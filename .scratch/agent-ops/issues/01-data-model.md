@@ -1,6 +1,6 @@
 # 01 数据模型总图:实体与关系
 
-Status: open
+Status: claimed
 Type: grilling
 Blocked by:
 
