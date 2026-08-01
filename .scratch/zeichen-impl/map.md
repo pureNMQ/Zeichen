@@ -17,6 +17,7 @@
 <!-- 每个已解决 ticket 一行:标题链接 + 一句话要点 -->
 
 - [01 工程骨架+数据模型+迁移](issues/01-scaffold-data-model.md) — 15 表全建、迁移双路径(PG/SQLite)干净;五件套按语义落(工作区级实体无 project_id);cognee 1.4.1 镜像拉取成功,默认 auth=required
+- [02 认证权限闭环](issues/02-auth-permissions-slice.md) — JWT 会话 cookie + 首用户引导 + 成员首登设密码;API key 哈希+AES-GCM 存储、admin 密码验证回看;两级角色判权 admin 自动 owner;Web 登录/项目/成员/Agent 页全闭环(38 后端 + 5 前端测试)
 
 ## Not yet specified
 
@@ -26,7 +27,6 @@
   → ✅ 已验(01):`cognee/cognee:latest` 1.4.1 可拉取,compose 骨架就位;API 端口/健康端点待 05 票确认
 - **IR 编辑器选型落地**:Milkdown / Bisheng / 其他,哪个与 React+TS+Tailwind 兼容最好——等文档票推进时验
 - **cognee update 端点对会话缓存条目的覆盖范围**:规格书 §9 的待验证事实——等记忆票推进时验
-- **API key 回看的实现细节**:管理员密码验证 + 明文再展示的安全流程——等认证票细化
 - **任务看板的拖拽交互**:dnd-kit 选型——等需求任务页票细化
 
 ## Out of scope

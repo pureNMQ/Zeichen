@@ -33,6 +33,8 @@ class ApiKey(IdMixin, TimestampMixin, Base):
         Uuid, ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True
     )
     token_hash: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    # 明文仅加密存(服务端密钥 AES-GCM),回看时经管理员密码验证后解密展示
+    token_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
