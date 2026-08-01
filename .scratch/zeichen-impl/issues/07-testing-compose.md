@@ -1,8 +1,8 @@
-# 11 测试补全 + 本地 compose 全链路
+# 07 测试补全 + 本地 compose 全链路
 
 Status: open
 Type: task
-Blocked by: 04, 05, 08, 09, 10
+Blocked by: 02, 03, 04, 05, 06
 
 ## Question
 

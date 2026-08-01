@@ -8,7 +8,8 @@
 
 - 域:实现构建(基于已定稿规格书 docs/spec.md);中文交流
 - 技能:tdd 常备(后端 pytest 全量 + 前端组件测试);prototype 用于 Web 交互;research 用于实现期事实验证(cognee 端点行为、MCP SDK 用法、IR 编辑器选型)
-- 已锁决策(charting 会话):目的地=本地可跑 v1;代码住本仓库(D:\Projects\agent-ops,与 specs/.scratch 同源);前端 Vite+React+TS+Tailwind+Shadcn/ui;后端单代码库分层(SQLAlchemy 2.0+Alembic,api/mcp 共享 service,两进程入口);MCP 用官方 mcp Python SDK;前端 React Router+TanStack Query;测试=后端 pytest 全量+前端组件测试(Vitest+RTL),不做 E2E;构建票按规格书章节切 11 张,每张可运行可验证
+- 已锁决策(charting 会话):目的地=本地可跑 v1;代码住本仓库(D:\Projects\agent-ops);前端 Vite+React+TS+Tailwind+Shadcn/ui;后端单代码库分层(SQLAlchemy 2.0+Alembic,api/mcp 共享 service,两进程入口);MCP 用官方 mcp Python SDK;前端 React Router+TanStack Query;测试=后端 pytest 全量+前端组件测试(Vitest+RTL),不做 E2E
+- **构建策略:垂直切片**——每张票 = 一个人类可用的完整闭环(后端+前端+测试),不积攒大爆炸
 - 规格书为唯一依据;spec 的 §9 列有实现时需再验证的事实清单
 
 ## Decisions so far
@@ -19,11 +20,11 @@
 
 <!-- 在范围内但还不能精确表述的雾;前沿推进后逐步毕业成 ticket -->
 
-- **本地 compose 的确切编排**:cognee 官方镜像在本机的可用性/版本(04 research 提过 cognee/cognee 与 cognee/cognee-mcp,但本地起 service 的细节要试)——等第 1 张工程票推进时验
-- **IR 编辑器选型落地**:Milkdown / Bisheng / 其他,哪个与 React+TS+Tailwind 兼容最好——等文档票(第 8 张)推进时验
-- **cognee update 端点对会话缓存条目的覆盖范围**:规格书 §9 的待验证事实——等记忆票(第 9 张)推进时验
-- **API key 回看的实现细节**:管理员密码验证 + 明文再展示的安全流程——等认证票(第 2 张)细化
-- **任务看板的拖拽交互**:看板拖拽改状态的具体实现(库选型 dnd-kit?)——等 Web 任务页票(第 7 张)细化
+- **本地 compose 的确切编排**:cognee 官方镜像在本机的可用性/版本——等第 1 张工程票推进时验
+- **IR 编辑器选型落地**:Milkdown / Bisheng / 其他,哪个与 React+TS+Tailwind 兼容最好——等文档票推进时验
+- **cognee update 端点对会话缓存条目的覆盖范围**:规格书 §9 的待验证事实——等记忆票推进时验
+- **API key 回看的实现细节**:管理员密码验证 + 明文再展示的安全流程——等认证票细化
+- **任务看板的拖拽交互**:dnd-kit 选型——等需求任务页票细化
 
 ## Out of scope
 
