@@ -1,6 +1,6 @@
 # 01 工程骨架 + 数据模型 + 迁移
 
-Status: open
+Status: claimed
 Type: task
 Blocked by:
 
