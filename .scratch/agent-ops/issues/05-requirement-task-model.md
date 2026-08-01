@@ -1,6 +1,6 @@
 # 05 需求生命周期与任务模型
 
-Status: open
+Status: claimed
 Type: grilling
 Blocked by: 01
 
