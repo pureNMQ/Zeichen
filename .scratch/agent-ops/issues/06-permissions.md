@@ -1,6 +1,6 @@
 # 06 权限与角色模型
 
-Status: open
+Status: claimed
 Type: grilling
 Blocked by: 01
 
