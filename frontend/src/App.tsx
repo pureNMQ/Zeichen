@@ -10,7 +10,6 @@ import { LoginPage } from '@/pages/login'
 import { MembersPage } from '@/pages/members'
 import { ProjectsPage } from '@/pages/projects'
 import { SetPasswordPage } from '@/pages/set-password'
-import { StyleLabPage } from '@/stylelab'
 
 function BootstrapGate() {
   const navigate = useNavigate()
@@ -65,7 +64,6 @@ export function App() {
       <Route path="/bootstrap" element={<BootstrapGate />} />
       <Route path="/login" element={<LoginGate />} />
       <Route path="/set-password" element={<SetPasswordPage />} />
-      <Route path="/style-lab" element={<StyleLabPage />} />
       <Route path="/" element={<RequireAuth />}>
         <Route index element={<Navigate to="/projects" replace />} />
         <Route path="projects" element={<ProjectsPage />} />
