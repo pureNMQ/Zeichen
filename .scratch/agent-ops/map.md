@@ -15,12 +15,15 @@
 
 <!-- 每个已解决 ticket 一行:标题链接 + 一句话要点 -->
 
+- [02 cognee 能力与多主体记忆隔离](issues/02-cognee-capabilities.md) — cognee 支持四层隔离(Dataset/Session/NodeSet/ACL),推荐每主体一 Dataset + NodeSet 承载 project_id/entity_id;自定义元数据可行(external_metadata/node_set);零 LLM 通道与 token 消耗点已摸清
+- [03 MCP 标准与认证方式](issues/03-mcp-standards.md) — 协议 Modern 时代(无握手);自建 Bearer API key 合规可行,TokenVerifier 即可;推荐单 server + 点号命名空间;远程用 Streamable HTTP
+- [04 部署与运维方案](issues/04-deployment.md) — 单机 Compose 骨架:反向代理唯一公网入口,mcp 独立容器(端点 /mcp),cognee 数据卷必挂,pg_dump 每日备份;mcp 容器形态留待 11 裁定
+
 ## Not yet specified
 
 <!-- 在范围内但还不能精确表述的雾;前沿推进后逐步毕业成 ticket -->
 
 - **需求→任务的追溯链**:需求如何派生任务、任务如何回溯需求,粒度到什么程度——等数据模型总图与需求生命周期定后才有形
-- **记忆的引用模型**:记忆条目如何引用需求/任务/文档实体(记忆里提到的东西能跳回源实体吗),cognee 的图与业务数据库如何互相引用——等 cognee 能力研究和数据模型定后
 - **Wiki/字典/API 模块的编辑与浏览交互细节**:版本历史、引用自动更新(改字段名后 API 文档自动同步?)——等文档模块形态 ticket
 - **通知与活动流**:变更通知(人类收到"你的任务被 agent 更新了")、活动日志的形态,是否进 v1——尚不清楚是否值得一个 ticket
 - **文件附件**:需求/任务/文档挂附件的能力,存储方式(本地卷 vs 对象存储)——等数据模型定后
