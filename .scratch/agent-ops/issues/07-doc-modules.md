@@ -1,6 +1,6 @@
 # 07 Wiki/字典/API 文档模块形态
 
-Status: open
+Status: claimed
 Type: grilling
 Blocked by: 01
 
