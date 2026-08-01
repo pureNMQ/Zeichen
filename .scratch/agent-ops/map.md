@@ -21,6 +21,7 @@
 - [04 部署与运维方案](issues/04-deployment.md) — 单机 Compose 骨架:反向代理唯一公网入口,mcp 独立容器(端点 /mcp),cognee 数据卷必挂,pg_dump 每日备份;mcp 容器形态留待 11 裁定
 - [01 数据模型总图:实体与关系](issues/01-data-model.md) — user/agent 同表(is_agent)+api_key;team 单例→project→资源;workspace_member+project_member 授权,资源级授权 out of scope;task.requirement_id 可空 + reference 表(derives/documents/implements/mentions);comment/activity 多态单表;document 单实体+doc_type;软删+定时物理清理;UUID+五件套公共字段;记忆归 cognee Dataset 经引用回指
 - [05 需求生命周期与任务模型](issues/05-requirement-task-model.md) — 需求=单项目验收单元,无层级;状态机 待办→实现中→验收中→已完成+取消,任务驱动自动流转(首任务开工→实现中,全完成→验收中),任何编辑权主体可验收;任务同构 待办→实现中→已完成+取消,assignee 可空,已指派仅本人/管理员可改;评论即讨论;Zeichen 只记录不调度,执行在外部客户端
+- [06 权限与角色模型](issues/06-permissions.md) — 两级角色 admin/member × owner/editor/viewer,admin 自动全项目 owner;agent 授权=project_member 同表,默认 editor;API key 仅 agent 签发、多 key 并存独立吊销、明文可回看(管理员密码验证);判权只看角色不看主体类型;操作矩阵 + 所有权规则(已指派任务仅本人/管理员,评论删除 editor 限自己的)
 
 ## Not yet specified
 
