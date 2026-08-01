@@ -1,6 +1,6 @@
 # 09 Web 功能面与页面清单
 
-Status: open
+Status: claimed
 Type: prototype
 Blocked by: 01, 05, 07
 
