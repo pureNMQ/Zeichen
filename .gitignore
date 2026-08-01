@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Node
+node_modules/
+dist/
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Cognee
+.cognee_data/
+.cognee_system/
+
+# OS
+Thumbs.db
+.DS_Store
