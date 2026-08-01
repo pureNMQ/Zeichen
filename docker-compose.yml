@@ -1,0 +1,55 @@
+# 贼船 Zeichen — 本地开发编排骨架(规格书 §1.1 / §8)
+# 本文件是骨架:目前 postgres + cognee 可直接起;api / mcp / web 容器在后续票落地。
+# 生产布局(nginx 唯一入口)见规格书 §8.1,在部署票中完善。
+name: zeichen
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: zeichen
+      POSTGRES_PASSWORD: zeichen
+      POSTGRES_DB: zeichen
+    ports:
+      # 仅开发期暴露给宿主(backend 本地进程连接);生产不发布宿主端口(§8.1)
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zeichen -d zeichen"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  cognee:
+    image: cognee/cognee:latest
+    environment:
+      ENABLE_BACKEND_ACCESS_CONTROL: "True"          # §8.2 cognee 默认安全项,显式确认
+      DATA_ROOT_DIRECTORY: /app/data
+      SYSTEM_ROOT_DIRECTORY: /app/system
+      # LLM 配置由 .env 注入(DeepSeek,§1.2);骨架期留注释,记忆票(09)细化
+      # LLM_PROVIDER: deepseek
+      # LLM_MODEL: deepseek-chat
+      # LLM_API_KEY: ${DEEPSEEK_API_KEY:?}
+    volumes:
+      - cognee_data:/app/data
+      - cognee_system:/app/system
+    # 骨架期先不起(镜像首拉与配置待验证,见 ticket 01 Answer);起服务时移除注释
+    # ports:
+    #   - "8001:8001"
+
+  # --- 以下容器在后续票落地(骨架占位,勿启用) ---
+  # api:
+  #   build: ./backend
+  #   depends_on: [postgres]
+  # mcp:
+  #   build: ./backend
+  #   environment:
+  #     TRANSPORT_MODE: http
+  # web:
+  #   build: ./frontend
+
+volumes:
+  pgdata:
+  cognee_data:
+  cognee_system:

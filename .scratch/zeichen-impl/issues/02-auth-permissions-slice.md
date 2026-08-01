@@ -1,6 +1,6 @@
 # 02 认证与权限闭环(后端 + Web)
 
-Status: open
+Status: claimed
 Type: task
 Blocked by: 01
 
