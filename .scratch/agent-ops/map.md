@@ -20,6 +20,7 @@
 - [03 MCP 标准与认证方式](issues/03-mcp-standards.md) — 协议 Modern 时代(无握手);自建 Bearer API key 合规可行,TokenVerifier 即可;推荐单 server + 点号命名空间;远程用 Streamable HTTP
 - [04 部署与运维方案](issues/04-deployment.md) — 单机 Compose 骨架:反向代理唯一公网入口,mcp 独立容器(端点 /mcp),cognee 数据卷必挂,pg_dump 每日备份;mcp 容器形态留待 11 裁定
 - [01 数据模型总图:实体与关系](issues/01-data-model.md) — user/agent 同表(is_agent)+api_key;team 单例→project→资源;workspace_member+project_member 授权,资源级授权 out of scope;task.requirement_id 可空 + reference 表(derives/documents/implements/mentions);comment/activity 多态单表;document 单实体+doc_type;软删+定时物理清理;UUID+五件套公共字段;记忆归 cognee Dataset 经引用回指
+- [05 需求生命周期与任务模型](issues/05-requirement-task-model.md) — 需求=单项目验收单元,无层级;状态机 待办→实现中→验收中→已完成+取消,任务驱动自动流转(首任务开工→实现中,全完成→验收中),任何编辑权主体可验收;任务同构 待办→实现中→已完成+取消,assignee 可空,已指派仅本人/管理员可改;评论即讨论;Zeichen 只记录不调度,执行在外部客户端
 
 ## Not yet specified
 
@@ -27,8 +28,6 @@
 
 - **Wiki/字典/API 模块的编辑与浏览交互细节**:版本历史、引用自动更新(改字段名后 API 文档自动同步?)——等文档模块形态 ticket
 - **通知与活动流**:变更通知(人类收到"你的任务被 agent 更新了")、活动日志的形态,是否进 v1——尚不清楚是否值得一个 ticket
-- **文件附件**:需求/任务/文档挂附件的能力,存储方式(本地卷 vs 对象存储)——等数据模型定后
-- **agent 调度与执行**:agent 完成任务时如何"执行"(本工具只管任务与记忆,还是也调度 agent 跑?),边界尚未明确——很可能 out of scope,等任务模型 ticket 时裁决
 - **现有 opencode cognee 插件与既有记忆数据的处置**:退役是直接停用还是导入新工具——细节依赖记忆语义 ticket
 - **规格书成稿后的交接方式**:spec.md 的存放位置与结构——地图收尾时定
 
@@ -36,4 +35,4 @@
 
 <!-- 明确排除在目的地之外的工作;只留 gist + 原因,永远不毕业 -->
 
-(暂无)
+- **agent 调度与执行** — 本工具只记录任务与记忆,不推送任务、不跑 agent 运行时;执行在外部 MCP 客户端发生(05 裁决)。agent 编排平台是另一个产品。
