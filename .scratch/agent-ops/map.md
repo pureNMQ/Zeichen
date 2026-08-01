@@ -25,6 +25,7 @@
 - [07 Wiki/字典/API 文档模块形态](issues/07-doc-modules.md) — Wiki 自由页+可空 parent_id+互引;版本链(保存即版本,回滚=新版本);词条项目级、document 表+别名 metadata;API 定义=OpenAPI 子集 schema+校验+渲染;引用感知警示不自动同步;内容=Markdown 文本,Web 编辑器 IR 模式(无转换层)
 - [08 MCP 工具面清单](issues/08-mcp-tools.md) — 原型 mcp-tools-v0.md 锁定:8 域 ~45 工具、单 server 点号命名空间;无 admin 域(key 管理仅 Web);memory.forget 仅限自己的记忆;蒸馏自动触发(会话断开+空闲超时+条目阈值);search.query 全局混合检索;错误四件套 + cursor 分页 + 软删语义统一
 - [09 Web 功能面与页面清单](issues/09-web-surface.md) — 原型 web-surface-v0.md 锁定:两级导航 ~20 页全进 v1;记忆管理页=项目级 editor+;全局搜索 v1;需求=列表/任务=看板(可切换);成员直接添加;记忆修正=cognee update 转接
+- [10 记忆语义](issues/10-memory-semantics.md) — 三层写入管线(activity→会话缓存→图谱);每 agent 一个 Dataset+NodeSet 承载项目,项目记忆=聚合视图;人类 editor+ 看全,agent 默认自己的+项目,可选只读互通(ACL);三层遗忘;不设预算上限,消耗可见+手动蒸馏仅 Web
 
 ## Not yet specified
 

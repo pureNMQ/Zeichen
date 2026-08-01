@@ -1,6 +1,6 @@
 # 10 记忆语义:什么进记忆、如何引用、成本控制
 
-Status: claimed
+Status: resolved
 Type: grilling
 Blocked by: 01, 02
 
@@ -23,3 +23,11 @@ Blocked by: 01, 02
 - 蒸馏自动触发:MCP 会话断开即蒸馏 + 15 分钟空闲超时兜底 + 条目阈值(少于 3 条不蒸馏)
 
 产出:记忆语义规格。
+
+## Answer
+
+- 写入管线三层:活动轨迹(业务库 activity,0 token)→ 会话缓存(cognee 短期,0 token,业务变更自动一句摘要进缓存)→ 知识图谱(蒸馏,耗 token);agent 对话默认进缓存,阈值外才蒸馏
+- 空间划分:每 agent 一个 cognee Dataset(物理隔离)+ NodeSet 承载 project_id;项目记忆=跨 Dataset 聚合视图
+- 权限:人类 editor+ 看项目全部记忆;agent 默认看自己的+项目记忆,可选互通(admin 授权只读其他 agent 的 dataset,ACL read,记 activity);agent 之间默认互不可见
+- 遗忘三层:单条(透传 cognee)/ 按实体(NodeSet/锚点过滤)/ 全清(仅人类 Web 端二次确认);遗忘记 activity
+- 成本:不设硬性预算上限(无自动暂停);可见性=记忆管理页 token 消耗(7/30 天/累计,对接 cognee usage);手动蒸馏入口仅 Web 端
