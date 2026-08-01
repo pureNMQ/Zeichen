@@ -10,6 +10,7 @@
 - 技能:grilling 与 domain-modeling 常备;prototype 用于 MCP 工具面与 Web 功能面;research 用于 cognee 与 MCP 生态事实
 - 已锁决策(来自 charting 会话,详见各 ticket):目的地=规格书;独立新仓库+本地 markdown tracker;自建核心数据模型含文档子模块;云端部署;多用户团队模式,agent 也是用户;记忆一等公民双向(agent 经 MCP 读写、人类经 Web 管理);Python(FastAPI)+ React + PostgreSQL + FastMCP;agent=独立 principal,API key 认证,归属团队;单团队(Team 单例)→ Project → 资源;cognee 独立服务走 HTTP;MCP 全量读写对齐+记忆工具,权限兜底;邮箱密码自建会话,首用户管理员;标准 MCP 任意客户端可连,现有 opencode cognee 插件退役
 - 团队/项目/资源、用户/agent 的域词汇在 CONTEXT.md 维护
+- **产品名:贼船 Zeichen**(charting 会话定;德语"记号/印记",谐音"贼船";spec 与仓库名沿用)
 
 ## Decisions so far
 
