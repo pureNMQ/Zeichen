@@ -16,11 +16,14 @@
 
 <!-- 每个已解决 ticket 一行:标题链接 + 一句话要点 -->
 
+- [01 工程骨架+数据模型+迁移](issues/01-scaffold-data-model.md) — 15 表全建、迁移双路径(PG/SQLite)干净;五件套按语义落(工作区级实体无 project_id);cognee 1.4.1 镜像拉取成功,默认 auth=required
+
 ## Not yet specified
 
 <!-- 在范围内但还不能精确表述的雾;前沿推进后逐步毕业成 ticket -->
 
 - **本地 compose 的确切编排**:cognee 官方镜像在本机的可用性/版本——等第 1 张工程票推进时验
+  → ✅ 已验(01):`cognee/cognee:latest` 1.4.1 可拉取,compose 骨架就位;API 端口/健康端点待 05 票确认
 - **IR 编辑器选型落地**:Milkdown / Bisheng / 其他,哪个与 React+TS+Tailwind 兼容最好——等文档票推进时验
 - **cognee update 端点对会话缓存条目的覆盖范围**:规格书 §9 的待验证事实——等记忆票推进时验
 - **API key 回看的实现细节**:管理员密码验证 + 明文再展示的安全流程——等认证票细化

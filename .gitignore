@@ -3,6 +3,9 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+*.db
+*.sqlite3
+*.egg-info/
 
 # Node
 node_modules/
