@@ -19,12 +19,12 @@
 - [02 cognee 能力与多主体记忆隔离](issues/02-cognee-capabilities.md) — cognee 支持四层隔离(Dataset/Session/NodeSet/ACL),推荐每主体一 Dataset + NodeSet 承载 project_id/entity_id;自定义元数据可行(external_metadata/node_set);零 LLM 通道与 token 消耗点已摸清
 - [03 MCP 标准与认证方式](issues/03-mcp-standards.md) — 协议 Modern 时代(无握手);自建 Bearer API key 合规可行,TokenVerifier 即可;推荐单 server + 点号命名空间;远程用 Streamable HTTP
 - [04 部署与运维方案](issues/04-deployment.md) — 单机 Compose 骨架:反向代理唯一公网入口,mcp 独立容器(端点 /mcp),cognee 数据卷必挂,pg_dump 每日备份;mcp 容器形态留待 11 裁定
+- [01 数据模型总图:实体与关系](issues/01-data-model.md) — user/agent 同表(is_agent)+api_key;team 单例→project→资源;workspace_member+project_member 授权,资源级授权 out of scope;task.requirement_id 可空 + reference 表(derives/documents/implements/mentions);comment/activity 多态单表;document 单实体+doc_type;软删+定时物理清理;UUID+五件套公共字段;记忆归 cognee Dataset 经引用回指
 
 ## Not yet specified
 
 <!-- 在范围内但还不能精确表述的雾;前沿推进后逐步毕业成 ticket -->
 
-- **需求→任务的追溯链**:需求如何派生任务、任务如何回溯需求,粒度到什么程度——等数据模型总图与需求生命周期定后才有形
 - **Wiki/字典/API 模块的编辑与浏览交互细节**:版本历史、引用自动更新(改字段名后 API 文档自动同步?)——等文档模块形态 ticket
 - **通知与活动流**:变更通知(人类收到"你的任务被 agent 更新了")、活动日志的形态,是否进 v1——尚不清楚是否值得一个 ticket
 - **文件附件**:需求/任务/文档挂附件的能力,存储方式(本地卷 vs 对象存储)——等数据模型定后
