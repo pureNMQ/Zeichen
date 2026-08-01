@@ -11,6 +11,12 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://zeichen:zeichen@localhost:5432/zeichen"
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
 
+    # 会话 JWT 密钥与 cookie 名(生产必须经 env 覆盖)
+    session_secret: str = "dev-only-session-secret-change-me-0123456789abcdef"
+    session_cookie_name: str = "zeichen_session"
+    session_ttl_seconds: int = 7 * 24 * 3600
+    session_cookie_secure: bool = False
+
 
 @lru_cache
 def get_settings() -> Settings:

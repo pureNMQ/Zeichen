@@ -1,0 +1,52 @@
+"""工作区成员 API(仅 admin):列表 / 添加 / 改角色 / 移除。"""
+
+import uuid
+
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+
+from ..db import get_db
+from ..models import User
+from ..schemas import MemberCreate, MemberUpdate
+from ..services import members as members_service
+from .deps import current_admin
+
+router = APIRouter(prefix="/api/members", tags=["members"])
+
+
+def _payload(user: User) -> dict:
+    return {"id": str(user.id), "username": user.username, "created_at": user.created_at.isoformat()}
+
+
+@router.get("")
+def list_members(admin: User = Depends(current_admin), db: Session = Depends(get_db)) -> list[dict]:
+    return [
+        {**_payload(u), "role": role} for u, role in members_service.list_members(db)
+    ]
+
+
+@router.post("", status_code=201)
+def create_member(
+    body: MemberCreate, admin: User = Depends(current_admin), db: Session = Depends(get_db)
+) -> dict:
+    user = members_service.create_member(db, admin, body.username.strip(), body.role)
+    return {**_payload(user), "role": body.role}
+
+
+@router.patch("/{user_id}")
+def update_member(
+    user_id: uuid.UUID,
+    body: MemberUpdate,
+    admin: User = Depends(current_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    user = members_service.update_role(db, admin, user_id, body.role)
+    return {**_payload(user), "role": body.role}
+
+
+@router.delete("/{user_id}")
+def remove_member(
+    user_id: uuid.UUID, admin: User = Depends(current_admin), db: Session = Depends(get_db)
+) -> dict:
+    members_service.remove_member(db, admin, user_id)
+    return {"ok": True}

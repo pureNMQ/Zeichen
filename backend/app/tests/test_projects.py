@@ -1,0 +1,145 @@
+"""项目:列表可见性(admin 全量/member 已加入)、建项目、成员管理、判权矩阵。"""
+
+from .conftest import login, make_user
+
+
+def _admin_client(client):
+    login(client, "admin", "admin-pass-1")
+    return client
+
+
+def test_list_visibility(client, db, world):
+    _admin_client(client)
+    resp = client.get("/api/projects")
+    assert resp.status_code == 200
+    assert [p["name"] for p in resp.json()] == ["demo"]
+    assert resp.json()[0]["my_role"] == "owner"
+
+    carol = make_user(db, "carol", role="member")
+    client.post("/api/auth/logout")
+    login(client, "bob", "whatever-1")
+    client.post("/api/auth/set-password", json={"password": "bob-pass-1"})
+    resp = client.get("/api/projects")
+    assert resp.status_code == 200
+    assert resp.json()[0]["my_role"] == "viewer"
+
+    login(client, "carol", "whatever-1")
+    client.post("/api/auth/set-password", json={"password": "carol-pass-1"})
+    resp = client.get("/api/projects")
+    assert resp.json() == []
+
+
+def test_create_project_admin_only(client, db, world):
+    resp = client.post("/api/projects", json={"name": "x", "members": []})
+    assert resp.status_code == 401
+
+    login(client, "bob", "whatever-1")
+    client.post("/api/auth/set-password", json={"password": "bob-pass-1"})
+    assert (
+        client.post("/api/projects", json={"name": "x", "members": []}).status_code == 403
+    )
+
+    _admin_client(client)
+    resp = client.post(
+        "/api/projects",
+        json={
+            "name": "网站改版",
+            "members": [
+                {"user_id": str(world["member"].id), "role": "editor"},
+                {"user_id": str(world["agent"].id), "role": "editor"},
+            ],
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["my_role"] == "owner"
+
+    detail = client.get(f"/api/projects/{resp.json()['id']}/members").json()
+    roles = {m["username"]: m["role"] for m in detail}
+    assert roles == {"admin": "owner", "bob": "editor", "agent-a": "editor"}
+
+
+def test_add_member_owner_only(client, db, world):
+    _admin_client(client)
+    project_id = str(world["project"].id)
+    carol = make_user(db, "carol", role="member")
+
+    # viewer 成员试图加人 → 403
+    client.post("/api/auth/logout")
+    login(client, "bob", "whatever-1")
+    client.post("/api/auth/set-password", json={"password": "bob-pass-1"})
+    resp = client.post(
+        f"/api/projects/{project_id}/members",
+        json={"user_id": str(carol.id), "role": "viewer"},
+    )
+    assert resp.status_code == 403
+
+    # admin(自动 owner)加人成功
+    _admin_client(client)
+    resp = client.post(
+        f"/api/projects/{project_id}/members",
+        json={"user_id": str(carol.id), "role": "viewer"},
+    )
+    assert resp.status_code == 201, resp.text
+
+    # 重复添加 → 409
+    assert (
+        client.post(
+            f"/api/projects/{project_id}/members",
+            json={"user_id": str(carol.id), "role": "editor"},
+        ).status_code
+        == 409
+    )
+
+
+def test_add_non_member_human_rejected(client, db, world):
+    """非工作区成员的账号不能被加入项目(agent 除外)。"""
+    _admin_client(client)
+    outsider = make_user(db, "outsider", role=None)
+    resp = client.post(
+        f"/api/projects/{world['project'].id}/members",
+        json={"user_id": str(outsider.id), "role": "viewer"},
+    )
+    assert resp.status_code == 400
+
+
+def test_remove_member_last_owner_guard(client, db, world):
+    """无 admin 且只剩一个 owner 行时,不能移除最后一名 owner。"""
+    from app.models import ProjectMember, WorkspaceMember
+
+    project_id = str(world["project"].id)
+    # 抹掉 admin 后,把 bob 提为唯一 owner 行
+    db.query(WorkspaceMember).filter(WorkspaceMember.role == "admin").delete()
+    db.query(ProjectMember).filter(ProjectMember.user_id == world["member"].id).update(
+        {ProjectMember.role: "owner"}
+    )
+    db.commit()
+
+    login(client, "bob", "whatever-1")
+    client.post("/api/auth/set-password", json={"password": "bob-pass-1"})
+
+    # 移除非 owner 成员成功
+    resp = client.delete(f"/api/projects/{project_id}/members/{world['agent'].id}")
+    assert resp.status_code == 200
+
+    # 唯一 owner 不可移除
+    resp = client.delete(f"/api/projects/{project_id}/members/{world['member'].id}")
+    assert resp.status_code == 409
+
+
+def test_project_access_matrix(client, db, world):
+    project_id = str(world["project"].id)
+    outsider = make_user(db, "outsider", role="member")
+
+    _admin_client(client)
+    assert client.get(f"/api/projects/{project_id}").status_code == 200
+
+    client.post("/api/auth/logout")
+    login(client, "bob", "whatever-1")
+    client.post("/api/auth/set-password", json={"password": "bob-pass-1"})
+    assert client.get(f"/api/projects/{project_id}").status_code == 200
+    assert client.get(f"/api/projects/{project_id}/members").status_code == 403
+
+    login(client, "outsider", "whatever-1")
+    client.post("/api/auth/set-password", json={"password": "out-pass-1"})
+    assert client.get(f"/api/projects/{project_id}").status_code == 404
+    assert client.get("/api/projects/00000000-0000-0000-0000-000000000000").status_code == 404
