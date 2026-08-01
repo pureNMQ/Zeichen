@@ -1,6 +1,6 @@
 # 09 Web 功能面与页面清单
 
-Status: claimed
+Status: resolved
 Type: prototype
 Blocked by: 01, 05, 07
 
@@ -21,3 +21,12 @@ Blocked by: 01, 05, 07
 - 需求=列表默认、任务=看板默认,可切换
 - 成员直接添加(邮箱+角色,首登设密码,无 SMTP)
 - 页面裁剪:全部 ~20 页进 v1,含记忆管理页(浏览/修正/删除/清空);记忆修正 = cognee 原生 update 转接
+
+## Answer
+
+原型 web-surface-v0.md 锁定(已提交):两级导航(工作区级:登录/项目列表/成员管理/agent 管理/用户菜单;项目级:需求/任务/文档[wiki|字典|api]/记忆/项目设置),~20 页全进 v1:
+- 记忆管理页=项目级,editor+ 可见可改,viewer 无入口;区块:总览/按 agent 过滤/条目列表(锚点跳转)/详情/删除/清空/修正/token 概览
+- 全局搜索进 v1,工作区级常驻,与 MCP search.query 同一后端
+- 需求=列表默认、任务=看板默认,均可切换
+- 成员直接添加(邮箱+角色,首登设密码,无 SMTP)
+- 记忆修正保留 = cognee 原生 PATCH /api/v1/update 转接(09/10 输入)
