@@ -22,12 +22,12 @@
 - [01 数据模型总图:实体与关系](issues/01-data-model.md) — user/agent 同表(is_agent)+api_key;team 单例→project→资源;workspace_member+project_member 授权,资源级授权 out of scope;task.requirement_id 可空 + reference 表(derives/documents/implements/mentions);comment/activity 多态单表;document 单实体+doc_type;软删+定时物理清理;UUID+五件套公共字段;记忆归 cognee Dataset 经引用回指
 - [05 需求生命周期与任务模型](issues/05-requirement-task-model.md) — 需求=单项目验收单元,无层级;状态机 待办→实现中→验收中→已完成+取消,任务驱动自动流转(首任务开工→实现中,全完成→验收中),任何编辑权主体可验收;任务同构 待办→实现中→已完成+取消,assignee 可空,已指派仅本人/管理员可改;评论即讨论;Zeichen 只记录不调度,执行在外部客户端
 - [06 权限与角色模型](issues/06-permissions.md) — 两级角色 admin/member × owner/editor/viewer,admin 自动全项目 owner;agent 授权=project_member 同表,默认 editor;API key 仅 agent 签发、多 key 并存独立吊销、明文可回看(管理员密码验证);判权只看角色不看主体类型;操作矩阵 + 所有权规则(已指派任务仅本人/管理员,评论删除 editor 限自己的)
+- [07 Wiki/字典/API 文档模块形态](issues/07-doc-modules.md) — Wiki 自由页+可空 parent_id+互引;版本链(保存即版本,回滚=新版本);词条项目级、document 表+别名 metadata;API 定义=OpenAPI 子集 schema+校验+渲染;引用感知警示不自动同步;内容=Markdown 文本,Web 编辑器 IR 模式(无转换层)
 
 ## Not yet specified
 
 <!-- 在范围内但还不能精确表述的雾;前沿推进后逐步毕业成 ticket -->
 
-- **Wiki/字典/API 模块的编辑与浏览交互细节**:版本历史、引用自动更新(改字段名后 API 文档自动同步?)——等文档模块形态 ticket
 - **通知与活动流**:变更通知(人类收到"你的任务被 agent 更新了")、活动日志的形态,是否进 v1——尚不清楚是否值得一个 ticket
 - **现有 opencode cognee 插件与既有记忆数据的处置**:退役是直接停用还是导入新工具——细节依赖记忆语义 ticket
 - **规格书成稿后的交接方式**:spec.md 的存放位置与结构——地图收尾时定
