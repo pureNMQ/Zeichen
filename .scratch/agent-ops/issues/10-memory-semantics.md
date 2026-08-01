@@ -1,6 +1,6 @@
 # 10 记忆语义:什么进记忆、如何引用、成本控制
 
-Status: open
+Status: claimed
 Type: grilling
 Blocked by: 01, 02
 
