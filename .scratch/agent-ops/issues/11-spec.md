@@ -1,6 +1,6 @@
 # 11 规格书成稿
 
-Status: open
+Status: claimed
 Type: grilling
 Blocked by: 01, 02, 03, 04, 05, 06, 07, 08, 09, 10
 
