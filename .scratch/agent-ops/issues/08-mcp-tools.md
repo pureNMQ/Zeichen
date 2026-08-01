@@ -1,6 +1,6 @@
 # 08 MCP 工具面清单
 
-Status: open
+Status: claimed
 Type: prototype
 Blocked by: 01, 03, 06
 
