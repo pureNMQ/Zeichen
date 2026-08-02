@@ -3,10 +3,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .api.router import api_router
 from .config import get_settings
+from .errors import install_error_handler
 
 settings = get_settings()
 
 app = FastAPI(title=settings.app_name)
+install_error_handler(app)
 
 app.add_middleware(
     CORSMiddleware,

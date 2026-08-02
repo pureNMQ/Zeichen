@@ -23,3 +23,6 @@ dist/
 # OS
 Thumbs.db
 .DS_Store
+
+# Runtime logs
+.scratch/*.log

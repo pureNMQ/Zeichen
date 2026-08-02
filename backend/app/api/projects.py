@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..models import Project, User
-from ..schemas import ProjectCreate, ProjectMemberAdd
+from ..schemas import ProjectCreate, ProjectMemberAdd, ProjectMemberUpdate, ProjectUpdate
 from ..services import projects as projects_service
 from .deps import current_user
 
@@ -49,6 +49,17 @@ def get_project(
     }
 
 
+@router.patch("/{project_id}")
+def update_project(
+    project_id: uuid.UUID,
+    body: ProjectUpdate,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    project = projects_service.update_project(db, user, project_id, body.name)
+    return {"id": str(project.id), "name": project.name}
+
+
 @router.get("/{project_id}/members")
 def list_project_members(
     project_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)
@@ -75,6 +86,18 @@ def add_project_member(
     return {"ok": True}
 
 
+@router.patch("/{project_id}/members/{user_id}")
+def update_project_member_role(
+    project_id: uuid.UUID,
+    user_id: uuid.UUID,
+    body: ProjectMemberUpdate,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    projects_service.update_project_member_role(db, user, project_id, user_id, body.role)
+    return {"ok": True}
+
+
 @router.delete("/{project_id}/members/{user_id}")
 def remove_project_member(
     project_id: uuid.UUID,
@@ -84,3 +107,15 @@ def remove_project_member(
 ) -> dict:
     projects_service.remove_project_member(db, user, project_id, user_id)
     return {"ok": True}
+
+
+@router.get("/{project_id}/member_candidates")
+def list_member_candidates(
+    project_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    return [
+        {"id": str(u.id), "username": u.username, "is_agent": u.is_agent}
+        for u in projects_service.list_member_candidates(db, user, project_id)
+    ]

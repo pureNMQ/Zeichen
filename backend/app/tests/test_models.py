@@ -1,4 +1,4 @@
-"""模型层冒烟:建表、五态状态机枚举、多态 check 约束、软删字段。"""
+"""模型层冒烟:建表、需求四态/任务五态 check 约束、多态 check 约束、软删字段。"""
 import uuid
 
 import pytest
@@ -71,6 +71,24 @@ def test_status_check_constraint(session: Session, world: tuple[User, Team, Proj
     session.add(req)
     with pytest.raises(IntegrityError):
         session.commit()
+    session.rollback()
+
+
+def test_requirement_four_states_task_five_states(
+    session: Session, world: tuple[User, Team, Project]
+) -> None:
+    """需求四态(拒 verifying);任务五态(verifying 合法)。"""
+    _, _, p = world
+    req = Requirement(project_id=p.id, title="验收中已删", status="verifying")
+    session.add(req)
+    with pytest.raises(IntegrityError):
+        session.commit()
+    session.rollback()
+
+    t = Task(project_id=p.id, title="普通状态", status="verifying")
+    session.add(t)
+    session.commit()
+    assert t.status == "verifying"
 
 
 def test_polymorphic_target_check(session: Session, world: tuple[User, Team, Project]) -> None:

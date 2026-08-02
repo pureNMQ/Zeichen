@@ -59,6 +59,60 @@ class ProjectMemberAdd(BaseModel):
     role: Literal["owner", "editor", "viewer"]
 
 
+class ProjectMemberUpdate(BaseModel):
+    role: Literal["owner", "editor", "viewer"]
+
+
 class ProjectCreate(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     members: list[ProjectMemberAdd] = []
+
+
+class ProjectUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+
+
+class RequirementCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=256)
+    description: str | None = None
+
+
+class RequirementUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=256)
+    description: str | None = None
+
+
+class StatusBody(BaseModel):
+    status: str = Field(min_length=1, max_length=16)
+
+
+class RequirementDeleteBody(BaseModel):
+    confirm_task_count: int | None = Field(default=None, ge=0)
+
+
+class TaskCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=256)
+    description: str | None = None
+    requirement_id: uuid.UUID | None = None
+    assignee_id: uuid.UUID | None = None
+
+
+class TaskUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=256)
+    description: str | None = None
+
+
+class TaskAssignBody(BaseModel):
+    assignee_id: uuid.UUID
+
+
+class CommentCreate(BaseModel):
+    body: str = Field(min_length=1, max_length=5000)
+
+
+class ReferenceCreate(BaseModel):
+    from_type: Literal["requirement", "task", "document", "project"]
+    from_id: uuid.UUID
+    to_type: Literal["requirement", "task", "document", "project"]
+    to_id: uuid.UUID
+    type: Literal["derives", "documents", "implements", "mentions"]

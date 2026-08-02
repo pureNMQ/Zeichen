@@ -55,8 +55,8 @@
 | `workspace_member` | user_id, role | role: admin / member |
 | `project` | team_id, name | 资源容器 |
 | `project_member` | user_id, project_id, role | role: owner / editor / viewer;人+agent 共用 |
-| `requirement` | title, description, status | status: 见 §3.1 |
-| `task` | title, description, status, assignee_id, requirement_id(可空) | status 同需求五态;派生任务溯源,独立任务允许 |
+| `requirement` | title, description, status | status: 见 §3.1(需求四态) |
+| `task` | title, description, status, assignee_id, requirement_id(可空) | status: 见 §3.2(任务五态);派生任务溯源,独立任务允许 |
 | `document` | title, doc_type(wiki/glossary/api), content, metadata JSON | 三子模块一表,差异进 metadata |
 | `document_version` | document_id, content, version_no | 全文版本链 |
 | `attachment` | target_type, target_id, file_name, size, storage_path | 挂任意实体 |
@@ -75,21 +75,21 @@
 
 ### 3.1 需求状态机
 
-`待办(backlog) → 实现中(in_progress) → 验收中(verifying) → 已完成(done)`,侧路 `已取消(cancelled)`
+`待办(backlog) → 实现中(in_progress) → 已完成(done)`,侧路 `已取消(cancelled)`
 
 - 无评审态;需求 = 单项目内的验收单元,不支持父子层级,拆解靠任务承接
-- **自动流转**:首个任务进入实现中 → 需求进实现中;所有任务已完成 → 需求进验收中
-- **验收**:验收中状态下,任何有编辑权主体(人/agent)置已完成 + 留验收说明(activity/comment)
-- 手动操作仅:创建、取消(任意非终态)、验收
+- **完全自由流转**:任意状态互转(含直达终态),**无任何前置校验**(带未决任务也可直达已完成);唯一约束是同态再转返回 `conflict`
+- **状态全手动**:任务状态变化**不影响**需求状态(自动流转已删除),需求状态仅由操作者显式改状态控制
+- **验收语义**:置"已完成"由任意有编辑权主体(人/agent)经通用改状态操作完成,无校验、不强制留验收说明;activity 只记状态变更(action=`status`,摘要=旧态→新态),说明/理由经评论留存
 
 ### 3.2 任务模型
 
-`待办 → 实现中 → 验收中 → 已完成`,侧路 `已取消`(与需求同构)
+`待办 → 实现中 → 验收中 → 已完成`,侧路 `已取消`(任务五态;验收中为无仪式感的普通状态)
 
 - `assignee_id` 可空;未指派 = 待认领,任何有编辑权者可认领(claim)
-- 已指派任务:仅被指派者本人或团队管理员可改状态/改派
-- 任务完成 = 验收中 → 已完成(与需求验收同语义:任何编辑权主体置完成 + 说明)
-- 需求侧检查:全部任务进入验收中 → 需求进验收中;需求置已完成时校验其任务不允许仍处于验收中/实现中(存在则返回 `conflict`)
+- 已指派任务:仅被指派者本人或团队管理员或项目 owner 可改状态/改派
+- **完全自由流转**:任意状态互转(含拖到已完成直达),无前置校验,与需求一致
+- 任务状态变化不影响需求状态;需求状态完全由操作者显式控制(见 §3.1)
 
 ### 3.3 评论与活动
 
@@ -110,8 +110,8 @@
 
 | 命名空间 | 工具(要点) |
 |---|---|
-| `requirements.*` | create/get/list/update/complete(验收)/cancel/delete/restore;delete 带任务数二次确认 |
-| `tasks.*` | create/get/list/update/start/complete/assign/claim/unassign/cancel/delete/restore |
+| `requirements.*` | create/get/list/update/set_status(任意目标态自由流转,无前置校验)/cancel(set_status("cancelled") 便捷封装)/delete/restore;delete 带任务数二次确认 |
+| `tasks.*` | create/get/list/update/set_status(任意目标态自由流转,无前置校验)/assign/claim/unassign/cancel(set_status("cancelled") 便捷封装)/delete/restore |
 | `docs.wiki.*` | create/get/list/update/versions/rollback/delete/restore |
 | `docs.glossary.*` | create/get/list/update/delete/restore;get 支持按词名 |
 | `docs.api.*` | create/get/list/update/references(反向引用自查)/delete/restore;schema 保存校验 |
@@ -136,7 +136,7 @@
 | 工作区 | admin | 成员/agent/key 管理、建项目、自动拥有所有项目 owner 级访问 |
 | 工作区 | member | 仅可见已加入项目 |
 | 项目 | owner | 项目一切操作 + 成员管理 + 删项目 |
-| 项目 | editor | 读写项目内资源,认领/验收 |
+| 项目 | editor | 读写项目内资源,认领/改状态 |
 | 项目 | viewer | 只读 |
 
 - **判权只看角色,不看主体类型**:admin 角色的 agent 与人类同权;止损靠吊销 key
@@ -196,8 +196,8 @@
 
 ### 7.2 关键页面
 
-- **需求**:列表默认,可切换;详情含关联任务、引用面板、评论流、活动流、验收操作
-- **任务**:看板默认,可切换;认领/开始/完成/取消按钮按权限
+- **需求**:列表默认,可切换;详情含关联任务、引用面板、评论流、活动流、改状态操作
+- **任务**:看板默认,可切换;自由拖拽改状态(拖到已完成直达),认领/删除按权限
 - **文档**:Wiki 阅读/编辑/版本历史;字典列表/词条;API 渲染页 + 编辑
 - **记忆管理页**(项目级,editor+,viewer 无入口):按 agent 过滤、条目列表(锚点跳转)、详情、删除/清空(二次确认)、修正(cognee update)、token 概览、记忆互通授权配置
 - **通知**:轻量站内通知(未读数、点击跳转,"我关注实体的变更";无偏好系统、无邮件/推送)

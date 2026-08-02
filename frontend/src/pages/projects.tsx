@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react'
+import { Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus, FolderOpen } from 'lucide-react'
 import { api, ApiError, type ProjectRow } from '@/lib/api'
@@ -50,7 +51,7 @@ function CreateProjectDialog({ open, onOpenChange }: { open: boolean; onOpenChan
       <DialogContent>
         <DialogHeader>
           <DialogTitle>新建项目</DialogTitle>
-          <DialogDescription>项目成员授权将在项目详情中配置(03 票)</DialogDescription>
+          <DialogDescription>项目成员授权将在项目详情页中配置</DialogDescription>
         </DialogHeader>
         <form onSubmit={onSubmit} className="space-y-4">
           <div className="space-y-1.5">
@@ -121,16 +122,23 @@ export function ProjectsPage() {
         {projects?.map((p) => (
           <Card key={p.id}>
             <CardHeader>
-              <CardTitle className="text-base">{p.name}</CardTitle>
+              <CardTitle className="text-base">
+                <Link to={`/projects/${p.id}`} className="hover:text-primary">
+                  {p.name}
+                </Link>
+              </CardTitle>
               <CardDescription>
                 创建于 {new Date(p.created_at).toLocaleDateString()}
               </CardDescription>
             </CardHeader>
             <CardContent className="flex items-center gap-2">
               <Badge variant="outline">{p.my_role}</Badge>
-              <span className="text-xs text-muted-foreground">
-                需求 / 任务 / 文档将在 03 票落地
-              </span>
+              <Link
+                to={`/projects/${p.id}`}
+                className="text-xs text-muted-foreground hover:text-primary"
+              >
+                基础信息 / 成员授权 →
+              </Link>
             </CardContent>
           </Card>
         ))}

@@ -10,6 +10,8 @@
 - 技能:tdd 常备(后端 pytest 全量 + 前端组件测试);prototype 用于 Web 交互;research 用于实现期事实验证(cognee 端点行为、MCP SDK 用法、IR 编辑器选型)
 - 已锁决策(charting 会话):目的地=本地可跑 v1;代码住本仓库(D:\Projects\agent-ops);前端 Vite+React+TS+Tailwind+Shadcn/ui;后端单代码库分层(SQLAlchemy 2.0+Alembic,api/mcp 共享 service,两进程入口);MCP 用官方 mcp Python SDK;前端 React Router+TanStack Query;测试=后端 pytest 全量+前端组件测试(Vitest+RTL),不做 E2E
 - **构建策略:垂直切片**——每张票 = 一个人类可用的完整闭环(后端+前端+测试),不积攒大爆炸
+- **优先级决定(测试反馈)**:优化票 **08-14 全部先于 04-07** 新增功能开发,顺序 08→09→10→11→12→13→14;04-07 一律排在 14 之后
+- **草稿流程**:用户测试发现的优化点先收集在 `issues/optimization-backlog.md`(单文件合并,**不参与认领/分发**);全部整理完成、用户逐项确认(含遗留决策)后,拆分回 `issues/NN-<slug>.md` 独立可执行票(去掉草稿态)再分发 → ✅ 2026-08-02 已逐项确认并拆分为 08-14(严格垂直切片,09 含状态机+MCP+看板+文档修订)
 - 规格书为唯一依据;spec 的 §9 列有实现时需再验证的事实清单
 
 ## Decisions so far
@@ -18,6 +20,7 @@
 
 - [01 工程骨架+数据模型+迁移](issues/01-scaffold-data-model.md) — 15 表全建、迁移双路径(PG/SQLite)干净;五件套按语义落(工作区级实体无 project_id);cognee 1.4.1 镜像拉取成功,默认 auth=required
 - [02 认证权限闭环](issues/02-auth-permissions-slice.md) — JWT 会话 cookie + 首用户引导 + 成员首登设密码;API key 哈希+AES-GCM 存储、admin 密码验证回看;两级角色判权 admin 自动 owner;Web 登录/项目/成员/Agent 页全闭环(38 后端 + 5 前端测试)
+- [03 需求/任务闭环](issues/03-requirements-tasks-slice.md) — 五态状态机(提交/验收双义 complete)+ 自动流转 + 所有权规则 + 认领原子化;错误四件套统一(API/MCP 同源);29 个 MCP 工具 + TokenVerifier(Bearer key)+ cursor 分页;Web 需求列表/详情 + 任务看板(dnd-kit 拖拽)/详情;E2E 打通"agent 认领→完成→需求进验收中"(73 后端 + 10 前端测试)
 
 ## Not yet specified
 
@@ -27,7 +30,7 @@
   → ✅ 已验(01):`cognee/cognee:latest` 1.4.1 可拉取,compose 骨架就位;API 端口/健康端点待 05 票确认
 - **IR 编辑器选型落地**:Milkdown / Bisheng / 其他,哪个与 React+TS+Tailwind 兼容最好——等文档票推进时验
 - **cognee update 端点对会话缓存条目的覆盖范围**:规格书 §9 的待验证事实——等记忆票推进时验
-- **任务看板的拖拽交互**:dnd-kit 选型——等需求任务页票细化
+- **mcp SDK 版本与客户端传输**:→ ✅ 已验(03):SDK 2.0 重构 auth/FastMCP,锁 1.29 线;1.28/1.29 自带 client 传输在本环境有 bug(响应不送达),E2E 用最小 wire 协议客户端
 
 ## Out of scope
 

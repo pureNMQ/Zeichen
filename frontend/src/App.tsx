@@ -1,15 +1,21 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Navigate, Outlet, Route, Routes, useNavigate } from 'react-router-dom'
 import { ShieldAlert } from 'lucide-react'
 import { AppShell } from '@/components/app-shell'
 import { api } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
+import { CurrentProjectProvider } from '@/lib/current-project'
 import { AgentsPage } from '@/pages/agents'
 import { BootstrapPage } from '@/pages/bootstrap'
 import { LoginPage } from '@/pages/login'
 import { MembersPage } from '@/pages/members'
 import { ProjectsPage } from '@/pages/projects'
+import { ProjectLayout } from '@/pages/project/layout'
+import { RequirementsPage } from '@/pages/requirements'
+import { TasksPage } from '@/pages/tasks'
+import { RequirementDetailPage } from '@/pages/requirement-detail'
 import { SetPasswordPage } from '@/pages/set-password'
+import { TaskDetailPage } from '@/pages/task-detail'
 
 function BootstrapGate() {
   const navigate = useNavigate()
@@ -40,9 +46,34 @@ function LoginGate() {
 
 function RequireAuth() {
   const { user, loading } = useAuth()
+  const [bootstrap, setBootstrap] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    if (loading || user !== null) return
+    let cancelled = false
+    void api
+      .get<{ needs_bootstrap: boolean }>('/auth/bootstrap')
+      .then((b) => {
+        if (!cancelled) setBootstrap(b.needs_bootstrap)
+      })
+      .catch(() => {
+        if (!cancelled) setBootstrap(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [loading, user])
+
   if (loading) return null
-  if (!user) return <Navigate to="/login" replace />
-  return <AppShell />
+  if (!user) {
+    if (bootstrap === null) return null
+    return <Navigate to={bootstrap ? '/bootstrap' : '/login'} replace />
+  }
+  return (
+    <CurrentProjectProvider>
+      <AppShell />
+    </CurrentProjectProvider>
+  )
 }
 
 function RequireAdmin() {
@@ -67,6 +98,11 @@ export function App() {
       <Route path="/" element={<RequireAuth />}>
         <Route index element={<Navigate to="/projects" replace />} />
         <Route path="projects" element={<ProjectsPage />} />
+        <Route path="projects/:projectId" element={<ProjectLayout />} />
+        <Route path="requirements" element={<RequirementsPage />} />
+        <Route path="tasks" element={<TasksPage />} />
+        <Route path="requirements/:id" element={<RequirementDetailPage />} />
+        <Route path="tasks/:id" element={<TaskDetailPage />} />
         <Route path="members" element={<RequireAdmin />}>
           <Route index element={<MembersPage />} />
         </Route>

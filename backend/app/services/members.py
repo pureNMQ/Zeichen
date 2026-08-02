@@ -7,10 +7,10 @@
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from ..errors import conflict, invalid_request, not_found, permission_denied
 from ..models import ProjectMember, User, WorkspaceMember
 from .permissions import get_team
 
@@ -50,16 +50,16 @@ def admin_count(db: Session) -> int:
 def _get_active_user(db: Session, user_id: uuid.UUID) -> User:
     user = db.get(User, user_id)
     if user is None or user.deleted_at is not None:
-        raise HTTPException(status_code=404, detail="成员不存在")
+        raise not_found("成员不存在")
     return user
 
 
 def create_member(db: Session, actor: User, username: str, role: str) -> User:
     if role not in WORKSPACE_ROLES:
-        raise HTTPException(status_code=400, detail="角色不合法")
+        raise invalid_request("角色不合法")
     exists = db.scalar(select(User).where(User.username == username))
     if exists is not None:
-        raise HTTPException(status_code=409, detail="账号已存在")
+        raise conflict("账号已存在")
     user = User(username=username, password_hash="", is_agent=False)
     team = get_team(db)
     db.add(user)
@@ -73,10 +73,10 @@ def create_member(db: Session, actor: User, username: str, role: str) -> User:
 
 def update_role(db: Session, actor: User, user_id: uuid.UUID, role: str) -> User:
     if role not in WORKSPACE_ROLES:
-        raise HTTPException(status_code=400, detail="角色不合法")
+        raise invalid_request("角色不合法")
     user = _get_active_user(db, user_id)
     if user.is_agent:
-        raise HTTPException(status_code=400, detail="agent 不在此页管理")
+        raise invalid_request("agent 不在此页管理")
     wm = get_team(db)
     membership = db.scalar(
         select(WorkspaceMember).where(
@@ -84,9 +84,9 @@ def update_role(db: Session, actor: User, user_id: uuid.UUID, role: str) -> User
         )
     )
     if membership is None:
-        raise HTTPException(status_code=404, detail="成员不存在")
+        raise not_found("成员不存在")
     if membership.role == "admin" and role != "admin" and admin_count(db) <= 1:
-        raise HTTPException(status_code=409, detail="不能降级最后一名管理员")
+        raise conflict("不能降级最后一名管理员")
     membership.role = role
     db.commit()
     return user
@@ -101,9 +101,9 @@ def remove_member(db: Session, actor: User, user_id: uuid.UUID) -> None:
         )
     )
     if membership is None:
-        raise HTTPException(status_code=404, detail="成员不存在")
+        raise not_found("成员不存在")
     if membership.role == "admin" and admin_count(db) <= 1:
-        raise HTTPException(status_code=409, detail="不能移除最后一名管理员")
+        raise conflict("不能移除最后一名管理员")
     db.delete(membership)
     db.query(ProjectMember).filter(ProjectMember.user_id == user_id).delete()
     user.deleted_at = datetime.now(timezone.utc)

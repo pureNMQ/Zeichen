@@ -7,10 +7,10 @@
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..errors import conflict, invalid_request, not_found, permission_denied
 from ..models import ApiKey, MemoryGrant, Project, ProjectMember, User
 from ..security import (
     decrypt_secret,
@@ -25,13 +25,13 @@ from .permissions import is_admin
 def _get_agent(db: Session, agent_id: uuid.UUID) -> User:
     agent = db.get(User, agent_id)
     if agent is None or agent.deleted_at is not None or not agent.is_agent:
-        raise HTTPException(status_code=404, detail="Agent 不存在")
+        raise not_found("Agent 不存在")
     return agent
 
 
 def create_agent(db: Session, actor: User, username: str, grants: list[dict]) -> User:
     if db.scalar(select(User).where(User.username == username)) is not None:
-        raise HTTPException(status_code=409, detail="账号已存在")
+        raise conflict("账号已存在")
     agent = User(
         username=username,
         password_hash="",
@@ -65,7 +65,7 @@ def update_agent(
     agent = _get_agent(db, agent_id)
     if username is not None and username != agent.username:
         if db.scalar(select(User).where(User.username == username)) is not None:
-            raise HTTPException(status_code=409, detail="账号已存在")
+            raise conflict("账号已存在")
         agent.username = username
     if grants is not None:
         db.query(ProjectMember).filter(ProjectMember.user_id == agent.id).delete()
@@ -80,7 +80,7 @@ def _apply_grants(db: Session, agent: User, grants: list[dict]) -> None:
             select(Project).where(Project.id == g["project_id"], Project.deleted_at.is_(None))
         )
         if project is None:
-            raise HTTPException(status_code=400, detail="授权指向的项目不存在")
+            raise invalid_request("授权指向的项目不存在")
         db.add(
             ProjectMember(
                 project_id=project.id, user_id=agent.id, role=g["role"], created_by=agent.created_by
@@ -134,7 +134,7 @@ def _get_key(db: Session, agent_id: uuid.UUID, key_id: uuid.UUID) -> ApiKey:
         select(ApiKey).where(ApiKey.id == key_id, ApiKey.user_id == agent_id)
     )
     if key is None:
-        raise HTTPException(status_code=404, detail="API key 不存在")
+        raise not_found("API key 不存在")
     return key
 
 
@@ -143,12 +143,12 @@ def reveal_key(
 ) -> str:
     """管理员输入自己的密码验证后,解密回看明文。"""
     if not is_admin(db, actor.id):
-        raise HTTPException(status_code=403, detail="仅工作区管理员可回看 key")
+        raise permission_denied("仅工作区管理员可回看 key")
     if not actor.password_hash or not verify_password(password, actor.password_hash):
-        raise HTTPException(status_code=403, detail="密码验证失败")
+        raise permission_denied("密码验证失败")
     key = _get_key(db, agent_id, key_id)
     if key.revoked_at is not None:
-        raise HTTPException(status_code=409, detail="key 已吊销,无法回看")
+        raise conflict("key 已吊销,无法回看")
     return decrypt_secret(key.token_encrypted)
 
 

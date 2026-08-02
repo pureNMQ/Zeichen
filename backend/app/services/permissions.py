@@ -5,10 +5,10 @@
 - admin 自动拥有所有项目 owner 级访问;判权只看角色,不看主体类型
 """
 
-from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..errors import conflict, not_found, permission_denied
 from ..models import Project, ProjectMember, Team, WorkspaceMember
 
 ROLE_LEVEL = {"viewer": 1, "editor": 2, "owner": 3}
@@ -17,7 +17,7 @@ ROLE_LEVEL = {"viewer": 1, "editor": 2, "owner": 3}
 def get_team(db: Session) -> Team:
     team = db.scalar(select(Team).order_by(Team.created_at).limit(1))
     if team is None:
-        raise HTTPException(status_code=409, detail="工作区尚未初始化,请先完成首用户引导")
+        raise conflict("工作区尚未初始化,请先完成首用户引导")
     return team
 
 
@@ -37,7 +37,7 @@ def is_admin(db: Session, user_id) -> bool:
 
 def require_workspace_admin(db: Session, user_id) -> None:
     if not is_admin(db, user_id):
-        raise HTTPException(status_code=403, detail="仅工作区管理员可执行")
+        raise permission_denied("仅工作区管理员可执行")
 
 
 def get_project_role(db: Session, user_id, project_id) -> str | None:
@@ -60,10 +60,16 @@ def get_accessible_project(
         select(Project).where(Project.id == project_id, Project.deleted_at.is_(None))
     )
     if project is None:
-        raise HTTPException(status_code=404, detail="项目不存在或无访问权限")
+        raise not_found("项目不存在或无访问权限")
     role = get_project_role(db, user_id, project_id)
     if role is None:
-        raise HTTPException(status_code=404, detail="项目不存在或无访问权限")
+        raise not_found("项目不存在或无访问权限")
     if ROLE_LEVEL[role] < ROLE_LEVEL[min_level]:
-        raise HTTPException(status_code=403, detail="项目权限不足")
+        raise permission_denied("项目权限不足")
     return project
+
+
+def require_project_role(db: Session, user_id, project_id, min_level: str = "editor") -> str:
+    """项目访问 + 最低角色校验,返回实际角色(editor/owner)。"""
+    get_accessible_project(db, user_id, project_id, min_level=min_level)
+    return get_project_role(db, user_id, project_id) or "viewer"

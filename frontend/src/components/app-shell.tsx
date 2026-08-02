@@ -3,6 +3,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { LogOut, KeyRound, Settings } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
+import { useCurrentProject } from '@/lib/current-project'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -22,12 +23,79 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 
-const NAV = [
+const TEAM_NAV = [
   { to: '/projects', label: '项目' },
   { to: '/members', label: '成员', adminOnly: true },
   { to: '/agents', label: 'Agent', adminOnly: true },
 ]
+
+const WORKSPACE_NAV = [
+  { to: '/requirements', label: '需求' },
+  { to: '/tasks', label: '任务' },
+]
+
+function NavGroup({ title, items, isAdmin }: { title: string; items: { to: string; label: string; adminOnly?: boolean }[]; isAdmin: boolean }) {
+  return (
+    <div className="space-y-1">
+      <p className="px-3 pb-1.5 pt-4 text-[11px] font-semibold uppercase tracking-wider text-foreground/50">
+        {title}
+      </p>
+      {items
+        .filter((item) => !item.adminOnly || isAdmin)
+        .map((item) => (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            className={({ isActive }) =>
+              `block rounded-md px-3 py-2 text-sm ${
+                isActive
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+              }`
+            }
+          >
+            {item.label}
+          </NavLink>
+        ))}
+    </div>
+  )
+}
+
+function ProjectSwitcher() {
+  const { projects, currentProject, selectProject, isLoading } = useCurrentProject()
+
+  return (
+    <div className="border-t p-2">
+      <p className="px-1 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-foreground/50">当前项目</p>
+      {isLoading ? (
+        <p className="px-1 text-sm text-muted-foreground">加载中…</p>
+      ) : projects.length === 0 ? (
+        <p className="px-1 text-sm text-muted-foreground">暂无可见项目</p>
+      ) : (
+        <Select value={currentProject?.id} onValueChange={selectProject}>
+          <SelectTrigger className="w-full">
+            <SelectValue placeholder="选择项目" />
+          </SelectTrigger>
+          <SelectContent>
+            {projects.map((p) => (
+              <SelectItem key={p.id} value={p.id}>
+                {p.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+    </div>
+  )
+}
 
 function ChangePasswordDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const { user } = useAuth()
@@ -127,23 +195,12 @@ export function AppShell() {
     <div className="flex min-h-screen">
       <aside className="flex w-52 shrink-0 flex-col border-r bg-muted/30">
         <div className="px-4 py-4 text-base font-semibold">贼船 Zeichen</div>
-        <nav className="flex-1 space-y-1 px-2">
-          {NAV.filter((item) => !item.adminOnly || isAdmin).map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={({ isActive }) =>
-                `block rounded-md px-3 py-2 text-sm ${
-                  isActive
-                    ? 'bg-primary text-primary-foreground'
-                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                }`
-              }
-            >
-              {item.label}
-            </NavLink>
-          ))}
+        <nav className="flex-1 space-y-1 overflow-y-auto px-2">
+          <NavGroup title="团队功能" items={TEAM_NAV} isAdmin={isAdmin} />
+          <div className="mx-3 my-1 border-t" />
+          <NavGroup title="工作区" items={WORKSPACE_NAV} isAdmin={isAdmin} />
         </nav>
+        <ProjectSwitcher />
         <div className="border-t p-2">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

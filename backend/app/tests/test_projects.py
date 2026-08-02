@@ -58,6 +58,39 @@ def test_create_project_admin_only(client, db, world):
     assert roles == {"admin": "owner", "bob": "editor", "agent-a": "editor"}
 
 
+def test_update_project_name(client, db, world):
+    _admin_client(client)
+    project_id = str(world["project"].id)
+    resp = client.patch(f"/api/projects/{project_id}", json={"name": "改版项目"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["name"] == "改版项目"
+    detail = client.get(f"/api/projects/{project_id}").json()
+    assert detail["name"] == "改版项目"
+
+
+def test_update_project_requires_owner(client, db, world):
+    project_id = str(world["project"].id)
+    client.post("/api/auth/logout")
+    login(client, "bob", "whatever-1")
+    client.post("/api/auth/set-password", json={"password": "bob-pass-1"})
+    assert client.patch(f"/api/projects/{project_id}", json={"name": "x"}).status_code == 403
+
+
+def test_update_project_empty_name_rejected(client, db, world):
+    _admin_client(client)
+    resp = client.patch(f"/api/projects/{world['project'].id}", json={"name": "  "})
+    assert resp.status_code == 400
+    resp = client.patch(f"/api/projects/{world['project'].id}", json={"name": ""})
+    assert resp.status_code == 422
+
+
+def test_update_project_whitespace_trimmed(client, db, world):
+    _admin_client(client)
+    resp = client.patch(f"/api/projects/{world['project'].id}", json={"name": "  改版项目  "})
+    assert resp.status_code == 200
+    assert resp.json()["name"] == "改版项目"
+
+
 def test_add_member_owner_only(client, db, world):
     _admin_client(client)
     project_id = str(world["project"].id)
@@ -124,6 +157,99 @@ def test_remove_member_last_owner_guard(client, db, world):
     # 唯一 owner 不可移除
     resp = client.delete(f"/api/projects/{project_id}/members/{world['member'].id}")
     assert resp.status_code == 409
+
+
+def test_update_member_role(client, db, world):
+    project_id = str(world["project"].id)
+    _admin_client(client)
+
+    resp = client.patch(
+        f"/api/projects/{project_id}/members/{world['member'].id}",
+        json={"role": "editor"},
+    )
+    assert resp.status_code == 200
+    roles = {m["username"]: m["role"] for m in client.get(f"/api/projects/{project_id}/members").json()}
+    assert roles["bob"] == "editor"
+
+    resp = client.patch(
+        f"/api/projects/{project_id}/members/{world['member'].id}",
+        json={"role": "boss"},
+    )
+    assert resp.status_code == 422
+
+    outsider = make_user(db, "outsider2", role="member")
+    resp = client.patch(
+        f"/api/projects/{project_id}/members/{outsider.id}",
+        json={"role": "viewer"},
+    )
+    assert resp.status_code == 404
+
+
+def test_update_member_role_requires_owner(client, db, world):
+    project_id = str(world["project"].id)
+    login(client, "bob", "whatever-1")
+    client.post("/api/auth/set-password", json={"password": "bob-pass-1"})
+    resp = client.patch(
+        f"/api/projects/{project_id}/members/{world['agent'].id}",
+        json={"role": "viewer"},
+    )
+    assert resp.status_code == 403
+
+
+def test_demote_last_owner_guard(client, db, world):
+    """无 admin 且只剩一个 owner 行时,最后一名 owner 不可降级。"""
+    from app.models import ProjectMember, WorkspaceMember
+
+    project_id = str(world["project"].id)
+    db.query(WorkspaceMember).filter(WorkspaceMember.role == "admin").delete()
+    db.query(ProjectMember).filter(ProjectMember.user_id == world["member"].id).update(
+        {ProjectMember.role: "owner"}
+    )
+    db.commit()
+    login(client, "bob", "whatever-1")
+    client.post("/api/auth/set-password", json={"password": "bob-pass-1"})
+
+    # 有第二个 owner 时允许降级
+    assert (
+        client.patch(
+            f"/api/projects/{project_id}/members/{world['agent'].id}",
+            json={"role": "owner"},
+        ).status_code
+        == 200
+    )
+    assert (
+        client.patch(
+            f"/api/projects/{project_id}/members/{world['agent'].id}",
+            json={"role": "editor"},
+        ).status_code
+        == 200
+    )
+
+    # 唯一 owner 不可降级
+    resp = client.patch(
+        f"/api/projects/{project_id}/members/{world['member'].id}",
+        json={"role": "editor"},
+    )
+    assert resp.status_code == 409
+
+
+def test_member_candidates(client, db, world):
+    project_id = str(world["project"].id)
+    make_user(db, "carol", role="member")
+    _admin_client(client)
+
+    resp = client.get(f"/api/projects/{project_id}/member_candidates")
+    assert resp.status_code == 200
+    names = {m["username"]: m["is_agent"] for m in resp.json()}
+    assert names["carol"] is False
+    assert "admin" not in names  # admin 自动 owner,不列为候选人
+    assert "bob" not in names  # 已在项目中
+    assert "agent-a" not in names  # 已在项目中
+
+    # viewer 成员无候选人访问权
+    login(client, "bob", "whatever-1")
+    client.post("/api/auth/set-password", json={"password": "bob-pass-1"})
+    assert client.get(f"/api/projects/{project_id}/member_candidates").status_code == 403
 
 
 def test_project_access_matrix(client, db, world):
