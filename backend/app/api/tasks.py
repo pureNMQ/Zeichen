@@ -71,7 +71,14 @@ def update_task(
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    return service._task_dict(db, service.update_task(db, user, task_id, body.title, body.description))
+    fields = body.model_fields_set
+    requirement_id = body.requirement_id if "requirement_id" in fields else service._UNSET
+    return service._task_dict(
+        db,
+        service.update_task(
+            db, user, task_id, body.title, body.description, requirement_id
+        ),
+    )
 
 
 @router.post("/tasks/{task_id}/status")

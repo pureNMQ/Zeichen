@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { FolderOpen, LayoutGrid, List, Plus } from 'lucide-react'
 
 import { Kanban } from '@/components/kanban'
-import { StatusBadge } from '@/components/status-badge'
+import { StatusSelect } from '@/components/status-select'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -35,7 +35,19 @@ export async function moveRequirement(id: string, to: RequirementStatus): Promis
   await api.post(`/requirements/${id}/status`, { status: to })
 }
 
-function RequirementCard({ r, onDelete, canDelete }: { r: RequirementRow; onDelete: (r: RequirementRow) => void; canDelete: boolean }) {
+function RequirementCard({
+  r,
+  canEdit,
+  onStatus,
+  onDelete,
+  canDelete,
+}: {
+  r: RequirementRow
+  canEdit: boolean
+  onStatus: (r: RequirementRow, s: string) => void
+  onDelete: (r: RequirementRow) => void
+  canDelete: boolean
+}) {
   return (
     <Card>
       <CardContent className="space-y-2 p-3">
@@ -43,7 +55,12 @@ function RequirementCard({ r, onDelete, canDelete }: { r: RequirementRow; onDele
           {r.title}
         </Link>
         <div className="flex items-center gap-2">
-          <StatusBadge status={r.status} />
+          <StatusSelect
+            value={r.status}
+            statuses={REQUIREMENT_STATUSES}
+            onSelect={(s) => onStatus(r, s)}
+            disabled={!canEdit}
+          />
           <Badge variant="outline">{r.task_count} 任务</Badge>
         </div>
         {canDelete && (
@@ -102,6 +119,11 @@ export function RequirementsPage() {
       alert(err instanceof ApiError ? err.message : '状态变更失败')
       await qc.invalidateQueries({ queryKey: ['requirements', projectId] })
     }
+  }
+
+  function onCardStatus(r: RequirementRow, s: string) {
+    if (s === r.status) return
+    void doMove(r.id, s as RequirementStatus)
   }
 
   async function doDelete() {
@@ -174,12 +196,27 @@ export function RequirementsPage() {
           canDrag={canEdit}
           onMove={(id, to) => void doMove(id, to as RequirementStatus)}
           columns={REQUIREMENT_STATUSES}
-          renderCard={(r) => <RequirementCard r={r} onDelete={setDeleteTarget} canDelete={canEdit} />}
+          renderCard={(r) => (
+            <RequirementCard
+              r={r}
+              canEdit={canEdit}
+              onStatus={onCardStatus}
+              onDelete={setDeleteTarget}
+              canDelete={canEdit}
+            />
+          )}
         />
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {items.map((r) => (
-            <RequirementCard key={r.id} r={r} onDelete={setDeleteTarget} canDelete={canEdit} />
+            <RequirementCard
+              key={r.id}
+              r={r}
+              canEdit={canEdit}
+              onStatus={onCardStatus}
+              onDelete={setDeleteTarget}
+              canDelete={canEdit}
+            />
           ))}
         </div>
       )}

@@ -1,10 +1,11 @@
-import { useState, type FormEvent } from 'react'
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { FolderOpen, List, LayoutGrid, Plus, Trash2, UserPlus } from 'lucide-react'
 
 import { Kanban } from '@/components/kanban'
-import { StatusBadge } from '@/components/status-badge'
+import { StatusSelect } from '@/components/status-select'
+import { CreateTaskDialog } from '@/components/create-task-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -16,10 +17,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { api, ApiError, type TaskRow, type WorkflowStatus } from '@/lib/api'
+import { api, ApiError, TASK_STATUSES, type TaskRow, type WorkflowStatus } from '@/lib/api'
+import { useAuth } from '@/lib/auth'
 import { useCurrentProject, useProjectRole } from '@/lib/current-project'
+import { canSetTaskStatus } from '@/lib/task-perms'
 
 export async function moveTask(id: string, to: WorkflowStatus): Promise<void> {
   await api.post(`/tasks/${id}/status`, { status: to })
@@ -33,12 +34,16 @@ function TaskCard({
   t,
   canEdit,
   canDelete,
+  canSetStatus,
+  onStatus,
   onClaim,
   onDelete,
 }: {
   t: TaskRow
   canEdit: boolean
   canDelete: boolean
+  canSetStatus: boolean
+  onStatus: (t: TaskRow, s: string) => void
   onClaim: (t: TaskRow) => void
   onDelete: (t: TaskRow) => void
 }) {
@@ -49,7 +54,12 @@ function TaskCard({
           {t.title}
         </Link>
         <div className="flex items-center gap-2">
-          <StatusBadge status={t.status} />
+          <StatusSelect
+            value={t.status}
+            statuses={TASK_STATUSES}
+            onSelect={(s) => onStatus(t, s)}
+            disabled={!canSetStatus}
+          />
           {t.assignee && <Badge variant="outline">{t.assignee}</Badge>}
         </div>
         <div className="flex items-center gap-1">
@@ -100,6 +110,7 @@ function NoProjectGuide() {
 
 export function TasksPage() {
   const { projectId, currentProject, isLoading: cpLoading } = useCurrentProject()
+  const { user } = useAuth()
   const qc = useQueryClient()
   const role = useProjectRole()
   const canEdit = role === 'editor' || role === 'owner'
@@ -124,6 +135,11 @@ export function TasksPage() {
       alert(err instanceof ApiError ? err.message : '状态变更失败')
       await qc.invalidateQueries({ queryKey: ['tasks', projectId] })
     }
+  }
+
+  function onCardStatus(t: TaskRow, s: string) {
+    if (s === t.status) return
+    void doMove(t.id, s as WorkflowStatus)
   }
 
   async function claim(task: TaskRow) {
@@ -192,13 +208,30 @@ export function TasksPage() {
           canDrag={canEdit}
           onMove={(id, to) => void doMove(id, to)}
           renderCard={(t) => (
-            <TaskCard t={t} canEdit={canEdit} canDelete={canEdit} onClaim={claim} onDelete={setDeleteTarget} />
+            <TaskCard
+              t={t}
+              canEdit={canEdit}
+              canDelete={canEdit}
+              canSetStatus={canSetTaskStatus(t, user, role)}
+              onStatus={onCardStatus}
+              onClaim={claim}
+              onDelete={setDeleteTarget}
+            />
           )}
         />
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {tasks.map((t) => (
-            <TaskCard key={t.id} t={t} canEdit={canEdit} canDelete={canEdit} onClaim={claim} onDelete={setDeleteTarget} />
+            <TaskCard
+              key={t.id}
+              t={t}
+              canEdit={canEdit}
+              canDelete={canEdit}
+              canSetStatus={canSetTaskStatus(t, user, role)}
+              onStatus={onCardStatus}
+              onClaim={claim}
+              onDelete={setDeleteTarget}
+            />
           ))}
         </div>
       )}
@@ -224,58 +257,5 @@ export function TasksPage() {
         </DialogContent>
       </Dialog>
     </div>
-  )
-}
-
-function CreateTaskDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
-  const { projectId } = useCurrentProject()
-  const qc = useQueryClient()
-  const [title, setTitle] = useState('')
-  const [description, setDescription] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [submitting, setSubmitting] = useState(false)
-
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault()
-    setError(null)
-    setSubmitting(true)
-    try {
-      await api.post(`/projects/${projectId}/tasks`, { title: title.trim(), description: description.trim() || null })
-      setTitle('')
-      setDescription('')
-      onOpenChange(false)
-      await qc.invalidateQueries({ queryKey: ['tasks', projectId] })
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : '创建失败,请重试')
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>新建任务</DialogTitle>
-          <DialogDescription>任务可挂到需求下(承接拆解),也可作为独立任务。</DialogDescription>
-        </DialogHeader>
-        <form onSubmit={onSubmit} className="space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="task-title">标题</Label>
-            <Input id="task-title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={256} required />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="task-desc">描述</Label>
-            <Input id="task-desc" value={description} onChange={(e) => setDescription(e.target.value)} />
-          </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
-          <DialogFooter>
-            <Button type="submit" disabled={submitting}>
-              {submitting ? '创建中…' : '创建'}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
   )
 }

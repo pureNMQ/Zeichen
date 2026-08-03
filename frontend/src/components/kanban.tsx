@@ -2,6 +2,7 @@ import { DndContext, DragOverlay, PointerSensor, useDraggable, useDroppable, use
 import { useEffect, useState, type ReactNode } from 'react'
 
 import { STATUS_LABEL, type WorkflowStatus } from '@/lib/api'
+import { STATUS_DOT } from '@/components/status-badge'
 import { cn } from '@/lib/utils'
 
 export interface KanbanItem {
@@ -47,7 +48,10 @@ function Column({ status, canDrop, isActiveTarget, children }: ColumnProps) {
         !showPlaceholder && isActiveTarget && canDrop && 'border-dashed border-primary/60',
       )}
     >
-      <div className="px-1 text-xs font-medium text-muted-foreground">{STATUS_LABEL[status]}</div>
+      <div className="flex items-center gap-1.5 px-1 text-xs font-medium text-muted-foreground">
+        <span className={cn('size-2 shrink-0 rounded-full', STATUS_DOT[status])} />
+        {STATUS_LABEL[status]}
+      </div>
       <div className="flex min-h-24 flex-col gap-2">
         {children}
         {showPlaceholder && (

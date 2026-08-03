@@ -1,6 +1,6 @@
 # 10 需求/任务状态下拉框:卡片与详情页直接调整状态
 
-Status: open
+Status: claimed
 Type: task
 Blocked by: 09
 

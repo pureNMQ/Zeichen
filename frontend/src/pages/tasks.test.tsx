@@ -26,8 +26,17 @@ vi.mock('@/lib/api', () => {
       done: '已完成',
       cancelled: '已取消',
     },
+    TASK_STATUSES: ['backlog', 'in_progress', 'verifying', 'done', 'cancelled'],
+    REQUIREMENT_STATUSES: ['backlog', 'in_progress', 'done', 'cancelled'],
   }
 })
+
+vi.mock('@/lib/auth', () => ({
+  useAuth: () => ({
+    user: { id: 'u1', username: 'admin', is_agent: false, workspace_role: 'member' },
+    logout: vi.fn(),
+  }),
+}))
 
 import { api, type ProjectRow, type TaskRow } from '@/lib/api'
 import { CurrentProjectProvider } from '@/lib/current-project'
@@ -162,5 +171,103 @@ describe('任务删除入口与自由流转', () => {
     expect(api.post).toHaveBeenCalledWith('/tasks/t1/status', { status: 'done' })
     await moveTask('t2', 'cancelled')
     expect(api.post).toHaveBeenCalledWith('/tasks/t2/status', { status: 'cancelled' })
+  })
+})
+
+describe('任务卡片状态下拉(ticket 10)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    qc.clear()
+    localStorage.clear()
+  })
+
+  it('编辑权卡片渲染状态下拉(五态),选择即调通用改状态端点', async () => {
+    vi.mocked(api.post).mockResolvedValue({ ok: true })
+    renderTasks()
+    const user = (await import('@testing-library/user-event')).default
+    const combos = await screen.findAllByRole('combobox', { name: '状态' })
+    expect(combos.length).toBe(2)
+    await user.click(combos[0])
+    await user.click(await screen.findByRole('option', { name: '已完成' }))
+    expect(api.post).toHaveBeenCalledWith('/tasks/t1/status', { status: 'done' })
+  })
+
+  it('viewer 状态下拉禁用', async () => {
+    renderTasks([projects[1]])
+    expect(await screen.findByText('认领我')).toBeInTheDocument()
+    const combos = screen.getAllByRole('combobox', { name: '状态' })
+    for (const c of combos) expect(c).toBeDisabled()
+  })
+})
+
+describe('新建任务对话框关联需求(ticket 10)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    qc.clear()
+    localStorage.clear()
+  })
+
+  const requirements = [
+    {
+      id: 'r1',
+      title: '登录功能',
+      description: null,
+      status: 'backlog',
+      project_id: 'p1',
+      created_by: 'u1',
+      created_at: '2026-08-01T00:00:00+00:00',
+      updated_at: '2026-08-01T00:00:00+00:00',
+      task_count: 0,
+    },
+  ]
+
+  function renderWithRequirements() {
+    vi.mocked(api.get).mockImplementation((path: string) => {
+      if (path === '/projects') return Promise.resolve(projects)
+      if (path.includes('/requirements')) return Promise.resolve({ items: requirements, next_cursor: null })
+      if (path.includes('/tasks')) return Promise.resolve({ items: tasks, next_cursor: null })
+      return Promise.resolve({})
+    })
+    return render(
+      <QueryClientProvider client={qc}>
+        <CurrentProjectProvider>
+          <MemoryRouter initialEntries={['/tasks']}>
+            <Routes>
+              <Route path="/tasks" element={<TasksPage />} />
+            </Routes>
+          </MemoryRouter>
+        </CurrentProjectProvider>
+      </QueryClientProvider>,
+    )
+  }
+
+  it('选择需求后提交带 requirement_id', async () => {
+    vi.mocked(api.post).mockResolvedValue({ ok: true })
+    renderWithRequirements()
+    const user = (await import('@testing-library/user-event')).default
+    await user.click(await screen.findByRole('button', { name: /新建任务/ }))
+    await user.type(screen.getByLabelText('标题'), '承接任务')
+    await user.click(await screen.findByRole('combobox', { name: '关联需求' }))
+    await user.click(await screen.findByRole('option', { name: '登录功能' }))
+    await user.click(screen.getByRole('button', { name: '创建' }))
+    expect(api.post).toHaveBeenCalledWith('/projects/p1/tasks', {
+      title: '承接任务',
+      description: null,
+      requirement_id: 'r1',
+    })
+  })
+
+  it('不选需求 = 独立任务(requirement_id null)', async () => {
+    vi.mocked(api.post).mockResolvedValue({ ok: true })
+    renderWithRequirements()
+    const user = (await import('@testing-library/user-event')).default
+    await user.click(await screen.findByRole('button', { name: /新建任务/ }))
+    await user.type(screen.getByLabelText('标题'), '独立任务')
+    await user.click(screen.getByRole('button', { name: '创建' }))
+    expect(api.post).toHaveBeenCalledWith('/projects/p1/tasks', {
+      title: '独立任务',
+      description: null,
+      requirement_id: null,
+    })
   })
 })

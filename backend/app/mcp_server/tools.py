@@ -175,10 +175,17 @@ def _register_all(mcp) -> None:
 
     @mcp.tool(name="tasks.update")
     @sessioned
-    def tasks_update(id: str, title: str | None = None, description: str | None = None) -> dict:
-        """更新任务元数据(标题/描述,不涉状态)。"""
+    def tasks_update(
+        id: str,
+        title: str | None = None,
+        description: str | None = None,
+        requirement_id: str | None = None,
+    ) -> dict:
+        """更新任务元数据(标题/描述/关联需求;requirement_id 传空=解除关联,须与任务同项目且未删除)。"""
         db, actor = dbc()
-        t = task_svc.update_task(db, actor, uuid.UUID(id), title, description)
+        t = task_svc.update_task(
+            db, actor, uuid.UUID(id), title, description, _req_id(requirement_id)
+        )
         return task_svc._task_dict(db, t)
 
     @mcp.tool(name="tasks.set_status")

@@ -103,11 +103,14 @@ describe('需求列表页(当前项目)', () => {
     expect(api.get).toHaveBeenCalledWith('/projects/p1/requirements?limit=100')
   })
 
-  it('viewer 不可见新建/删除按钮,editor 可见', async () => {
+  it('viewer 不可见新建/删除按钮', async () => {
     renderRequirements()
     expect(await screen.findByText('登录功能')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /新建需求/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /删除/ })).not.toBeInTheDocument()
+  })
 
+  it('owner 可见新建/删除按钮', async () => {
     renderRequirements([projects[1]])
     expect(await screen.findByRole('button', { name: /新建需求/ })).toBeInTheDocument()
   })
@@ -153,5 +156,32 @@ describe('需求看板(四列自由拖拽)', () => {
     expect(api.post).toHaveBeenCalledWith('/requirements/r1/status', { status: 'done' })
     await moveRequirement('r2', 'cancelled')
     expect(api.post).toHaveBeenCalledWith('/requirements/r2/status', { status: 'cancelled' })
+  })
+})
+
+describe('需求卡片状态下拉(ticket 10)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    qc.clear()
+    localStorage.clear()
+  })
+
+  it('编辑权卡片渲染状态下拉(四态),选择即调通用改状态端点', async () => {
+    vi.mocked(api.post).mockResolvedValue({ ok: true })
+    renderRequirements([projects[1]])
+    const user = (await import('@testing-library/user-event')).default
+    const combos = await screen.findAllByRole('combobox', { name: '状态' })
+    expect(combos.length).toBe(2)
+    await user.click(combos[0])
+    await user.click(await screen.findByRole('option', { name: '已完成' }))
+    expect(api.post).toHaveBeenCalledWith('/requirements/r1/status', { status: 'done' })
+  })
+
+  it('viewer 状态下拉禁用', async () => {
+    renderRequirements()
+    expect(await screen.findByText('登录功能')).toBeInTheDocument()
+    const combos = screen.getAllByRole('combobox', { name: '状态' })
+    expect(combos.length).toBe(2)
+    for (const c of combos) expect(c).toBeDisabled()
   })
 })

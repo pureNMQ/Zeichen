@@ -260,6 +260,33 @@ def test_agent_claim_to_requirement_done(mcp_server: dict):
     assert client.call("requirements.restore", id=rid)["status"] == "cancelled"
 
 
+def test_task_requirement_link_over_mcp(mcp_server: dict):
+    """tasks.update 经 MCP 同步支持 requirement_id(设置/更换/解除)。"""
+    client = RawMcpClient(mcp_server["url"], mcp_server["token"])
+    client.initialize()
+
+    r1 = client.call("requirements.create", project_id=mcp_server["project_id"], title="MCP 需求一")
+    r2 = client.call("requirements.create", project_id=mcp_server["project_id"], title="MCP 需求二")
+    t = client.call("tasks.create", project_id=mcp_server["project_id"], title="MCP 独立任务")
+    assert t["requirement_id"] is None
+
+    updated = client.call("tasks.update", id=t["id"], requirement_id=r1["id"])
+    assert updated["requirement_id"] == r1["id"]
+    changed = client.call("tasks.update", id=t["id"], requirement_id=r2["id"])
+    assert changed["requirement_id"] == r2["id"]
+    cleared = client.call("tasks.update", id=t["id"], requirement_id="")
+    assert cleared["requirement_id"] is None
+
+    # 关联后 tasks.list 可按 requirement_id 过滤
+    client.call("tasks.update", id=t["id"], requirement_id=r1["id"])
+    page = client.call("tasks.list", project_id=mcp_server["project_id"], requirement_id=r1["id"])
+    assert [i["id"] for i in page["items"]] == [t["id"]]
+
+    # 清理本测试建的需求(恢复 pagination 基线)
+    assert client.call("requirements.delete", id=r1["id"], confirm_task_count=1)["deleted"] is True
+    assert client.call("requirements.delete", id=r2["id"])["deleted"] is True
+
+
 def test_cursor_pagination_over_mcp(mcp_server: dict):
     client = RawMcpClient(mcp_server["url"], mcp_server["token"])
     client.initialize()

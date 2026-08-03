@@ -26,6 +26,8 @@ vi.mock('@/lib/api', () => {
       done: '已完成',
       cancelled: '已取消',
     },
+    TASK_STATUSES: ['backlog', 'in_progress', 'verifying', 'done', 'cancelled'],
+    REQUIREMENT_STATUSES: ['backlog', 'in_progress', 'done', 'cancelled'],
   }
 })
 
@@ -61,8 +63,10 @@ const task: TaskRow = {
   updated_at: '2026-08-01T00:00:00+00:00',
 }
 
-function renderDetail(projectList: ProjectRow[] = projects) {
+function renderDetail(projectList: ProjectRow[] = projects, extraMock?: (path: string) => unknown | undefined) {
   vi.mocked(api.get).mockImplementation((path: string) => {
+    const hit = extraMock?.(path)
+    if (hit !== undefined) return Promise.resolve(hit)
     if (path === '/projects') return Promise.resolve(projectList)
     if (path === '/tasks/t1') return Promise.resolve(task)
     return Promise.resolve({ items: [] })
@@ -106,25 +110,74 @@ describe('任务详情(当前项目约束)', () => {
   })
 })
 
-describe('任务详情操作按钮(ticket 09 通用改状态)', () => {
+describe('任务详情操作(ticket 10 状态下拉)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     qc.clear()
     localStorage.clear()
   })
 
-  it('编辑权下展示标记完成/取消,点击走通用改状态端点,无验收对话框', async () => {
+  it('编辑权下详情页展示状态下拉(五态),选择走通用改状态端点', async () => {
     vi.mocked(api.post).mockResolvedValue({ ok: true })
     renderDetail()
     const user = (await import('@testing-library/user-event')).default
     await user.click(await screen.findByRole('button', { name: '切换到该项目' }))
     expect(await screen.findByText('其他项目的任务')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: /标记完成/ }))
+    const combo = screen.getByRole('combobox', { name: '状态' })
+    await user.click(combo)
+    await user.click(await screen.findByRole('option', { name: '已完成' }))
     expect(api.post).toHaveBeenCalledWith('/tasks/t1/status', { status: 'done' })
-    await user.click(screen.getByRole('button', { name: '取消' }))
+    await user.click(screen.getByRole('combobox', { name: '状态' }))
+    await user.click(await screen.findByRole('option', { name: '已取消' }))
     expect(api.post).toHaveBeenCalledWith('/tasks/t1/status', { status: 'cancelled' })
     expect(screen.queryByRole('button', { name: /开工/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /提交验收/ })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /验收通过/ })).not.toBeInTheDocument()
+  })
+})
+
+describe('任务详情关联需求(ticket 10)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    qc.clear()
+    localStorage.clear()
+  })
+
+  const requirements = [
+    {
+      id: 'r1',
+      title: '需求A',
+      description: null,
+      status: 'backlog',
+      project_id: 'p2',
+      created_by: 'u1',
+      created_at: '2026-08-01T00:00:00+00:00',
+      updated_at: '2026-08-01T00:00:00+00:00',
+      task_count: 0,
+    },
+  ]
+
+  it('关联需求下拉:设置走 PATCH requirement_id,可换可解除(null)', async () => {
+    let currentReq: string | null = 'r1'
+    vi.mocked(api.patch).mockImplementation(async (_path: string, body: unknown) => {
+      currentReq = (body as { requirement_id: string | null }).requirement_id
+      return { ok: true }
+    })
+    renderDetail(projects, (path: string) => {
+      if (path === '/tasks/t1') return { ...task, requirement_id: currentReq, title: '已挂需求的任务' }
+      if (path.includes('/requirements')) return { items: requirements, next_cursor: null }
+      return undefined
+    })
+    const user = (await import('@testing-library/user-event')).default
+    await user.click(await screen.findByRole('button', { name: '切换到该项目' }))
+    expect(await screen.findByText('已挂需求的任务')).toBeInTheDocument()
+    expect(screen.getByText(/所属需求:/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('combobox', { name: '关联需求' }))
+    await user.click(await screen.findByRole('option', { name: '独立任务(不关联)' }))
+    expect(api.patch).toHaveBeenCalledWith('/tasks/t1', { requirement_id: null })
+
+    await user.click(screen.getByRole('combobox', { name: '关联需求' }))
+    await user.click(await screen.findByRole('option', { name: '需求A' }))
+    expect(api.patch).toHaveBeenCalledWith('/tasks/t1', { requirement_id: 'r1' })
   })
 })

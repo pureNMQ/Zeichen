@@ -19,6 +19,9 @@ from .permissions import get_accessible_project, get_project_role, is_admin, req
 from .polymorphic import record_activity
 from .workflow import TERMINAL, assert_status_valid
 
+# update_task 的 requirement_id 哨兵:未传 = 不变;None = 显式解除
+_UNSET = object()
+
 
 def _task_dict(db: Session, t: Task) -> dict:
     assignee = db.get(User, t.assignee_id) if t.assignee_id else None
@@ -76,6 +79,19 @@ def _check_assignee(db: Session, project_id: uuid.UUID, assignee_id: uuid.UUID) 
     return assignee
 
 
+def _check_requirement(db: Session, project_id: uuid.UUID, requirement_id: uuid.UUID) -> None:
+    """需求须存在、未删除、且与任务同项目(跨项目拒绝)。"""
+    requirement = db.scalar(
+        select(Requirement).where(
+            Requirement.id == requirement_id, Requirement.deleted_at.is_(None)
+        )
+    )
+    if requirement is None:
+        raise not_found("需求不存在")
+    if requirement.project_id != project_id:
+        raise invalid_request("任务所属项目与需求不一致")
+
+
 def create_task(
     db: Session,
     actor: User,
@@ -91,15 +107,7 @@ def create_task(
     require_project_role(db, actor.id, project_id, min_level="editor")
     requirement = None
     if requirement_id is not None:
-        requirement = db.scalar(
-            select(Requirement).where(
-                Requirement.id == requirement_id, Requirement.deleted_at.is_(None)
-            )
-        )
-        if requirement is None:
-            raise not_found("需求不存在")
-        if requirement.project_id != project_id:
-            raise invalid_request("任务所属项目与需求不一致")
+        _check_requirement(db, project_id, requirement_id)
     if assignee_id is not None:
         _check_assignee(db, project_id, assignee_id)
     task = Task(
@@ -157,9 +165,15 @@ def update_task(
     db: Session,
     actor: User,
     task_id: uuid.UUID,
-    title: str | None,
-    description: str | None,
+    title: str | None = None,
+    description: str | None = None,
+    requirement_id: object = _UNSET,
 ) -> Task:
+    """更新任务元数据;requirement_id 可设/可换/可解除(null=解除)。
+
+    requirement_id 权限与改状态同规则(已指派仅本人/工作区 admin/项目 owner,
+    未指派任意编辑权);校验需求同项目且未删除。
+    """
     task = _get_editable(db, actor, task_id)
     if title is not None:
         title = title.strip()
@@ -168,7 +182,16 @@ def update_task(
         task.title = title
     if description is not None:
         task.description = description
-    record_activity(db, task.project_id, actor.id, "task", task.id, "update", "更新任务")
+    summary = "更新任务"
+    if requirement_id is not _UNSET:
+        _require_owner(db, actor, task)
+        rid = requirement_id if requirement_id is None else uuid.UUID(str(requirement_id))
+        if rid != task.requirement_id:
+            if rid is not None:
+                _check_requirement(db, task.project_id, rid)
+            task.requirement_id = rid
+            summary = "关联需求" if rid else "解除需求关联"
+    record_activity(db, task.project_id, actor.id, "task", task.id, "update", summary)
     db.commit()
     return task
 

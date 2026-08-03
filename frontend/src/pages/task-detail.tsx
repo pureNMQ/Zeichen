@@ -1,16 +1,25 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { CheckCircle2, FolderOpen, UserPlus, UserX, XCircle } from 'lucide-react'
+import { FolderOpen, UserPlus, UserX } from 'lucide-react'
 
 import { ActivityStream } from '@/components/activity-stream'
 import { CommentStream } from '@/components/comment-stream'
 import { StatusBadge } from '@/components/status-badge'
+import { StatusSelect } from '@/components/status-select'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { api, ApiError, type TaskRow } from '@/lib/api'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { api, ApiError, TASK_STATUSES, type RequirementRow, type TaskRow } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { useCurrentProject, useProjectRole } from '@/lib/current-project'
+import { canSetTaskStatus } from '@/lib/task-perms'
 
 function Guide({ children }: { children: React.ReactNode }) {
   return (
@@ -33,6 +42,14 @@ export function TaskDetailPage() {
     queryKey: ['task', id],
     queryFn: () => api.get<TaskRow>(`/tasks/${id}`),
   })
+  const { data: requirements } = useQuery({
+    queryKey: ['requirements', task?.project_id],
+    queryFn: () =>
+      api.get<{ items: RequirementRow[]; next_cursor: string | null }>(
+        `/projects/${task?.project_id}/requirements?limit=100`,
+      ),
+    enabled: !!task,
+  })
 
   const isAdmin = user?.workspace_role === 'admin'
   const isAssignee = task?.assignee_id === user?.id
@@ -40,7 +57,7 @@ export function TaskDetailPage() {
   const canManage = isAdmin || isOwner || isAssignee
   const canEditTask = role === 'editor' || role === 'owner'
   // 已指派仅本人/admin/owner;未指派任意编辑权者可改状态
-  const canSetStatus = task?.assignee_id ? canManage : canEditTask
+  const canSetStatus = task ? canSetTaskStatus(task, user, role) : false
 
   async function act(path: string, body?: unknown) {
     setError(null)
@@ -54,7 +71,21 @@ export function TaskDetailPage() {
   }
 
   async function setStatus(status: string) {
+    if (status === task?.status) return
     await act(`/tasks/${id}/status`, { status })
+  }
+
+  async function setRequirement(requirementId: string | null) {
+    if (requirementId === (task?.requirement_id ?? null)) return
+    setError(null)
+    try {
+      await api.patch(`/tasks/${id}`, { requirement_id: requirementId })
+      await qc.invalidateQueries({ queryKey: ['task', id] })
+      await qc.invalidateQueries({ queryKey: ['tasks', task?.project_id] })
+      await qc.invalidateQueries({ queryKey: ['requirement-tasks', task?.requirement_id] })
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : '关联失败')
+    }
   }
 
   if (cpLoading || isLoading) return <p className="text-sm text-muted-foreground">加载中…</p>
@@ -102,17 +133,29 @@ export function TaskDetailPage() {
               认领
             </Button>
           )}
-          {task.status !== 'done' && canSetStatus && (
-            <Button onClick={() => void setStatus('done')}>
-              <CheckCircle2 className="mr-2 h-4 w-4" />
-              标记完成
-            </Button>
-          )}
-          {task.status !== 'cancelled' && canSetStatus && (
-            <Button variant="outline" onClick={() => void setStatus('cancelled')}>
-              <XCircle className="mr-2 h-4 w-4" />
-              取消
-            </Button>
+          <StatusSelect
+            value={task.status}
+            statuses={TASK_STATUSES}
+            onSelect={(s) => void setStatus(s)}
+            disabled={!canSetStatus}
+          />
+          {canSetStatus && (
+            <Select
+              value={task.requirement_id ?? 'none'}
+              onValueChange={(v) => void setRequirement(v === 'none' ? null : v)}
+            >
+              <SelectTrigger size="sm" aria-label="关联需求" className="h-6 gap-1 px-1.5 text-xs">
+                <SelectValue placeholder="关联需求" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">独立任务(不关联)</SelectItem>
+                {(requirements?.items ?? []).map((r) => (
+                  <SelectItem key={r.id} value={r.id}>
+                    {r.title}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           )}
           {task.assignee_id && canManage && (
             <Button variant="outline" onClick={() => void act('/tasks/' + id + '/unassign')}>
