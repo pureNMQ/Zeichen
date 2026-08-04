@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Bot, Pencil, Plus, Trash2, UserRound } from 'lucide-react'
+import { Bot, Pencil, Plus, Trash2 } from 'lucide-react'
 import { api, ApiError, type ProjectMemberRow, type ProjectRole } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -343,7 +343,7 @@ export function ProjectLayout() {
   const { data: members = [], isLoading: membersLoading, error: membersError } = useQuery({
     queryKey: ['project-members', projectId],
     queryFn: () => api.get<ProjectMemberRow[]>(`/projects/${projectId}/members`),
-    enabled: isOwner,
+    enabled: Boolean(project),
   })
 
   async function remove(member: ProjectMemberRow) {
@@ -375,10 +375,9 @@ export function ProjectLayout() {
       </div>
       <p className="text-sm text-muted-foreground">创建于 {new Date(project.created_at).toLocaleDateString()}</p>
 
-      {isOwner ? (
-        <Card>
+      <Card>
           <CardHeader>
-            <CardTitle className="text-base">成员授权</CardTitle>
+            <CardTitle className="text-base">项目成员</CardTitle>
             <CardDescription>共 {members.length} 人 · 项目资源按成员角色授权(owner/editor/viewer)，Owner 仅可转让</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -391,40 +390,34 @@ export function ProjectLayout() {
             ) : (
               <Table>
                 <TableHeader>
-                  <TableRow>
-                    <TableHead>账号</TableHead>
-                    <TableHead>类型</TableHead>
-                    <TableHead>角色</TableHead>
-                    <TableHead className="text-right">操作</TableHead>
+                    <TableRow>
+                      <TableHead>账号</TableHead>
+                      <TableHead>角色</TableHead>
+                    {isOwner && <TableHead className="text-right">操作</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {members.map((m) => (
                     <TableRow key={m.id}>
-                      <TableCell className="font-medium">{m.username}</TableCell>
-                      <TableCell>
-                        {m.is_agent ? (
-                          <Badge variant="secondary">
-                            <Bot className="mr-1 h-3 w-3" />
-                            Agent
-                          </Badge>
-                        ) : (
-                          <Badge variant="secondary">
-                            <UserRound className="mr-1 h-3 w-3" />
-                            成员
-                          </Badge>
+                      <TableCell className="font-medium">
+                        {m.username}
+                        {m.is_agent && (
+                          <span className="ml-1 inline-flex align-text-bottom" title="Agent">
+                            <Bot className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+                            <span className="sr-only">Agent</span>
+                          </span>
                         )}
                       </TableCell>
                       <TableCell>
-                        {m.role === 'owner' ? (
+                        {isOwner && m.role === 'owner' ? (
                           <Select value="owner" disabled>
                             <SelectTrigger className="w-28">
                               <SelectValue>owner</SelectValue>
                             </SelectTrigger>
                           </Select>
-                        ) : <MemberRoleSelect projectId={projectId} member={m} />}
+                        ) : isOwner ? <MemberRoleSelect projectId={projectId} member={m} /> : <Badge variant="outline">{m.role}</Badge>}
                       </TableCell>
-                      <TableCell className="text-right">
+                      {isOwner && <TableCell className="text-right">
                         {m.role === 'owner' ? (
                           m.is_current_user && (
                             <Button variant="outline" size="sm" onClick={() => setTransferOwner(m)}>
@@ -437,25 +430,20 @@ export function ProjectLayout() {
                             <span className="sr-only">移除 {m.username}</span>
                           </Button>
                         )}
-                      </TableCell>
+                      </TableCell>}
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
             )}
-            <Button onClick={() => setAddOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" />
-              添加成员
-            </Button>
+            {isOwner && (
+              <Button onClick={() => setAddOpen(true)}>
+                <Plus className="mr-2 h-4 w-4" />
+                添加成员
+              </Button>
+            )}
           </CardContent>
         </Card>
-      ) : (
-        <Card>
-          <CardContent className="py-8 text-center text-sm text-muted-foreground">
-            成员授权由项目 owner 管理,你的角色为 {project.my_role}
-          </CardContent>
-        </Card>
-      )}
 
       <RenameProjectDialog
         projectId={projectId}
@@ -463,7 +451,7 @@ export function ProjectLayout() {
         open={renameOpen}
         onOpenChange={setRenameOpen}
       />
-      <AddMemberDialog projectId={projectId} open={addOpen} onOpenChange={setAddOpen} />
+      {isOwner && <AddMemberDialog projectId={projectId} open={addOpen} onOpenChange={setAddOpen} />}
       {transferOwner && (
         <TransferOwnerDialog
           projectId={projectId}

@@ -66,7 +66,8 @@ def update_project(db: Session, actor: User, project_id: uuid.UUID, name: str) -
 
 
 def list_project_members(db: Session, user: User, project_id: uuid.UUID) -> list[tuple[User, str]]:
-    get_accessible_project(db, user.id, project_id, min_level="owner")
+    # 项目成员可查看彼此及角色；增删改成员仍由各写操作单独要求 owner。
+    get_accessible_project(db, user.id, project_id)
     rows = db.execute(
         select(User, ProjectMember.role)
         .join(ProjectMember, ProjectMember.user_id == User.id)

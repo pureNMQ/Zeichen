@@ -1,4 +1,4 @@
-"""工作区成员 API(仅 admin):列表 / 添加 / 改角色 / 移除。"""
+"""工作区成员 API:全员可读;添加、改角色和移除仅 admin。"""
 
 import uuid
 
@@ -10,7 +10,7 @@ from ..config import get_settings
 from ..models import User
 from ..schemas import MemberCreate, MemberUpdate
 from ..services import members as members_service
-from .deps import current_admin
+from .deps import current_admin, current_user
 
 router = APIRouter(prefix="/api/members", tags=["members"])
 
@@ -30,9 +30,9 @@ def _password_setup_url(token: str) -> str:
 
 
 @router.get("")
-def list_members(admin: User = Depends(current_admin), db: Session = Depends(get_db)) -> list[dict]:
+def list_members(user: User = Depends(current_user), db: Session = Depends(get_db)) -> list[dict]:
     return [
-        {**_payload(u), "role": role, "is_self": u.id == admin.id}
+        {**_payload(u), "role": role, "is_self": u.id == user.id}
         for u, role in members_service.list_members(db)
     ]
 

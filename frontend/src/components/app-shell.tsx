@@ -33,7 +33,7 @@ import {
 
 const TEAM_NAV = [
   { to: '/projects', label: '项目' },
-  { to: '/members', label: '成员', adminOnly: true },
+  { to: '/members', label: '成员' },
   { to: '/agents', label: 'Agent', adminOnly: true },
 ]
 

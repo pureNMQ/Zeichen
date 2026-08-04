@@ -270,7 +270,16 @@ def test_project_access_matrix(client, db, world):
     login(client, "bob", "whatever-1")
     client.post("/api/auth/set-password", json={"password": "bob-pass-1"})
     assert client.get(f"/api/projects/{project_id}").status_code == 200
-    assert client.get(f"/api/projects/{project_id}/members").status_code == 403
+    members = client.get(f"/api/projects/{project_id}/members")
+    assert members.status_code == 200
+    assert {row["username"]: row["role"] for row in members.json()} == {
+        "bob": "viewer",
+        "agent-a": "editor",
+    }
+    assert client.post(
+        f"/api/projects/{project_id}/members",
+        json={"user_id": str(outsider.id), "role": "viewer"},
+    ).status_code == 403
 
     login(client, "outsider", "whatever-1")
     client.post("/api/auth/set-password", json={"password": "out-pass-1"})

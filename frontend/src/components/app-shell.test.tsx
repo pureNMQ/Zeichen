@@ -76,11 +76,11 @@ describe('AppShell 侧边栏', () => {
     }
   })
 
-  it('普通成员不见 成员/Agent 入口', async () => {
+  it('普通成员可见成员入口，但不见 Agent 入口', async () => {
     renderShell('member')
     expect(await screen.findByText('团队功能')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '项目' })).toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: '成员' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '成员' })).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Agent' })).not.toBeInTheDocument()
   })
 

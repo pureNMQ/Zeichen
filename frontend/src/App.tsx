@@ -103,9 +103,7 @@ export function App() {
         <Route path="tasks" element={<TasksPage />} />
         <Route path="requirements/:id" element={<RequirementDetailPage />} />
         <Route path="tasks/:id" element={<TaskDetailPage />} />
-        <Route path="members" element={<RequireAdmin />}>
-          <Route index element={<MembersPage />} />
-        </Route>
+        <Route path="members" element={<MembersPage />} />
         <Route path="agents" element={<RequireAdmin />}>
           <Route index element={<AgentsPage />} />
         </Route>

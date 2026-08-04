@@ -1,6 +1,6 @@
 # 09 状态交互放开:状态机重构(后端+MCP+Web)+ 文档修订
 
-Status: claimed
+Status: resolved
 Type: task
 Blocked by: 08
 
@@ -26,5 +26,9 @@ Blocked by: 08
 - CONTEXT.md:验收语义(不再留说明)、需求/任务状态机描述
 
 - 测试:后端状态机全路径(任意互转/四态五态约束/权限)+ MCP set_status 端到端 + 前端看板拖拽/任务删除
+
+## Answer
+
+用户验收通过。需求状态已收敛为四态、任务保留五态，状态可任意转换；API/MCP 统一为参数化 `set_status`，看板拖拽、状态更新、任务删除与状态机权限均已落地并覆盖回归测试，规格与领域文档也已同步。
 
 产出:Web 拖拽/删除与 MCP set_status 全自由流转闭环,规格文档同步一致。

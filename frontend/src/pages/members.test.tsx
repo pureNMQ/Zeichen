@@ -1,7 +1,9 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MemoryRouter } from 'react-router-dom'
 import { MembersPage } from '@/pages/members'
+import { App } from '@/App'
 import { NotificationProvider } from '@/components/ui/notification'
 
 vi.mock('@/lib/api', () => {
@@ -20,8 +22,27 @@ vi.mock('@/lib/api', () => {
       patch: vi.fn(),
       delete: vi.fn(),
     },
+    REQUIREMENT_STATUSES: ['backlog', 'in_progress', 'done', 'cancelled'],
+    TASK_STATUSES: ['backlog', 'in_progress', 'verifying', 'done', 'cancelled'],
+    STATUS_LABEL: {
+      backlog: '待办',
+      in_progress: '实现中',
+      verifying: '验收中',
+      done: '已完成',
+      cancelled: '已取消',
+    },
   }
 })
+
+let workspaceRole: 'admin' | 'member' = 'admin'
+
+vi.mock('@/lib/auth', () => ({
+  useAuth: () => ({
+    user: { id: 'u1', username: 'admin', is_agent: false, workspace_role: workspaceRole },
+    loading: false,
+    logout: vi.fn(),
+  }),
+}))
 
 import { ApiError, api, type MemberRow } from '@/lib/api'
 
@@ -44,6 +65,7 @@ function renderMembers() {
 describe('MembersPage 成员列表渲染', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    workspaceRole = 'admin'
   })
 
   it('以响应式卡片渲染成员与角色', async () => {
@@ -98,5 +120,40 @@ describe('MembersPage 成员列表渲染', () => {
     await user.click(await screen.findByRole('button', { name: /重新生成 bob 的设密链接/ }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('成员已完成设密，不能重新生成设密链接')
+  })
+
+  it('普通成员只能查看成员列表，隐藏全部管理控件', async () => {
+    workspaceRole = 'member'
+    vi.mocked(api.get).mockResolvedValue(rows)
+    renderMembers()
+
+    expect(await screen.findByText('admin')).toBeInTheDocument()
+    expect(screen.getByText(/仅可查看/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '添加成员' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /重新生成 bob 的设密链接/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /移除 bob/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
+  })
+
+  it('普通成员经 /members 路由可进入只读成员页', async () => {
+    workspaceRole = 'member'
+    vi.mocked(api.get).mockImplementation((path: string) => {
+      if (path === '/members') return Promise.resolve(rows)
+      if (path === '/projects') return Promise.resolve([])
+      return Promise.resolve({})
+    })
+    const qc = new QueryClient()
+    render(
+      <QueryClientProvider client={qc}>
+        <NotificationProvider>
+          <MemoryRouter initialEntries={['/members']}>
+            <App />
+          </MemoryRouter>
+        </NotificationProvider>
+      </QueryClientProvider>,
+    )
+
+    expect(await screen.findByRole('heading', { name: '成员管理' })).toBeInTheDocument()
+    expect(screen.queryByText('该页面仅工作区管理员可访问')).not.toBeInTheDocument()
   })
 })

@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Copy, KeyRound, Plus, Trash2, UserRound } from 'lucide-react'
 import { api, ApiError, type MemberCreateResponse, type MemberRow, type PasswordSetupLinkResponse, type Role } from '@/lib/api'
+import { useAuth } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -164,6 +165,8 @@ function RoleSelect({ member }: { member: MemberRow }) {
 }
 
 export function MembersPage() {
+  const { user } = useAuth()
+  const isAdmin = user?.workspace_role === 'admin'
   const [addOpen, setAddOpen] = useState(false)
   const [setupUrl, setSetupUrl] = useState<string | null>(null)
   const {
@@ -203,12 +206,16 @@ export function MembersPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold">成员管理</h1>
-          <p className="text-sm text-muted-foreground">工作区成员(人类账号),管理员专属</p>
+          <p className="text-sm text-muted-foreground">
+            工作区成员(人类账号){isAdmin ? ', 管理员可管理成员' : ', 仅可查看'}
+          </p>
         </div>
-        <Button onClick={() => setAddOpen(true)}>
-          <Plus className="mr-2 h-4 w-4" />
-          添加成员
-        </Button>
+        {isAdmin && (
+          <Button onClick={() => setAddOpen(true)}>
+            <Plus className="mr-2 h-4 w-4" />
+            添加成员
+          </Button>
+        )}
       </div>
 
       {isLoading && <p className="text-sm text-muted-foreground">加载中…</p>}
@@ -246,35 +253,37 @@ export function MembersPage() {
                   <CardContent className="space-y-4">
                     <div className="space-y-1.5">
                       <p className="text-xs font-medium text-muted-foreground">角色</p>
-                      <RoleSelect member={m} />
+                      {isAdmin ? <RoleSelect member={m} /> : <p className="text-sm">{m.role === 'admin' ? '管理员' : '成员'}</p>}
                     </div>
-                    <div className="flex items-center gap-2 border-t pt-3">
-                      {!m.has_password && !isLocked ? (
+                    {isAdmin && (
+                      <div className="flex items-center gap-2 border-t pt-3">
+                        {!m.has_password && !isLocked ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="min-w-0 flex-1"
+                            onClick={() => void regenerateSetupLink(m.id)}
+                            title="重新生成设密链接"
+                          >
+                            <KeyRound className="h-4 w-4" />
+                            设密链接
+                            <span className="sr-only">重新生成 {m.username} 的设密链接</span>
+                          </Button>
+                        ) : (
+                          <div className="flex-1" aria-hidden="true" />
+                        )}
                         <Button
-                          variant="outline"
-                          size="sm"
-                          className="min-w-0 flex-1"
-                          onClick={() => void regenerateSetupLink(m.id)}
-                          title="重新生成设密链接"
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() => void remove(m.id, m.username)}
+                          disabled={isLocked}
+                          title={isLocked ? lockedMessage : `移除 ${m.username}`}
+                          aria-label={`移除 ${m.username}`}
                         >
-                          <KeyRound className="h-4 w-4" />
-                          设密链接
-                          <span className="sr-only">重新生成 {m.username} 的设密链接</span>
+                          <Trash2 className="h-4 w-4" />
                         </Button>
-                      ) : (
-                        <div className="flex-1" aria-hidden="true" />
-                      )}
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        onClick={() => void remove(m.id, m.username)}
-                        disabled={isLocked}
-                        title={isLocked ? lockedMessage : `移除 ${m.username}`}
-                        aria-label={`移除 ${m.username}`}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               )
@@ -283,8 +292,12 @@ export function MembersPage() {
         </section>
       )}
 
-      <AddMemberDialog open={addOpen} onOpenChange={setAddOpen} onCreated={setSetupUrl} />
-      <PasswordSetupLinkDialog setupUrl={setupUrl} onOpenChange={(open) => { if (!open) setSetupUrl(null) }} />
+      {isAdmin && (
+        <>
+          <AddMemberDialog open={addOpen} onOpenChange={setAddOpen} onCreated={setSetupUrl} />
+          <PasswordSetupLinkDialog setupUrl={setupUrl} onOpenChange={(open) => { if (!open) setSetupUrl(null) }} />
+        </>
+      )}
     </div>
   )
 }

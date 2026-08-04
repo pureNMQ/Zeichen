@@ -69,14 +69,14 @@ describe('项目详情页(成员授权)', () => {
     qc.clear()
   })
 
-  it('owner 看到成员列表:角色、类型徽标、操作按钮', async () => {
+  it('owner 看到成员列表:Agent 标识、角色与操作按钮', async () => {
     renderLayout()
     expect(await screen.findByRole('row', { name: /admin/ })).toBeInTheDocument()
     for (const name of ['bob', 'agent-a']) {
       expect(screen.getByRole('row', { name: new RegExp(name) })).toBeInTheDocument()
     }
-    expect(screen.getAllByText('Agent').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('成员').length).toBeGreaterThan(0)
+    expect(within(screen.getByRole('row', { name: /agent-aAgent/ })).getByTitle('Agent')).toBeInTheDocument()
+    expect(screen.queryByRole('columnheader', { name: '类型' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /添加成员/ })).toBeInTheDocument()
   })
 
@@ -148,10 +148,14 @@ describe('项目详情页(成员授权)', () => {
     expect(api.patch).toHaveBeenCalledWith('/projects/p1', { name: '改版项目' })
   })
 
-  it('非 owner 不显示成员管理,给出提示', async () => {
+  it('非 owner 可以只读查看项目成员，隐藏管理控件', async () => {
     renderLayout('viewer')
-    expect(await screen.findByText(/成员授权由项目 owner 管理/)).toBeInTheDocument()
-    expect(screen.queryByText('成员授权')).not.toBeInTheDocument()
-    expect(api.get).not.toHaveBeenCalledWith('/projects/p1/members')
+    expect(await screen.findByRole('row', { name: /admin/ })).toBeInTheDocument()
+    expect(screen.getByRole('row', { name: /bob/ })).toBeInTheDocument()
+    expect(screen.getByText('项目成员')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /添加成员/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /移除 bob/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '转让 Owner' })).not.toBeInTheDocument()
+    expect(api.get).toHaveBeenCalledWith('/projects/p1/members')
   })
 })

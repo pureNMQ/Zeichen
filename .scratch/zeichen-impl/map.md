@@ -23,6 +23,12 @@
 - [03 需求/任务闭环](issues/03-requirements-tasks-slice.md) — 五态状态机(提交/验收双义 complete)+ 自动流转 + 所有权规则 + 认领原子化;错误四件套统一(API/MCP 同源);29 个 MCP 工具 + TokenVerifier(Bearer key)+ cursor 分页;Web 需求列表/详情 + 任务看板(dnd-kit 拖拽)/详情;E2E 打通"agent 认领→完成→需求进验收中"(73 后端 + 10 前端测试)
 - [11 表单 autocomplete 规范](issues/11-autocomplete-standard.md) — 根 AGENTS.md 固化显式 autoComplete 规则；Input/Textarea 编译期强制声明，业务字段与密码语义已全站补齐并经前端回归验证。
 - [12 成员角色锁定与 Owner 转让](issues/12-member-role-lock.md) — 首用户与本人角色/移除锁定；项目 Owner 仅可经当前密码确认转让，原 Owner 自动降为 editor；共享下拉框默认向下展开。
+- [08 侧边栏导航与当前项目](issues/08-sidebar-navigation.md) — 团队/工作区两区导航、全局当前项目切换器、项目详情成员授权与改名闭环。
+- [09 自由状态交互](issues/09-state-interactions.md) — 需求四态、任务五态均可自由转换；API/MCP 与看板交互、文档同步完成。
+- [10 状态下拉与需求任务关联](issues/10-status-dropdown.md) — 卡片和详情状态下拉、需求与任务双向关联入口及回归测试完成。
+- [13 管理页卡片布局](issues/13-management-card-layout.md) — 成员和 Agent 管理页转为响应式卡片，管理能力集中且沿用权限锁定。
+- [14 Agent Key 管理交互](issues/14-agent-key-management.md) — Key 默认展开、图标操作、即时隐藏吊销项及明文复制闭环。
+- [16 普通成员只读查看成员](issues/16-member-read-access.md) — 已认证工作区成员可查看团队成员；有项目访问权的成员可查看项目成员与角色，所有管理接口及控件仍按 admin/Owner 严格限制。
 
 ## Not yet specified
 

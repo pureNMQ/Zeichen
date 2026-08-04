@@ -1,4 +1,4 @@
-"""工作区成员管理:仅 admin;添加/改角色/移除 + 最后管理员守卫。"""
+"""工作区成员:全员可读;添加/改角色/移除仅 admin。"""
 
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlparse
@@ -13,7 +13,7 @@ def _admin_client(client):
     return client
 
 
-def test_list_members_admin_only(client, world):
+def test_list_members_requires_an_authenticated_session(client, world):
     resp = client.get("/api/members")
     assert resp.status_code == 401
 
@@ -32,6 +32,15 @@ def test_list_members_admin_only(client, world):
     assert admin["has_password"] is True
     bob = next(row for row in rows if row["username"] == "bob")
     assert bob["has_password"] is False
+
+    client.post("/api/auth/logout")
+    login(client, "bob", "whatever-1")
+    client.post("/api/auth/set-password", json={"password": "bob-pass-1"})
+    resp = client.get("/api/members")
+    assert resp.status_code == 200
+    rows = {row["username"]: row for row in resp.json()}
+    assert rows["bob"]["is_self"] is True
+    assert rows["admin"]["is_self"] is False
 
 
 def _setup_token_from_url(url: str) -> str:
@@ -205,7 +214,7 @@ def test_self_removal_is_blocked(client, db, world):
 def test_member_cannot_manage(client, db, world):
     login(client, "bob", "whatever-1")
     client.post("/api/auth/set-password", json={"password": "bob-pass-1"})
-    assert client.get("/api/members").status_code == 403
+    assert client.get("/api/members").status_code == 200
     assert (
         client.post("/api/members", json={"username": "x", "role": "member"}).status_code
         == 403
