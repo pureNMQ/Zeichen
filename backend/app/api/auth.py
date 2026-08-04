@@ -1,13 +1,13 @@
 """认证 API:首用户引导 / 登录 / 设密码 / 改密码 / 退出 / me。"""
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..db import get_db
 from ..models import User
-from ..schemas import ChangePassword, SetPassword, UsernamePassword
+from ..schemas import ChangePassword, SetPassword, SetPasswordWithToken, UsernamePassword
 from ..security import PENDING_PASSWORD, SESSION, create_token
 from ..services import auth as auth_service
 from ..services.permissions import get_workspace_member
@@ -78,6 +78,23 @@ def set_password(
     auth_service.set_password(db, user.id, body.password)
     _set_cookie(response, str(user.id), SESSION)
     return {"needs_password": False, "user": _user_payload(user, db)}
+
+
+@router.post("/set-password-with-token")
+def set_password_with_token(
+    body: SetPasswordWithToken, response: Response, db: Session = Depends(get_db)
+) -> dict:
+    user = auth_service.set_password_with_token(db, body.token, body.password)
+    _set_cookie(response, str(user.id), SESSION)
+    return {"needs_password": False, "user": _user_payload(user, db)}
+
+
+@router.get("/password-setup")
+def password_setup_info(
+    token: str = Query(min_length=32, max_length=256), db: Session = Depends(get_db)
+) -> dict:
+    user = auth_service.get_password_setup_user(db, token)
+    return {"username": user.username}
 
 
 @router.post("/change-password")

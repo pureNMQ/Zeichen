@@ -7,7 +7,13 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..models import Project, User
-from ..schemas import ProjectCreate, ProjectMemberAdd, ProjectMemberUpdate, ProjectUpdate
+from ..schemas import (
+    ProjectCreate,
+    ProjectMemberAdd,
+    ProjectMemberUpdate,
+    ProjectOwnerTransfer,
+    ProjectUpdate,
+)
 from ..services import projects as projects_service
 from .deps import current_user
 
@@ -70,6 +76,7 @@ def list_project_members(
             "username": u.username,
             "is_agent": u.is_agent,
             "role": role,
+            "is_current_user": u.id == user.id,
         }
         for u, role in projects_service.list_project_members(db, user, project_id)
     ]
@@ -106,6 +113,19 @@ def remove_project_member(
     db: Session = Depends(get_db),
 ) -> dict:
     projects_service.remove_project_member(db, user, project_id, user_id)
+    return {"ok": True}
+
+
+@router.post("/{project_id}/owner-transfer")
+def transfer_project_owner(
+    project_id: uuid.UUID,
+    body: ProjectOwnerTransfer,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    projects_service.transfer_project_owner(
+        db, user, project_id, body.user_id, body.password
+    )
     return {"ok": True}
 
 

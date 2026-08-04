@@ -1,5 +1,5 @@
 from .base import Base
-from .user import ApiKey, User
+from .user import ApiKey, PasswordSetupToken, User
 from .team_project import Project, ProjectMember, Team, WorkspaceMember
 from .requirement import Requirement, Task
 from .document import Document, DocumentVersion
@@ -10,6 +10,7 @@ __all__ = [
     "Base",
     "User",
     "ApiKey",
+    "PasswordSetupToken",
     "Team",
     "WorkspaceMember",
     "Project",

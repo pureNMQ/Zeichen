@@ -8,6 +8,7 @@ import { CommentStream } from '@/components/comment-stream'
 import { StatusBadge } from '@/components/status-badge'
 import { StatusSelect } from '@/components/status-select'
 import { Button } from '@/components/ui/button'
+import { ErrorNotification } from '@/components/ui/notification'
 import { Card, CardContent } from '@/components/ui/card'
 import {
   Select,
@@ -96,7 +97,7 @@ export function TaskDetailPage() {
       </Guide>
     )
   }
-  if (loadError || !task) return <p className="text-sm text-destructive">{(loadError as Error)?.message ?? '任务不存在'}</p>
+  if (loadError || !task) return <ErrorNotification message={(loadError as Error)?.message ?? '任务不存在'} />
   if (task.project_id !== currentProject.id) {
     return (
       <Guide>
@@ -165,7 +166,7 @@ export function TaskDetailPage() {
           )}
         </div>
       </div>
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      <ErrorNotification message={error} />
 
       <Card>
         <CardContent className="space-y-6 p-4">

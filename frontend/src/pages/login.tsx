@@ -5,6 +5,7 @@ import { useAuth } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { ErrorNotification } from '@/components/ui/notification'
 
 export function LoginPage() {
   const { login } = useAuth()
@@ -63,7 +64,7 @@ export function LoginPage() {
               required
             />
           </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          <ErrorNotification message={error} />
           <Button type="submit" className="w-full" disabled={submitting}>
             {submitting ? '登录中…' : '登录'}
           </Button>

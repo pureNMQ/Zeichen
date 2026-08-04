@@ -1,6 +1,6 @@
 # 14 Agent API Key 管理交互:默认展开 + 图标操作 + 吊销即消失 + 签发可见明文
 
-Status: open
+Status: claimed
 Type: task
 Blocked by: 03
 

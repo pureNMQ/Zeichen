@@ -6,6 +6,7 @@ import { FolderOpen, List, LayoutGrid, Plus, Trash2, UserPlus } from 'lucide-rea
 import { Kanban } from '@/components/kanban'
 import { StatusSelect } from '@/components/status-select'
 import { CreateTaskDialog } from '@/components/create-task-dialog'
+import { ErrorNotification } from '@/components/ui/notification'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -167,13 +168,12 @@ export function TasksPage() {
   if (!currentProject) return <NoProjectGuide />
 
   return (
-    <div className="space-y-4">
+    <div className="flex min-h-[calc(100dvh-3rem)] flex-col gap-4">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold">任务</h1>
           <p className="text-sm text-muted-foreground">
             当前项目:{currentProject.name}
-            <span className="ml-1 text-xs">({role ?? '—'})</span>
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -197,13 +197,14 @@ export function TasksPage() {
       </div>
 
       {isLoading && <p className="text-sm text-muted-foreground">加载中…</p>}
-      {error && <p className="text-sm text-destructive">{(error as Error).message}</p>}
-      {!isLoading && tasks.length === 0 && (
+      <ErrorNotification message={error ? (error as Error).message : null} />
+      {!isLoading && view === 'list' && tasks.length === 0 && (
         <p className="py-10 text-center text-sm text-muted-foreground">暂无任务</p>
       )}
 
       {view === 'board' ? (
         <Kanban
+          className="flex-1"
           items={tasks}
           canDrag={canEdit}
           onMove={(id, to) => void doMove(id, to)}

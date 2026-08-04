@@ -5,6 +5,7 @@ import { Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { api, ApiError, type CommentRow } from '@/lib/api'
+import { ErrorNotification } from '@/components/ui/notification'
 
 export function CommentStream({ targetType, targetId, canEdit }: { targetType: string; targetId: string; canEdit: boolean }) {
   const qc = useQueryClient()
@@ -61,8 +62,8 @@ export function CommentStream({ targetType, targetId, canEdit }: { targetType: s
       </div>
       {canEdit && (
         <form onSubmit={onSubmit} className="space-y-2">
-          <Textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="写评论…" />
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          <Textarea value={body} onChange={(e) => setBody(e.target.value)} autoComplete="off" placeholder="写评论…" />
+          <ErrorNotification message={error} />
           <Button type="submit" size="sm" disabled={!body.trim()}>
             发表评论
           </Button>

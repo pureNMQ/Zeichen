@@ -35,9 +35,9 @@ const project = {
 }
 
 const members: ProjectMemberRow[] = [
-  { id: 'u1', username: 'admin', is_agent: false, role: 'owner' },
-  { id: 'u2', username: 'bob', is_agent: false, role: 'viewer' },
-  { id: 'u3', username: 'agent-a', is_agent: true, role: 'editor' },
+  { id: 'u1', username: 'admin', is_agent: false, role: 'owner', is_current_user: true },
+  { id: 'u2', username: 'bob', is_agent: false, role: 'viewer', is_current_user: false },
+  { id: 'u3', username: 'agent-a', is_agent: true, role: 'editor', is_current_user: false },
 ]
 
 const candidates: ProjectMemberRow[] = [
@@ -88,6 +88,24 @@ describe('项目详情页(成员授权)', () => {
     await user.click(within(row).getByRole('combobox'))
     await user.click(await screen.findByRole('option', { name: 'editor' }))
     expect(api.patch).toHaveBeenCalledWith('/projects/p1/members/u2', { role: 'editor' })
+  })
+
+  it('owner 角色显示禁用下拉框与转让入口，并要求当前密码', async () => {
+    const user = (await import('@testing-library/user-event')).default
+    vi.mocked(api.post).mockResolvedValue({ ok: true })
+    renderLayout()
+    const ownerRow = await screen.findByRole('row', { name: /admin/ })
+    expect(within(ownerRow).getByRole('combobox')).toBeDisabled()
+    await user.click(within(ownerRow).getByRole('button', { name: '转让 Owner' }))
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByRole('combobox'))
+    await user.click(await screen.findByRole('option', { name: 'bob' }))
+    await user.type(within(dialog).getByLabelText('当前密码'), 'admin-pass-1')
+    await user.click(within(dialog).getByRole('button', { name: '确认转让 Owner' }))
+    expect(api.post).toHaveBeenCalledWith('/projects/p1/owner-transfer', {
+      user_id: 'u2',
+      password: 'admin-pass-1',
+    })
   })
 
   it('移除成员调用 DELETE 接口(经 confirm)', async () => {

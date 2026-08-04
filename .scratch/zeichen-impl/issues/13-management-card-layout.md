@@ -1,6 +1,6 @@
 # 13 成员管理 / Agent 管理改为卡片式布局
 
-Status: open
+Status: claimed
 Type: task
 Blocked by: 12
 

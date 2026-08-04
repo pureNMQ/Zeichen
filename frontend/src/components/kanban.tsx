@@ -94,9 +94,10 @@ interface KanbanProps<T extends KanbanItem> {
   renderCard: (item: T) => ReactNode
   onMove: (id: string, to: WorkflowStatus) => void
   columns?: WorkflowStatus[]
+  className?: string
 }
 
-export function Kanban<T extends KanbanItem>({ items, canDrag, renderCard, onMove, columns = DEFAULT_COLUMNS }: KanbanProps<T>) {
+export function Kanban<T extends KanbanItem>({ items, canDrag, renderCard, onMove, columns = DEFAULT_COLUMNS, className }: KanbanProps<T>) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
   const [activeId, setActiveId] = useState<string | null>(null)
   const [overrides, setOverrides] = useState<Record<string, WorkflowStatus>>({})
@@ -126,23 +127,25 @@ export function Kanban<T extends KanbanItem>({ items, canDrag, renderCard, onMov
   const activeItem = activeId ? items.find((i) => i.id === activeId) : null
 
   return (
-    <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-      <div className="flex gap-3 overflow-x-auto pb-2">
-        {columns.map((status) => (
-          <Column key={status} status={status} canDrop={canDrag} isActiveTarget={!!activeItem}>
-            {items
-              .filter((i) => getEffectiveStatus(i, overrides) === status)
-              .map((item) => (
-                <DraggableCard key={item.id} id={item.id} canDrag={canDrag}>
-                  {renderCard(item)}
-                </DraggableCard>
-              ))}
-          </Column>
-        ))}
-      </div>
-      <DragOverlay dropAnimation={{ duration: 120 }}>
-        {activeItem ? <div className="w-64">{renderCard(activeItem)}</div> : null}
-      </DragOverlay>
-    </DndContext>
+    <div className={cn('flex min-h-0 flex-col', className)}>
+      <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+        <div className="flex min-h-0 flex-1 items-start gap-3 overflow-x-auto pb-2">
+          {columns.map((status) => (
+            <Column key={status} status={status} canDrop={canDrag} isActiveTarget={!!activeItem}>
+              {items
+                .filter((i) => getEffectiveStatus(i, overrides) === status)
+                .map((item) => (
+                  <DraggableCard key={item.id} id={item.id} canDrag={canDrag}>
+                    {renderCard(item)}
+                  </DraggableCard>
+                ))}
+            </Column>
+          ))}
+        </div>
+        <DragOverlay dropAnimation={{ duration: 120 }}>
+          {activeItem ? <div className="w-64">{renderCard(activeItem)}</div> : null}
+        </DragOverlay>
+      </DndContext>
+    </div>
   )
 }

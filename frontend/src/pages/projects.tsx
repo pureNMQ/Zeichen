@@ -7,6 +7,7 @@ import { useAuth } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { ErrorNotification } from '@/components/ui/notification'
 import { Badge } from '@/components/ui/badge'
 import {
   Card,
@@ -60,6 +61,7 @@ function CreateProjectDialog({ open, onOpenChange }: { open: boolean; onOpenChan
               id="project-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
+              autoComplete="off"
               maxLength={128}
               required
             />
@@ -108,7 +110,7 @@ export function ProjectsPage() {
       </div>
 
       {isLoading && <p className="text-sm text-muted-foreground">加载中…</p>}
-      {error && <p className="text-sm text-destructive">{(error as Error).message}</p>}
+      <ErrorNotification message={error ? (error as Error).message : null} />
       {!isLoading && projects?.length === 0 && (
         <Card>
           <CardContent className="flex flex-col items-center gap-2 py-12 text-muted-foreground">

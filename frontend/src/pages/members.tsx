@@ -1,10 +1,11 @@
 import { useState, type FormEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus, Trash2, UserRound } from 'lucide-react'
-import { api, ApiError, type MemberRow, type Role } from '@/lib/api'
+import { Copy, KeyRound, Plus, Trash2, UserRound } from 'lucide-react'
+import { api, ApiError, type MemberCreateResponse, type MemberRow, type PasswordSetupLinkResponse, type Role } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { ErrorNotification } from '@/components/ui/notification'
 import {
   Card,
   CardContent,
@@ -27,16 +28,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 
-function AddMemberDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+function AddMemberDialog({ open, onOpenChange, onCreated }: { open: boolean; onOpenChange: (v: boolean) => void; onCreated: (setupUrl: string) => void }) {
   const qc = useQueryClient()
   const [username, setUsername] = useState('')
   const [role, setRole] = useState<Role>('member')
@@ -48,10 +41,11 @@ function AddMemberDialog({ open, onOpenChange }: { open: boolean; onOpenChange: 
     setError(null)
     setSubmitting(true)
     try {
-      await api.post('/members', { username: username.trim(), role })
+      const member = await api.post<MemberCreateResponse>('/members', { username: username.trim(), role })
       setUsername('')
       setRole('member')
       onOpenChange(false)
+      onCreated(member.password_setup_url)
       await qc.invalidateQueries({ queryKey: ['members'] })
     } catch (err) {
       setError(err instanceof ApiError ? err.message : '添加失败,请重试')
@@ -74,6 +68,7 @@ function AddMemberDialog({ open, onOpenChange }: { open: boolean; onOpenChange: 
               id="member-username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
+              autoComplete="off"
               maxLength={64}
               required
             />
@@ -102,9 +97,45 @@ function AddMemberDialog({ open, onOpenChange }: { open: boolean; onOpenChange: 
   )
 }
 
+function PasswordSetupLinkDialog({ setupUrl, onOpenChange }: { setupUrl: string | null; onOpenChange: (open: boolean) => void }) {
+  const [copied, setCopied] = useState(false)
+
+  async function copyLink() {
+    try {
+      await navigator.clipboard.writeText(setupUrl ?? '')
+      setCopied(true)
+    } catch {
+      setCopied(false)
+    }
+  }
+
+  return (
+    <Dialog open={setupUrl !== null} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>复制设密链接</DialogTitle>
+          <DialogDescription>请安全地发送给该成员。链接 24 小时内有效，只能使用一次；关闭后不会再次显示。</DialogDescription>
+        </DialogHeader>
+        <div className="flex gap-2">
+          <Input value={setupUrl ?? ''} readOnly autoComplete="off" aria-label="设密链接" />
+          <Button type="button" variant="outline" onClick={() => void copyLink()}>
+            <Copy className="mr-2 h-4 w-4" />
+            {copied ? '已复制' : '复制'}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function RoleSelect({ member }: { member: MemberRow }) {
   const qc = useQueryClient()
   const [error, setError] = useState<string | null>(null)
+  const lockedReason = member.is_self
+    ? '不能修改自己的角色'
+    : member.is_bootstrap
+      ? '首用户的角色已锁定'
+      : null
 
   async function changeRole(role: Role) {
     setError(null)
@@ -117,9 +148,9 @@ function RoleSelect({ member }: { member: MemberRow }) {
   }
 
   return (
-    <div className="flex items-center gap-2">
-      <Select value={member.role} onValueChange={changeRole} disabled={error !== null}>
-        <SelectTrigger className="w-28">
+    <div className="space-y-2">
+      <Select value={member.role} onValueChange={changeRole} disabled={error !== null || lockedReason !== null}>
+        <SelectTrigger className="w-full">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -127,13 +158,14 @@ function RoleSelect({ member }: { member: MemberRow }) {
           <SelectItem value="admin">管理员</SelectItem>
         </SelectContent>
       </Select>
-      {error && <span className="text-xs text-destructive">{error}</span>}
+      <ErrorNotification message={error} />
     </div>
   )
 }
 
 export function MembersPage() {
   const [addOpen, setAddOpen] = useState(false)
+  const [setupUrl, setSetupUrl] = useState<string | null>(null)
   const {
     data: members,
     isLoading,
@@ -156,6 +188,16 @@ export function MembersPage() {
     }
   }
 
+  async function regenerateSetupLink(id: string) {
+    setRemoveError(null)
+    try {
+      const response = await api.post<PasswordSetupLinkResponse>(`/members/${id}/password-setup-link`)
+      setSetupUrl(response.password_setup_url)
+    } catch (err) {
+      setRemoveError(err instanceof ApiError ? err.message : '重新生成设密链接失败')
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -170,8 +212,8 @@ export function MembersPage() {
       </div>
 
       {isLoading && <p className="text-sm text-muted-foreground">加载中…</p>}
-      {error && <p className="text-sm text-destructive">{(error as Error).message}</p>}
-      {removeError && <p className="text-sm text-destructive">{removeError}</p>}
+      <ErrorNotification message={error ? (error as Error).message : null} />
+      <ErrorNotification message={removeError} />
       {!isLoading && members?.length === 0 && (
         <Card>
           <CardContent className="flex flex-col items-center gap-2 py-12 text-muted-foreground">
@@ -182,50 +224,67 @@ export function MembersPage() {
       )}
 
       {members && members.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">成员列表</CardTitle>
-            <CardDescription>共 {members.length} 人</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>账号</TableHead>
-                  <TableHead>角色</TableHead>
-                  <TableHead>加入时间</TableHead>
-                  <TableHead className="text-right">操作</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {members.map((m) => (
-                  <TableRow key={m.id}>
-                    <TableCell className="font-medium">{m.username}</TableCell>
-                    <TableCell>
+        <section className="space-y-3" aria-labelledby="members-list-title">
+          <div>
+            <h2 id="members-list-title" className="text-base font-medium">成员列表</h2>
+            <p className="text-sm text-muted-foreground">共 {members.length} 人</p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {members.map((m) => {
+              const isLocked = m.is_self || m.is_bootstrap
+              const lockedMessage = m.is_self ? '不能操作自己的成员资格' : '首用户不能被操作'
+
+              return (
+                <Card key={m.id} data-testid="member-card" className="h-52 overflow-hidden">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <UserRound className="h-4 w-4 text-muted-foreground" />
+                      {m.username}
+                    </CardTitle>
+                    <CardDescription>加入于 {new Date(m.created_at).toLocaleDateString()}</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="space-y-1.5">
+                      <p className="text-xs font-medium text-muted-foreground">角色</p>
                       <RoleSelect member={m} />
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {new Date(m.created_at).toLocaleDateString()}
-                    </TableCell>
-                    <TableCell className="text-right">
+                    </div>
+                    <div className="flex items-center gap-2 border-t pt-3">
+                      {!m.has_password && !isLocked ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="min-w-0 flex-1"
+                          onClick={() => void regenerateSetupLink(m.id)}
+                          title="重新生成设密链接"
+                        >
+                          <KeyRound className="h-4 w-4" />
+                          设密链接
+                          <span className="sr-only">重新生成 {m.username} 的设密链接</span>
+                        </Button>
+                      ) : (
+                        <div className="flex-1" aria-hidden="true" />
+                      )}
                       <Button
                         variant="ghost"
-                        size="sm"
+                        size="icon-sm"
                         onClick={() => void remove(m.id, m.username)}
+                        disabled={isLocked}
+                        title={isLocked ? lockedMessage : `移除 ${m.username}`}
+                        aria-label={`移除 ${m.username}`}
                       >
                         <Trash2 className="h-4 w-4" />
-                        <span className="sr-only">移除 {m.username}</span>
                       </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+                    </div>
+                  </CardContent>
+                </Card>
+              )
+            })}
+          </div>
+        </section>
       )}
 
-      <AddMemberDialog open={addOpen} onOpenChange={setAddOpen} />
+      <AddMemberDialog open={addOpen} onOpenChange={setAddOpen} onCreated={setSetupUrl} />
+      <PasswordSetupLinkDialog setupUrl={setupUrl} onOpenChange={(open) => { if (!open) setSetupUrl(null) }} />
     </div>
   )
 }

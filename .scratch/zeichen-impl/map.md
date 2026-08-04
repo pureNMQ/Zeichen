@@ -21,6 +21,8 @@
 - [01 工程骨架+数据模型+迁移](issues/01-scaffold-data-model.md) — 15 表全建、迁移双路径(PG/SQLite)干净;五件套按语义落(工作区级实体无 project_id);cognee 1.4.1 镜像拉取成功,默认 auth=required
 - [02 认证权限闭环](issues/02-auth-permissions-slice.md) — JWT 会话 cookie + 首用户引导 + 成员首登设密码;API key 哈希+AES-GCM 存储、admin 密码验证回看;两级角色判权 admin 自动 owner;Web 登录/项目/成员/Agent 页全闭环(38 后端 + 5 前端测试)
 - [03 需求/任务闭环](issues/03-requirements-tasks-slice.md) — 五态状态机(提交/验收双义 complete)+ 自动流转 + 所有权规则 + 认领原子化;错误四件套统一(API/MCP 同源);29 个 MCP 工具 + TokenVerifier(Bearer key)+ cursor 分页;Web 需求列表/详情 + 任务看板(dnd-kit 拖拽)/详情;E2E 打通"agent 认领→完成→需求进验收中"(73 后端 + 10 前端测试)
+- [11 表单 autocomplete 规范](issues/11-autocomplete-standard.md) — 根 AGENTS.md 固化显式 autoComplete 规则；Input/Textarea 编译期强制声明，业务字段与密码语义已全站补齐并经前端回归验证。
+- [12 成员角色锁定与 Owner 转让](issues/12-member-role-lock.md) — 首用户与本人角色/移除锁定；项目 Owner 仅可经当前密码确认转让，原 Owner 自动降为 editor；共享下拉框默认向下展开。
 
 ## Not yet specified
 

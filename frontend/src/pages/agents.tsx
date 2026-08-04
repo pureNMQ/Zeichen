@@ -1,10 +1,11 @@
-import { useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bot, Copy, Eye, KeyRound, Plus, Trash2, X } from 'lucide-react'
 import { api, ApiError, type AgentKey, type AgentRow } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { ErrorNotification } from '@/components/ui/notification'
 import { Badge } from '@/components/ui/badge'
 import {
   Card,
@@ -21,14 +22,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 
 function CreateAgentDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const qc = useQueryClient()
@@ -66,6 +59,7 @@ function CreateAgentDialog({ open, onOpenChange }: { open: boolean; onOpenChange
               id="agent-username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
+              autoComplete="off"
               maxLength={64}
               required
             />
@@ -103,6 +97,11 @@ function RevealedToken({ token }: { token: string }) {
   )
 }
 
+type IssuedKey = {
+  id: string
+  token: string
+}
+
 function KeyDialog({
   agent,
   open,
@@ -114,159 +113,184 @@ function KeyDialog({
 }) {
   const qc = useQueryClient()
   const [note, setNote] = useState('')
-  const [keys, setKeys] = useState<AgentKey[] | null>(null)
-  const [showReveal, setShowReveal] = useState<string | null>(null)
-  const [adminPassword, setAdminPassword] = useState('')
-  const [revealed, setRevealed] = useState<string | null>(null)
+  const [keys, setKeys] = useState<AgentKey[]>([])
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [revealed, setRevealed] = useState<IssuedKey | null>(null)
+  const [revealFor, setRevealFor] = useState<AgentKey | null>(null)
+  const [adminPassword, setAdminPassword] = useState('')
+  const [revealError, setRevealError] = useState<string | null>(null)
 
-  async function loadKeys() {
-    setKeys(await api.get<AgentKey[]>(`/agents/${agent.id}/keys`))
-  }
+  const loadKeys = useCallback(async () => {
+    setLoading(true)
+    try {
+      const rows = await api.get<AgentKey[]>(`/agents/${agent.id}/keys`)
+      setKeys(rows.filter((key) => key.revoked_at === null))
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : '加载 Key 失败')
+    } finally {
+      setLoading(false)
+    }
+  }, [agent.id])
+
+  useEffect(() => {
+    if (open) void loadKeys()
+  }, [open, loadKeys])
 
   async function issueKey(e: FormEvent) {
     e.preventDefault()
     setError(null)
     try {
-      await api.post(`/agents/${agent.id}/keys`, { note: note.trim() || null })
+      const issued = await api.post<IssuedKey>(`/agents/${agent.id}/keys`, {
+        note: note.trim() || null,
+      })
       setNote('')
       await loadKeys()
+      setRevealed(issued)
       await qc.invalidateQueries({ queryKey: ['agents'] })
     } catch (err) {
       setError(err instanceof ApiError ? err.message : '签发失败')
     }
   }
 
-  async function doReveal(keyId: string) {
+  async function revoke(keyId: string) {
     setError(null)
-    setRevealed(null)
     try {
-      const res = await api.post<{ token: string }>(
-        `/agents/${agent.id}/keys/${keyId}/reveal`,
-        { password: adminPassword },
-      )
-      setRevealed(res.token)
-      setAdminPassword('')
+      await api.post(`/agents/${agent.id}/keys/${keyId}/revoke`)
+      setKeys((current) => current.filter((key) => key.id !== keyId))
+      setRevealed((current) => (current?.id === keyId ? null : current))
+      await qc.invalidateQueries({ queryKey: ['agents'] })
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : '回看失败')
+      setError(err instanceof ApiError ? err.message : '吊销失败')
     }
   }
 
-  async function revoke(keyId: string) {
-    setError(null)
-    await api.post(`/agents/${agent.id}/keys/${keyId}/revoke`)
-    await loadKeys()
-    await qc.invalidateQueries({ queryKey: ['agents'] })
+  async function revealKey(e: FormEvent) {
+    e.preventDefault()
+    if (!revealFor) return
+    setRevealError(null)
+    try {
+      const result = await api.post<{ token: string }>(
+        `/agents/${agent.id}/keys/${revealFor.id}/reveal`,
+        { password: adminPassword },
+      )
+      setRevealed({ id: revealFor.id, token: result.token })
+      setAdminPassword('')
+      setRevealFor(null)
+    } catch (err) {
+      setRevealError(err instanceof ApiError ? err.message : '回看失败')
+    }
+  }
+
+  function closeRevealDialog(opened: boolean) {
+    if (!opened) {
+      setRevealFor(null)
+      setAdminPassword('')
+      setRevealError(null)
+    }
   }
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(v) => {
-        onOpenChange(v)
-        if (!v) {
-          setKeys(null)
-          setShowReveal(null)
-          setRevealed(null)
-          setAdminPassword('')
-          setError(null)
-        }
-      }}
-    >
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>API Key 管理 · {agent.username}</DialogTitle>
-          <DialogDescription>
-            多 key 并存、独立吊销;回看明文需验证管理员密码
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-4">
-          <form onSubmit={issueKey} className="flex gap-2">
-            <Input
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder="备注(如:桌面客户端)"
-              maxLength={500}
-            />
-            <Button type="submit">
-              <Plus className="mr-1 h-4 w-4" />
-              签发
-            </Button>
-          </form>
-          {error && <p className="text-sm text-destructive">{error}</p>}
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>API Key 管理 · {agent.username}</DialogTitle>
+            <DialogDescription>打开即加载全部有效 Key；回看明文需验证管理员密码。</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <form onSubmit={issueKey} className="flex gap-2">
+              <Input
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                autoComplete="off"
+                placeholder="备注（如：桌面客户端）"
+                maxLength={500}
+              />
+              <Button type="submit">
+                <Plus className="mr-1 h-4 w-4" />
+                签发
+              </Button>
+            </form>
+            {error && <p className="text-sm text-destructive">{error}</p>}
 
-          {keys === null && (
-            <Button variant="outline" onClick={() => void loadKeys()}>
-              <KeyRound className="mr-2 h-4 w-4" />
-              查看已有 key
-            </Button>
-          )}
-
-          {keys !== null && keys.length === 0 && (
-            <p className="text-sm text-muted-foreground">暂无 key</p>
-          )}
-
-          {keys !== null && keys.length > 0 && (
-            <div className="space-y-2">
-              {keys.map((k) => (
-                <div key={k.id} className="rounded-md border p-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium">{k.note || '(无备注)'}</p>
-                      <p className="text-xs text-muted-foreground">
-                        签发于 {new Date(k.created_at).toLocaleString()}
-                      </p>
+            {loading && <p className="text-sm text-muted-foreground">正在加载 Key…</p>}
+            {!loading && keys.length === 0 && (
+              <p className="text-sm text-muted-foreground">暂无有效 Key</p>
+            )}
+            {!loading && keys.length > 0 && (
+              <div className="space-y-2" aria-label="有效 Key 列表">
+                {keys.map((key) => (
+                  <div key={key.id} className="rounded-md border p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">{key.note || '（无备注）'}</p>
+                        <p className="text-xs text-muted-foreground">
+                          签发于 {new Date(key.created_at).toLocaleString()}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 gap-1">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() => setRevealFor(key)}
+                          aria-label={`回看 ${key.note || 'API Key'}`}
+                          title="回看"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() => void revoke(key.id)}
+                          aria-label={`吊销 ${key.note || 'API Key'}`}
+                          title="吊销"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
-                    {k.revoked_at ? (
-                      <Badge variant="destructive">已吊销</Badge>
-                    ) : (
-                      <div className="flex gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            setShowReveal(showReveal === k.id ? null : k.id)
-                            setRevealed(null)
-                          }}
-                        >
-                          <Eye className="mr-1 h-3.5 w-3.5" />
-                          回看
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => void revoke(k.id)}
-                        >
-                          <X className="mr-1 h-3.5 w-3.5" />
-                          吊销
-                        </Button>
+                    {revealed?.id === key.id && (
+                      <div className="mt-3">
+                        <RevealedToken token={revealed.token} />
                       </div>
                     )}
                   </div>
-                  {showReveal === k.id && !k.revoked_at && (
-                    <div className="mt-3 space-y-2">
-                      {revealed ? (
-                        <RevealedToken token={revealed} />
-                      ) : (
-                        <div className="flex gap-2">
-                          <Input
-                            type="password"
-                            value={adminPassword}
-                            onChange={(e) => setAdminPassword(e.target.value)}
-                            placeholder="输入你的管理员密码以验证"
-                          />
-                          <Button onClick={() => void doReveal(k.id)}>验证并显示</Button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
+                ))}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={revealFor !== null} onOpenChange={closeRevealDialog}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>验证管理员密码</DialogTitle>
+            <DialogDescription>验证通过后将显示该 API Key 的明文。</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={revealKey} className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="key-reveal-password">当前密码</Label>
+              <Input
+                id="key-reveal-password"
+                type="password"
+                value={adminPassword}
+                onChange={(e) => setAdminPassword(e.target.value)}
+                autoComplete="current-password"
+                required
+              />
             </div>
-          )}
-        </div>
-      </DialogContent>
-    </Dialog>
+            {revealError && <p className="text-sm text-destructive">{revealError}</p>}
+            <DialogFooter>
+              <Button type="submit">验证并显示</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
 
@@ -309,8 +333,8 @@ export function AgentsPage() {
       </div>
 
       {isLoading && <p className="text-sm text-muted-foreground">加载中…</p>}
-      {error && <p className="text-sm text-destructive">{(error as Error).message}</p>}
-      {removeError && <p className="text-sm text-destructive">{removeError}</p>}
+      <ErrorNotification message={error ? (error as Error).message : null} />
+      <ErrorNotification message={removeError} />
       {!isLoading && agents?.length === 0 && (
         <Card>
           <CardContent className="flex flex-col items-center gap-2 py-12 text-muted-foreground">
@@ -321,59 +345,62 @@ export function AgentsPage() {
       )}
 
       {agents && agents.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Agent 列表</CardTitle>
-            <CardDescription>共 {agents.length} 个</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>账号</TableHead>
-                  <TableHead>项目授权</TableHead>
-                  <TableHead>Key</TableHead>
-                  <TableHead className="text-right">操作</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {agents.map((a) => (
-                  <TableRow key={a.id}>
-                    <TableCell className="font-medium">{a.username}</TableCell>
-                    <TableCell>
-                      {a.grants.length === 0 ? (
-                        <span className="text-xs text-muted-foreground">无</span>
-                      ) : (
-                        <div className="flex flex-wrap gap-1">
-                          {a.grants.map((g) => (
-                            <Badge key={g.project_id} variant="outline">
-                              {g.name} · {g.role}
-                            </Badge>
-                          ))}
-                        </div>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={a.active_keys > 0 ? 'default' : 'secondary'}>
-                        {a.active_keys}/{a.key_count} 有效
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button variant="ghost" size="sm" onClick={() => setKeysFor(a)}>
-                        <KeyRound className="mr-1 h-4 w-4" />
-                        Key
-                      </Button>
-                      <Button variant="ghost" size="sm" onClick={() => void remove(a)}>
-                        <Trash2 className="h-4 w-4" />
-                        <span className="sr-only">删除 {a.username}</span>
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+        <section className="space-y-3" aria-labelledby="agents-list-title">
+          <div>
+            <h2 id="agents-list-title" className="text-base font-medium">Agent 列表</h2>
+            <p className="text-sm text-muted-foreground">共 {agents.length} 个</p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {agents.map((a) => (
+              <Card key={a.id} data-testid="agent-card" className="h-64 overflow-hidden">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Bot className="h-4 w-4 text-muted-foreground" />
+                    {a.username}
+                  </CardTitle>
+                  <CardDescription>创建于 {new Date(a.created_at).toLocaleDateString()}</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-1.5">
+                    <p className="text-xs font-medium text-muted-foreground">项目授权</p>
+                    {a.grants.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">暂无项目授权</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-1">
+                        {a.grants.map((g) => (
+                          <Badge key={g.project_id} variant="outline">
+                            {g.name} · {g.role}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="space-y-1.5">
+                    <p className="text-xs font-medium text-muted-foreground">API Key</p>
+                    <Badge variant={a.active_keys > 0 ? 'default' : 'secondary'}>
+                      {a.active_keys}/{a.key_count} 有效
+                    </Badge>
+                  </div>
+                  <div className="flex items-center gap-2 border-t pt-3">
+                    <Button variant="outline" size="sm" className="flex-1" onClick={() => setKeysFor(a)}>
+                      <KeyRound className="h-4 w-4" />
+                      管理 Key
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={() => void remove(a)}
+                      aria-label={`删除 ${a.username}`}
+                      title={`删除 ${a.username}`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </section>
       )}
 
       <CreateAgentDialog open={createOpen} onOpenChange={setCreateOpen} />

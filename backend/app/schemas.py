@@ -17,6 +17,10 @@ class SetPassword(BaseModel):
     password: str = PasswordField
 
 
+class SetPasswordWithToken(SetPassword):
+    token: str = Field(min_length=32, max_length=256)
+
+
 class ChangePassword(BaseModel):
     old_password: str = Field(min_length=1, max_length=128)
     new_password: str = PasswordField
@@ -56,11 +60,16 @@ class KeyReveal(BaseModel):
 
 class ProjectMemberAdd(BaseModel):
     user_id: uuid.UUID
-    role: Literal["owner", "editor", "viewer"]
+    role: Literal["editor", "viewer"]
 
 
 class ProjectMemberUpdate(BaseModel):
-    role: Literal["owner", "editor", "viewer"]
+    role: Literal["editor", "viewer"]
+
+
+class ProjectOwnerTransfer(BaseModel):
+    user_id: uuid.UUID
+    password: str = Field(min_length=1, max_length=128)
 
 
 class ProjectCreate(BaseModel):

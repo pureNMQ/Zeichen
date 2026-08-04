@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     # 默认指向 docker compose 的 postgres;本地无容器时可用 sqlite 覆盖(仅开发/测试)
     database_url: str = "postgresql+psycopg://zeichen:zeichen@localhost:5432/zeichen"
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
+    # Public Web origin. Password-setup links must target the SPA, never the
+    # API process listening behind the development proxy.
+    web_base_url: str = "http://localhost:5173"
 
     # 会话 JWT 密钥与 cookie 名(生产必须经 env 覆盖)
     session_secret: str = "dev-only-session-secret-change-me-0123456789abcdef"

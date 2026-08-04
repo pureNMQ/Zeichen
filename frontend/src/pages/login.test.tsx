@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { AuthProvider } from '@/lib/auth'
 import { LoginPage } from '@/pages/login'
+import { NotificationProvider } from '@/components/ui/notification'
 
 vi.mock('@/lib/api', () => {
   class ApiError extends Error {
@@ -30,11 +31,13 @@ function renderLogin() {
   return render(
     <MemoryRouter initialEntries={['/login']}>
       <AuthProvider>
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/projects" element={<div>项目页</div>} />
-          <Route path="/set-password" element={<div>设置密码页</div>} />
-        </Routes>
+        <NotificationProvider>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/projects" element={<div>项目页</div>} />
+            <Route path="/set-password" element={<div>设置密码页</div>} />
+          </Routes>
+        </NotificationProvider>
       </AuthProvider>
     </MemoryRouter>,
   )

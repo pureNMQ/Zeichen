@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { ErrorNotification } from '@/components/ui/notification'
 import { Textarea } from '@/components/ui/textarea'
 import { api, ApiError, REQUIREMENT_STATUSES, type RequirementRow, type RequirementStatus } from '@/lib/api'
 import { useCurrentProject, useProjectRole } from '@/lib/current-project'
@@ -144,13 +145,12 @@ export function RequirementsPage() {
   if (!currentProject) return <NoProjectGuide />
 
   return (
-    <div className="space-y-4">
+    <div className="flex min-h-[calc(100dvh-3rem)] flex-col gap-4">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold">需求</h1>
           <p className="text-sm text-muted-foreground">
             当前项目:{currentProject.name}
-            <span className="ml-1 text-xs">({role ?? '—'})</span>
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -185,13 +185,14 @@ export function RequirementsPage() {
       </div>
 
       {isLoading && <p className="text-sm text-muted-foreground">加载中…</p>}
-      {error && <p className="text-sm text-destructive">{(error as Error).message}</p>}
+      <ErrorNotification message={error ? (error as Error).message : null} />
       {!isLoading && items.length === 0 && (
         <p className="py-10 text-center text-sm text-muted-foreground">暂无需求</p>
       )}
 
       {view === 'board' ? (
         <Kanban
+          className="flex-1"
           items={items}
           canDrag={canEdit}
           onMove={(id, to) => void doMove(id, to as RequirementStatus)}
@@ -236,6 +237,7 @@ export function RequirementsPage() {
             type="number"
             value={confirmCount}
             onChange={(e) => setConfirmCount(e.target.value)}
+            autoComplete="off"
             placeholder={String(deleteTarget?.task_count ?? 0)}
           />
           <DialogFooter>
@@ -287,11 +289,11 @@ function CreateRequirementDialog({ open, onOpenChange }: { open: boolean; onOpen
         <form onSubmit={onSubmit} className="space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="req-title">标题</Label>
-            <Input id="req-title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={256} required />
+            <Input id="req-title" value={title} onChange={(e) => setTitle(e.target.value)} autoComplete="off" maxLength={256} required />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="req-desc">描述</Label>
-            <Textarea id="req-desc" value={description} onChange={(e) => setDescription(e.target.value)} />
+            <Textarea id="req-desc" value={description} onChange={(e) => setDescription(e.target.value)} autoComplete="off" />
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
           <DialogFooter>

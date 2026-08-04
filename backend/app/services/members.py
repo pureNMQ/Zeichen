@@ -5,16 +5,18 @@
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..errors import conflict, invalid_request, not_found, permission_denied
-from ..models import ProjectMember, User, WorkspaceMember
+from ..models import PasswordSetupToken, ProjectMember, User, WorkspaceMember
+from ..security import generate_password_setup_token, token_digest
 from .permissions import get_team
 
 WORKSPACE_ROLES = ("admin", "member")
+PASSWORD_SETUP_LINK_TTL = timedelta(hours=24)
 
 
 def list_members(db: Session) -> list[tuple[User, str]]:
@@ -32,21 +34,6 @@ def list_members(db: Session) -> list[tuple[User, str]]:
     return [(u, role) for u, role in rows]
 
 
-def admin_count(db: Session) -> int:
-    team = get_team(db)
-    return db.scalar(
-        select(func.count())
-        .select_from(WorkspaceMember)
-        .join(User, User.id == WorkspaceMember.user_id)
-        .where(
-            WorkspaceMember.team_id == team.id,
-            WorkspaceMember.role == "admin",
-            User.deleted_at.is_(None),
-            User.is_agent.is_(False),
-        )
-    )
-
-
 def _get_active_user(db: Session, user_id: uuid.UUID) -> User:
     user = db.get(User, user_id)
     if user is None or user.deleted_at is not None:
@@ -54,7 +41,25 @@ def _get_active_user(db: Session, user_id: uuid.UUID) -> User:
     return user
 
 
-def create_member(db: Session, actor: User, username: str, role: str) -> User:
+def _issue_password_setup_token(db: Session, user: User) -> str:
+    """Create or replace a 24-hour setup credential; only its digest is stored."""
+    raw_token = generate_password_setup_token()
+    expires_at = datetime.now(timezone.utc) + PASSWORD_SETUP_LINK_TTL
+    setup = db.scalar(select(PasswordSetupToken).where(PasswordSetupToken.user_id == user.id))
+    if setup is None:
+        db.add(
+            PasswordSetupToken(
+                user_id=user.id, token_hash=token_digest(raw_token), expires_at=expires_at
+            )
+        )
+    else:
+        setup.token_hash = token_digest(raw_token)
+        setup.expires_at = expires_at
+        setup.used_at = None
+    return raw_token
+
+
+def create_member(db: Session, actor: User, username: str, role: str) -> tuple[User, str]:
     if role not in WORKSPACE_ROLES:
         raise invalid_request("角色不合法")
     exists = db.scalar(select(User).where(User.username == username))
@@ -67,8 +72,20 @@ def create_member(db: Session, actor: User, username: str, role: str) -> User:
     db.add(
         WorkspaceMember(team_id=team.id, user_id=user.id, role=role, created_by=actor.id)
     )
+    raw_token = _issue_password_setup_token(db, user)
     db.commit()
-    return user
+    return user, raw_token
+
+
+def regenerate_password_setup_link(db: Session, user_id: uuid.UUID) -> str:
+    user = _get_active_user(db, user_id)
+    if user.is_agent:
+        raise invalid_request("Agent accounts do not support password login")
+    if user.password_hash:
+        raise conflict("成员已完成设密，不能重新生成设密链接")
+    raw_token = _issue_password_setup_token(db, user)
+    db.commit()
+    return raw_token
 
 
 def update_role(db: Session, actor: User, user_id: uuid.UUID, role: str) -> User:
@@ -85,8 +102,10 @@ def update_role(db: Session, actor: User, user_id: uuid.UUID, role: str) -> User
     )
     if membership is None:
         raise not_found("成员不存在")
-    if membership.role == "admin" and role != "admin" and admin_count(db) <= 1:
-        raise conflict("不能降级最后一名管理员")
+    if user.id == actor.id:
+        raise conflict("不能修改自己的角色")
+    if user.is_bootstrap:
+        raise conflict("首用户的角色已锁定")
     membership.role = role
     db.commit()
     return user
@@ -102,9 +121,12 @@ def remove_member(db: Session, actor: User, user_id: uuid.UUID) -> None:
     )
     if membership is None:
         raise not_found("成员不存在")
-    if membership.role == "admin" and admin_count(db) <= 1:
-        raise conflict("不能移除最后一名管理员")
+    if user.id == actor.id:
+        raise conflict("不能移除自己")
+    if user.is_bootstrap:
+        raise conflict("首用户不能被移除")
     db.delete(membership)
     db.query(ProjectMember).filter(ProjectMember.user_id == user_id).delete()
+    db.query(PasswordSetupToken).filter(PasswordSetupToken.user_id == user_id).delete()
     user.deleted_at = datetime.now(timezone.utc)
     db.commit()

@@ -81,3 +81,8 @@ def generate_api_token() -> str:
 
 def token_digest(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
+
+
+def generate_password_setup_token() -> str:
+    """Generate an opaque credential for a one-time password-setup link."""
+    return secrets.token_urlsafe(32)

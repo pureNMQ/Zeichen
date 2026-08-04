@@ -10,6 +10,7 @@ import { StatusBadge } from '@/components/status-badge'
 import { StatusSelect } from '@/components/status-select'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { ErrorNotification } from '@/components/ui/notification'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Dialog,
@@ -105,7 +106,7 @@ export function RequirementDetailPage() {
       </Guide>
     )
   }
-  if (error || !req) return <p className="text-sm text-destructive">{(error as Error)?.message ?? '需求不存在'}</p>
+  if (error || !req) return <ErrorNotification message={(error as Error)?.message ?? '需求不存在'} />
   if (req.project_id !== currentProject.id) {
     return (
       <Guide>
@@ -137,7 +138,7 @@ export function RequirementDetailPage() {
           />
         </div>
       </div>
-      {actionError && <p className="text-sm text-destructive">{actionError}</p>}
+      <ErrorNotification message={actionError} />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
@@ -226,7 +227,7 @@ export function RequirementDetailPage() {
                 </button>
               ))}
           </div>
-          {linkError && <p className="text-sm text-destructive">{linkError}</p>}
+          <ErrorNotification message={linkError} />
           <DialogFooter>
             <Button variant="outline" onClick={() => setLinkOpen(false)}>
               关闭

@@ -80,10 +80,10 @@ const tasks: TaskRow[] = [
   },
 ]
 
-function renderTasks(projectList: ProjectRow[] = projects) {
+function renderTasks(projectList: ProjectRow[] = projects, taskList: TaskRow[] = tasks) {
   vi.mocked(api.get).mockImplementation((path: string) => {
     if (path === '/projects') return Promise.resolve(projectList)
-    if (path.includes('/tasks')) return Promise.resolve({ items: tasks, next_cursor: null })
+    if (path.includes('/tasks')) return Promise.resolve({ items: taskList, next_cursor: null })
     return Promise.resolve({})
   })
   return render(
@@ -136,6 +136,15 @@ describe('任务看板(当前项目)', () => {
   it('无当前项目时展示空态引导', async () => {
     renderTasks([])
     expect(await screen.findByText('暂无当前项目,请在侧边栏选择项目')).toBeInTheDocument()
+  })
+
+  it('空任务只在列表模式显示提示', async () => {
+    renderTasks(projects, [])
+    await screen.findByText('待办')
+    expect(screen.queryByText('暂无任务')).not.toBeInTheDocument()
+    const user = (await import('@testing-library/user-event')).default
+    await user.click(screen.getByRole('button', { name: '列表' }))
+    expect(await screen.findByText('暂无任务')).toBeInTheDocument()
   })
 })
 

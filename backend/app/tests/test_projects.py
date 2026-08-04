@@ -196,41 +196,48 @@ def test_update_member_role_requires_owner(client, db, world):
     assert resp.status_code == 403
 
 
-def test_demote_last_owner_guard(client, db, world):
-    """无 admin 且只剩一个 owner 行时,最后一名 owner 不可降级。"""
-    from app.models import ProjectMember, WorkspaceMember
+def test_owner_cannot_be_changed_or_removed_by_ordinary_member_routes(client, db, world):
+    from app.models import ProjectMember
 
     project_id = str(world["project"].id)
-    db.query(WorkspaceMember).filter(WorkspaceMember.role == "admin").delete()
-    db.query(ProjectMember).filter(ProjectMember.user_id == world["member"].id).update(
-        {ProjectMember.role: "owner"}
-    )
+    db.add(ProjectMember(project_id=world["project"].id, user_id=world["admin"].id, role="owner"))
     db.commit()
-    login(client, "bob", "whatever-1")
-    client.post("/api/auth/set-password", json={"password": "bob-pass-1"})
-
-    # 有第二个 owner 时允许降级
-    assert (
-        client.patch(
-            f"/api/projects/{project_id}/members/{world['agent'].id}",
-            json={"role": "owner"},
-        ).status_code
-        == 200
-    )
-    assert (
-        client.patch(
-            f"/api/projects/{project_id}/members/{world['agent'].id}",
-            json={"role": "editor"},
-        ).status_code
-        == 200
-    )
-
-    # 唯一 owner 不可降级
-    resp = client.patch(
-        f"/api/projects/{project_id}/members/{world['member'].id}",
+    _admin_client(client)
+    assert client.patch(
+        f"/api/projects/{project_id}/members/{world['admin'].id}",
         json={"role": "editor"},
+    ).status_code == 409
+    assert client.delete(f"/api/projects/{project_id}/members/{world['admin'].id}").status_code == 409
+
+
+def test_transfer_owner_requires_current_password_and_existing_member(client, db, world):
+    from app.models import ProjectMember
+
+    project_id = str(world["project"].id)
+    db.add(ProjectMember(project_id=world["project"].id, user_id=world["admin"].id, role="owner"))
+    db.commit()
+    _admin_client(client)
+
+    assert client.post(
+        f"/api/projects/{project_id}/owner-transfer",
+        json={"user_id": str(world["member"].id), "password": "wrong-pass"},
+    ).status_code == 403
+    assert client.post(
+        f"/api/projects/{project_id}/owner-transfer",
+        json={"user_id": "00000000-0000-0000-0000-000000000000", "password": "admin-pass-1"},
+    ).status_code == 404
+
+    response = client.post(
+        f"/api/projects/{project_id}/owner-transfer",
+        json={"user_id": str(world["member"].id), "password": "admin-pass-1"},
     )
-    assert resp.status_code == 409
+    assert response.status_code == 200, response.text
+    roles = {
+        row["username"]: row["role"]
+        for row in client.get(f"/api/projects/{project_id}/members").json()
+    }
+    assert roles["admin"] == "editor"
+    assert roles["bob"] == "owner"
 
 
 def test_member_candidates(client, db, world):

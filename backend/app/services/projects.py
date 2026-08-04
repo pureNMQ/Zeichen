@@ -3,13 +3,13 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..errors import conflict, invalid_request, not_found, permission_denied
 from ..models import Project, ProjectMember, User, WorkspaceMember
-from .members import admin_count
 from .permissions import get_accessible_project, get_project_role, get_team, is_admin, require_workspace_admin
+from ..security import verify_password
 
 PROJECT_ROLES = ("owner", "editor", "viewer")
 
@@ -145,15 +145,8 @@ def update_project_member_role(
     )
     if pm is None:
         raise not_found("该用户不在项目中")
-    if pm.role == "owner" and role != "owner":
-        owners = db.scalar(
-            select(func.count()).select_from(ProjectMember).where(
-                ProjectMember.project_id == project.id, ProjectMember.role == "owner"
-            )
-        )
-        admin_exists = admin_count(db) > 0
-        if owners + (1 if admin_exists else 0) <= 1:
-            raise conflict("不能降级项目最后一名 owner")
+    if pm.role == "owner" or role == "owner":
+        raise conflict("owner 角色只能通过转让流程修改")
     pm.role = role
     db.commit()
 
@@ -168,15 +161,50 @@ def remove_project_member(db: Session, actor: User, project_id: uuid.UUID, user_
     if pm is None:
         raise not_found("该用户不在项目中")
     if pm.role == "owner":
-        owners = db.scalar(
-            select(func.count()).select_from(ProjectMember).where(
-                ProjectMember.project_id == project.id, ProjectMember.role == "owner"
-            )
-        )
-        admin_exists = admin_count(db) > 0
-        if owners + (1 if admin_exists else 0) <= 1:
-            raise conflict("不能移除项目最后一名 owner")
+        raise conflict("owner 只能通过转让后再移除")
     db.delete(pm)
+    db.commit()
+
+
+def transfer_project_owner(
+    db: Session,
+    actor: User,
+    project_id: uuid.UUID,
+    user_id: uuid.UUID,
+    password: str,
+) -> None:
+    """Transfer the single managed owner role after re-authenticating its holder.
+
+    Workspace admins retain their implicit project access, but only the user
+    holding an explicit project-owner membership may transfer that membership.
+    This keeps the operation tied to the owner being demoted.
+    """
+    project = get_accessible_project(db, actor.id, project_id, min_level="owner")
+    source = db.scalar(
+        select(ProjectMember).where(
+            ProjectMember.project_id == project.id,
+            ProjectMember.user_id == actor.id,
+            ProjectMember.role == "owner",
+        )
+    )
+    if source is None:
+        raise permission_denied("仅项目当前 owner 可以转让")
+    if user_id == actor.id:
+        raise invalid_request("转让目标必须是其他项目成员")
+    target = db.scalar(
+        select(ProjectMember).where(
+            ProjectMember.project_id == project.id,
+            ProjectMember.user_id == user_id,
+        )
+    )
+    if target is None:
+        raise not_found("转让目标不是项目成员")
+    if target.role == "owner":
+        raise conflict("转让目标已经是 owner")
+    if not actor.password_hash or not verify_password(password, actor.password_hash):
+        raise permission_denied("当前密码不正确")
+    source.role = "editor"
+    target.role = "owner"
     db.commit()
 
 

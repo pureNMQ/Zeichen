@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { ErrorNotification } from '@/components/ui/notification'
 import {
   Select,
   SelectContent,
@@ -74,7 +75,7 @@ function AddMemberDialog({ projectId, open, onOpenChange }: { projectId: string;
       <DialogContent>
         <DialogHeader>
           <DialogTitle>添加项目成员</DialogTitle>
-          <DialogDescription>可从工作区成员与 Agent 中选择,按项目授权 owner/editor/viewer</DialogDescription>
+          <DialogDescription>可从工作区成员与 Agent 中选择，按项目授权 editor/viewer。Owner 请通过转让流程指定。</DialogDescription>
         </DialogHeader>
         <form onSubmit={onSubmit} className="space-y-4">
           <div className="space-y-1.5">
@@ -104,7 +105,6 @@ function AddMemberDialog({ projectId, open, onOpenChange }: { projectId: string;
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="owner">owner</SelectItem>
                 <SelectItem value="editor">editor</SelectItem>
                 <SelectItem value="viewer">viewer</SelectItem>
               </SelectContent>
@@ -144,13 +144,115 @@ function MemberRoleSelect({ projectId, member }: { projectId: string; member: Pr
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="owner">owner</SelectItem>
           <SelectItem value="editor">editor</SelectItem>
           <SelectItem value="viewer">viewer</SelectItem>
         </SelectContent>
       </Select>
-      {error && <span className="text-xs text-destructive">{error}</span>}
+      <ErrorNotification message={error} />
     </div>
+  )
+}
+
+function TransferOwnerDialog({
+  projectId,
+  owner,
+  members,
+  open,
+  onOpenChange,
+}: {
+  projectId: string
+  owner: ProjectMemberRow
+  members: ProjectMemberRow[]
+  open: boolean
+  onOpenChange: (v: boolean) => void
+}) {
+  const qc = useQueryClient()
+  const [userId, setUserId] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const targets = members.filter((member) => member.id !== owner.id && member.role !== 'owner')
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault()
+    if (!userId || !password) return
+    setError(null)
+    setSubmitting(true)
+    try {
+      await api.post(`/projects/${projectId}/owner-transfer`, { user_id: userId, password })
+      setUserId('')
+      setPassword('')
+      onOpenChange(false)
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['project-members', projectId] }),
+        qc.invalidateQueries({ queryKey: ['project', projectId] }),
+        qc.invalidateQueries({ queryKey: ['projects'] }),
+      ])
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Owner 转让失败')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        onOpenChange(v)
+        if (!v) {
+          setError(null)
+          setPassword('')
+        }
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>转让 Owner</DialogTitle>
+          <DialogDescription>
+            转让后你将变为 editor。只能选择已加入项目的成员，并需要验证你的当前密码。
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={onSubmit} className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="owner-transfer-target">新 Owner</Label>
+            {targets.length === 0 ? (
+              <p className="text-sm text-muted-foreground">请先添加另一名项目成员。</p>
+            ) : (
+              <Select value={userId || undefined} onValueChange={setUserId}>
+                <SelectTrigger id="owner-transfer-target" className="w-full">
+                  <SelectValue placeholder="选择项目成员" />
+                </SelectTrigger>
+                <SelectContent>
+                  {targets.map((target) => (
+                    <SelectItem key={target.id} value={target.id}>
+                      {target.username}{target.is_agent && ' (Agent)'}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="owner-transfer-password">当前密码</Label>
+            <Input
+              id="owner-transfer-password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+              required
+            />
+          </div>
+          {error && <p className="text-sm text-destructive">{error}</p>}
+          <DialogFooter>
+            <Button type="submit" variant="destructive" disabled={submitting || !userId || !password}>
+              {submitting ? '转让中…' : '确认转让 Owner'}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -206,6 +308,7 @@ function RenameProjectDialog({
               id="project-name"
               value={value}
               onChange={(e) => setValue(e.target.value)}
+              autoComplete="off"
               maxLength={128}
               required
             />
@@ -227,6 +330,7 @@ export function ProjectLayout() {
   const qc = useQueryClient()
   const [addOpen, setAddOpen] = useState(false)
   const [renameOpen, setRenameOpen] = useState(false)
+  const [transferOwner, setTransferOwner] = useState<ProjectMemberRow | null>(null)
   const [removeError, setRemoveError] = useState<string | null>(null)
 
   const { data: project, isLoading } = useQuery({
@@ -255,7 +359,7 @@ export function ProjectLayout() {
   }
 
   if (isLoading) return <p className="text-sm text-muted-foreground">加载中…</p>
-  if (!project) return <p className="text-sm text-destructive">项目不存在或无访问权限</p>
+  if (!project) return <ErrorNotification message="项目不存在或无访问权限" />
 
   return (
     <div className="space-y-4">
@@ -275,11 +379,11 @@ export function ProjectLayout() {
         <Card>
           <CardHeader>
             <CardTitle className="text-base">成员授权</CardTitle>
-            <CardDescription>共 {members.length} 人 · 项目资源按成员角色授权(owner/editor/viewer)</CardDescription>
+            <CardDescription>共 {members.length} 人 · 项目资源按成员角色授权(owner/editor/viewer)，Owner 仅可转让</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {membersError && <p className="text-sm text-destructive">{(membersError as Error).message}</p>}
-            {removeError && <p className="text-sm text-destructive">{removeError}</p>}
+            <ErrorNotification message={membersError ? (membersError as Error).message : null} />
+            <ErrorNotification message={removeError} />
             {membersLoading ? (
               <p className="text-sm text-muted-foreground">加载中…</p>
             ) : members.length === 0 ? (
@@ -312,13 +416,27 @@ export function ProjectLayout() {
                         )}
                       </TableCell>
                       <TableCell>
-                        <MemberRoleSelect projectId={projectId} member={m} />
+                        {m.role === 'owner' ? (
+                          <Select value="owner" disabled>
+                            <SelectTrigger className="w-28">
+                              <SelectValue>owner</SelectValue>
+                            </SelectTrigger>
+                          </Select>
+                        ) : <MemberRoleSelect projectId={projectId} member={m} />}
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button variant="ghost" size="sm" onClick={() => void remove(m)}>
-                          <Trash2 className="h-4 w-4" />
-                          <span className="sr-only">移除 {m.username}</span>
-                        </Button>
+                        {m.role === 'owner' ? (
+                          m.is_current_user && (
+                            <Button variant="outline" size="sm" onClick={() => setTransferOwner(m)}>
+                              转让 Owner
+                            </Button>
+                          )
+                        ) : (
+                          <Button variant="ghost" size="sm" onClick={() => void remove(m)}>
+                            <Trash2 className="h-4 w-4" />
+                            <span className="sr-only">移除 {m.username}</span>
+                          </Button>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -346,6 +464,17 @@ export function ProjectLayout() {
         onOpenChange={setRenameOpen}
       />
       <AddMemberDialog projectId={projectId} open={addOpen} onOpenChange={setAddOpen} />
+      {transferOwner && (
+        <TransferOwnerDialog
+          projectId={projectId}
+          owner={transferOwner}
+          members={members}
+          open={true}
+          onOpenChange={(open) => {
+            if (!open) setTransferOwner(null)
+          }}
+        />
+      )}
     </div>
   )
 }

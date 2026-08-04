@@ -81,6 +81,8 @@ def world(db: Session) -> dict:
     db.add(Team(name="贼船"))
     db.commit()
     admin = make_user(db, "admin", role="admin", with_password="admin-pass-1")
+    admin.is_bootstrap = True
+    db.commit()
     member = make_user(db, "bob", role="member")
     agent = make_user(db, "agent-a", role=None, is_agent=True)
     project = Project(team_id=db.query(Team).first().id, name="demo")

@@ -2,7 +2,11 @@ import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
-function Input({ className, type, ...props }: React.ComponentProps<"input">) {
+type InputProps = Omit<React.ComponentProps<"input">, "autoComplete"> & {
+  autoComplete: string
+}
+
+function Input({ className, type, ...props }: InputProps) {
   return (
     <input
       type={type}

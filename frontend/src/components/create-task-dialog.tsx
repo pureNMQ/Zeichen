@@ -91,11 +91,11 @@ export function CreateTaskDialog({
         <form onSubmit={onSubmit} className="space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="task-title">标题</Label>
-            <Input id="task-title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={256} required />
+            <Input id="task-title" value={title} onChange={(e) => setTitle(e.target.value)} autoComplete="off" maxLength={256} required />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="task-desc">描述</Label>
-            <Input id="task-desc" value={description} onChange={(e) => setDescription(e.target.value)} />
+            <Input id="task-desc" value={description} onChange={(e) => setDescription(e.target.value)} autoComplete="off" />
           </div>
           <div className="space-y-1.5">
             <Label>关联需求</Label>

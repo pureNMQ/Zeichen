@@ -22,8 +22,34 @@ class User(IdMixin, TimestampMixin, SoftDeleteMixin, CreatedByMixin, Base):
     username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_agent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # The founding human account is permanently protected from workspace role
+    # changes and removal.  It is deliberately a user-level property so the
+    # protection survives membership lookups.
+    is_bootstrap: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     api_keys: Mapped[list["ApiKey"]] = relationship(back_populates="user")
+    password_setup_token: Mapped["PasswordSetupToken | None"] = relationship(
+        back_populates="user", cascade="all, delete-orphan", uselist=False
+    )
+
+
+class PasswordSetupToken(IdMixin, TimestampMixin, Base):
+    """A single, short-lived password-setup credential for a human user.
+
+    The raw credential is never persisted. Replacing the digest invalidates
+    every older link for that user.
+    """
+
+    __tablename__ = "password_setup_token"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("user.id", ondelete="CASCADE"), unique=True, nullable=False, index=True
+    )
+    token_hash: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    user: Mapped[User] = relationship(back_populates="password_setup_token")
 
 
 class ApiKey(IdMixin, TimestampMixin, Base):

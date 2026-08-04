@@ -28,6 +28,17 @@ export interface MemberRow {
   username: string
   role: Role
   created_at: string
+  is_bootstrap: boolean
+  is_self: boolean
+  has_password: boolean
+}
+
+export interface MemberCreateResponse extends MemberRow {
+  password_setup_url: string
+}
+
+export interface PasswordSetupLinkResponse {
+  password_setup_url: string
 }
 
 export interface ProjectRow {
@@ -42,6 +53,7 @@ export interface ProjectMemberRow {
   username: string
   is_agent: boolean
   role: ProjectRole
+  is_current_user?: boolean
 }
 
 export interface ProjectGrant {
