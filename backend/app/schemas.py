@@ -116,6 +116,43 @@ class TaskAssignBody(BaseModel):
     assignee_id: uuid.UUID
 
 
+class DocumentCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=256)
+    doc_type: Literal["wiki", "glossary", "api"]
+    content: str | None = None
+    metadata: dict = {}
+    parent_id: uuid.UUID | None = None
+    directory_id: uuid.UUID | None = None
+
+
+class DocumentUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=256)
+    content: str | None = None
+    metadata: dict | None = None
+
+
+class DocumentMove(BaseModel):
+    parent_id: uuid.UUID | None = None
+    directory_id: uuid.UUID | None = None
+
+
+class DirectoryCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    parent_id: uuid.UUID | None = None
+
+
+class DirectoryRename(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+
+
+class DirectoryMove(BaseModel):
+    parent_id: uuid.UUID | None = None
+
+
+class RollbackBody(BaseModel):
+    version_no: int = Field(ge=1)
+
+
 class CommentCreate(BaseModel):
     body: str = Field(min_length=1, max_length=5000)
 

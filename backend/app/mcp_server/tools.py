@@ -16,6 +16,7 @@ from ..db import SessionLocal
 from ..errors import AppError
 from ..models import ProjectMember, User
 from ..services import projects as project_svc
+from ..services import documents as document_svc
 from ..services import polymorphic as poly_svc
 from ..services import requirements as req_svc
 from ..services import tasks as task_svc
@@ -238,6 +239,278 @@ def _register_all(mcp) -> None:
         """恢复已软删任务。"""
         db, actor = dbc()
         return task_svc._task_dict(db, task_svc.restore_task(db, actor, uuid.UUID(id)))
+
+    # ---------- docs.wiki.* / docs.glossary.* / docs.api.* ----------
+    def _doc_create(project_id: str, title: str, module: str, content: str, metadata: dict | None, parent_id: str | None = None, directory_id: str | None = None) -> dict:
+        db, actor = dbc()
+        document = document_svc.create_document(
+            db, actor, uuid.UUID(project_id), title, module, content, metadata,
+            uuid.UUID(parent_id) if parent_id else None, uuid.UUID(directory_id) if directory_id else None,
+        )
+        return document_svc._document_dict(db, document)
+
+    def _doc_get(id: str, module: str) -> dict:
+        db, actor = dbc()
+        return document_svc._document_dict(db, document_svc.get_document(db, actor, uuid.UUID(id), module))
+
+    def _doc_children(project_id: str, module: str, parent_id: str | None, cursor: str | None, limit: int | None) -> dict:
+        db, actor = dbc()
+        cursor, limit = _paged({"project_id": project_id, "module": module, "parent_id": parent_id}, cursor, limit)
+        return document_svc.list_module_children(db, actor, uuid.UUID(project_id), module, uuid.UUID(parent_id) if parent_id else None, cursor, limit)
+
+    def _doc_update(id: str, module: str, title: str | None, content: str | None, metadata: dict | None = None) -> dict:
+        db, actor = dbc()
+        document = document_svc.get_document(db, actor, uuid.UUID(id), module)
+        saved, warning = document_svc.update_document(
+            db, actor, document.id, title, content, metadata if metadata is not None else document_svc._UNSET
+        )
+        return document_svc._document_dict(db, saved, warning)
+
+    def _doc_move(id: str, module: str, parent_id: str | None = None, directory_id: str | None = None) -> dict:
+        db, actor = dbc()
+        document = document_svc.get_document(db, actor, uuid.UUID(id), module)
+        moved = document_svc.move_document(
+            db, actor, document.id, uuid.UUID(parent_id) if parent_id else None, uuid.UUID(directory_id) if directory_id else None
+        )
+        return document_svc._document_dict(db, moved)
+
+    def _doc_delete(id: str, module: str) -> dict:
+        db, actor = dbc()
+        document = document_svc.get_document(db, actor, uuid.UUID(id), module)
+        impact = document_svc.delete_impact_document(db, actor, document.id)
+        document_svc.delete_document(db, actor, document.id)
+        return {"deleted": True, "id": id, "impact": impact}
+
+    def _doc_restore(id: str, module: str) -> dict:
+        db, actor = dbc()
+        document = document_svc._visible_document(db, actor, uuid.UUID(id), include_deleted=True)
+        if document.doc_type != module:
+            raise ToolError("not_found: 文档不存在")
+        return document_svc._document_dict(db, document_svc.restore_document(db, actor, document.id))
+
+    def _doc_path(project_id: str, module: str, node_kind: str, id: str) -> dict:
+        db, actor = dbc()
+        return document_svc.ancestor_path(db, actor, uuid.UUID(project_id), module, node_kind, uuid.UUID(id))
+
+    def _doc_deleted(project_id: str, module: str, cursor: str | None, limit: int | None) -> dict:
+        db, actor = dbc()
+        cursor, limit = _paged({"project_id": project_id, "module": module, "deleted": True}, cursor, limit)
+        return document_svc.list_deleted_nodes(db, actor, uuid.UUID(project_id), module, cursor, limit)
+
+    @mcp.tool(name="docs.wiki.create")
+    @sessioned
+    def docs_wiki_create(project_id: str, title: str, content: str = "", parent_id: str | None = None) -> dict:
+        """创建根 Wiki 或指定父 Wiki 下的子 Wiki。"""
+        return _doc_create(project_id, title, "wiki", content, {}, parent_id=parent_id)
+
+    @mcp.tool(name="docs.wiki.get")
+    @sessioned
+    def docs_wiki_get(id: str) -> dict:
+        return _doc_get(id, "wiki")
+
+    @mcp.tool(name="docs.wiki.children")
+    @sessioned
+    def docs_wiki_children(project_id: str, parent_id: str | None = None, cursor: str | None = None, limit: int | None = None) -> dict:
+        """按父 Wiki 懒加载直接子节点，返回 has_children。"""
+        return _doc_children(project_id, "wiki", parent_id, cursor, limit)
+
+    @mcp.tool(name="docs.wiki.list")
+    @sessioned
+    def docs_wiki_list(project_id: str, cursor: str | None = None, limit: int | None = None) -> dict:
+        """根 Wiki 列表（children 的根节点别名）。"""
+        return _doc_children(project_id, "wiki", None, cursor, limit)
+
+    @mcp.tool(name="docs.wiki.ancestors")
+    @sessioned
+    def docs_wiki_ancestors(project_id: str, id: str) -> dict:
+        return _doc_path(project_id, "wiki", "document", id)
+
+    @mcp.tool(name="docs.wiki.update")
+    @sessioned
+    def docs_wiki_update(id: str, title: str | None = None, content: str | None = None) -> dict:
+        return _doc_update(id, "wiki", title, content)
+
+    @mcp.tool(name="docs.wiki.move")
+    @sessioned
+    def docs_wiki_move(id: str, parent_id: str | None = None) -> dict:
+        return _doc_move(id, "wiki", parent_id=parent_id)
+
+    @mcp.tool(name="docs.wiki.versions")
+    @sessioned
+    def docs_wiki_versions(id: str) -> dict:
+        db, actor = dbc()
+        return {"items": document_svc.list_versions(db, actor, uuid.UUID(id), "wiki")}
+
+    @mcp.tool(name="docs.wiki.rollback")
+    @sessioned
+    def docs_wiki_rollback(id: str, version_no: int) -> dict:
+        db, actor = dbc()
+        return document_svc._document_dict(db, document_svc.rollback_document(db, actor, uuid.UUID(id), version_no, "wiki"))
+
+    @mcp.tool(name="docs.wiki.delete")
+    @sessioned
+    def docs_wiki_delete(id: str) -> dict:
+        return _doc_delete(id, "wiki")
+
+    @mcp.tool(name="docs.wiki.restore")
+    @sessioned
+    def docs_wiki_restore(id: str) -> dict:
+        return _doc_restore(id, "wiki")
+
+    def _register_directory_tools(mcp, module: str) -> None:
+        @mcp.tool(name=f"docs.{module}.directory_create")
+        @sessioned
+        def directory_create(project_id: str, name: str, parent_id: str | None = None) -> dict:
+            db, actor = dbc()
+            directory = document_svc.create_directory(db, actor, uuid.UUID(project_id), module, name, uuid.UUID(parent_id) if parent_id else None)
+            return document_svc._directory_dict(db, directory)
+
+        @mcp.tool(name=f"docs.{module}.directory_move")
+        @sessioned
+        def directory_move(id: str, parent_id: str | None = None) -> dict:
+            db, actor = dbc()
+            directory = document_svc.get_directory(db, actor, uuid.UUID(id), module)
+            moved = document_svc.move_directory(db, actor, directory.id, uuid.UUID(parent_id) if parent_id else None)
+            return document_svc._directory_dict(db, moved)
+
+        @mcp.tool(name=f"docs.{module}.directory_rename")
+        @sessioned
+        def directory_rename(id: str, name: str) -> dict:
+            db, actor = dbc()
+            directory = document_svc.get_directory(db, actor, uuid.UUID(id), module)
+            return document_svc._directory_dict(db, document_svc.rename_directory(db, actor, directory.id, name))
+
+        @mcp.tool(name=f"docs.{module}.directory_delete")
+        @sessioned
+        def directory_delete(id: str) -> dict:
+            db, actor = dbc()
+            directory = document_svc.get_directory(db, actor, uuid.UUID(id), module)
+            impact = document_svc.delete_impact_directory(db, actor, directory.id)
+            document_svc.delete_directory(db, actor, directory.id)
+            return {"deleted": True, "id": id, "impact": impact}
+
+        @mcp.tool(name=f"docs.{module}.directory_restore")
+        @sessioned
+        def directory_restore(id: str) -> dict:
+            db, actor = dbc()
+            directory = document_svc._get_directory_raw(db, uuid.UUID(id))
+            if directory.module_type != module:
+                raise ToolError("not_found: 目录不存在")
+            return document_svc._directory_dict(db, document_svc.restore_directory(db, actor, directory.id))
+
+    @mcp.tool(name="docs.glossary.create")
+    @sessioned
+    def docs_glossary_create(project_id: str, title: str, content: str = "", directory_id: str | None = None) -> dict:
+        return _doc_create(project_id, title, "glossary", content, {}, directory_id=directory_id)
+
+    @mcp.tool(name="docs.glossary.get")
+    @sessioned
+    def docs_glossary_get(project_id: str | None = None, title: str | None = None, id: str | None = None) -> dict:
+        db, actor = dbc()
+        if id:
+            return _doc_get(id, "glossary")
+        if not project_id or not title:
+            raise ToolError("invalid_request: 需要 id 或 project_id + title")
+        return document_svc._document_dict(db, document_svc.get_glossary_term(db, actor, uuid.UUID(project_id), title))
+
+    @mcp.tool(name="docs.glossary.children")
+    @sessioned
+    def docs_glossary_children(project_id: str, parent_id: str | None = None, cursor: str | None = None, limit: int | None = None) -> dict:
+        return _doc_children(project_id, "glossary", parent_id, cursor, limit)
+
+    @mcp.tool(name="docs.glossary.list")
+    @sessioned
+    def docs_glossary_list(project_id: str, cursor: str | None = None, limit: int | None = None) -> dict:
+        return _doc_children(project_id, "glossary", None, cursor, limit)
+
+    @mcp.tool(name="docs.glossary.ancestors")
+    @sessioned
+    def docs_glossary_ancestors(project_id: str, id: str, node_kind: str = "document") -> dict:
+        return _doc_path(project_id, "glossary", node_kind, id)
+
+    @mcp.tool(name="docs.glossary.update")
+    @sessioned
+    def docs_glossary_update(id: str, title: str | None = None, content: str | None = None) -> dict:
+        return _doc_update(id, "glossary", title, content)
+
+    @mcp.tool(name="docs.glossary.move")
+    @sessioned
+    def docs_glossary_move(id: str, directory_id: str | None = None) -> dict:
+        return _doc_move(id, "glossary", directory_id=directory_id)
+
+    @mcp.tool(name="docs.glossary.deleted")
+    @sessioned
+    def docs_glossary_deleted(project_id: str, cursor: str | None = None, limit: int | None = None) -> dict:
+        return _doc_deleted(project_id, "glossary", cursor, limit)
+
+    @mcp.tool(name="docs.glossary.delete")
+    @sessioned
+    def docs_glossary_delete(id: str) -> dict:
+        return _doc_delete(id, "glossary")
+
+    @mcp.tool(name="docs.glossary.restore")
+    @sessioned
+    def docs_glossary_restore(id: str) -> dict:
+        return _doc_restore(id, "glossary")
+
+    @mcp.tool(name="docs.api.create")
+    @sessioned
+    def docs_api_create(project_id: str, title: str, metadata: dict, content: str = "", directory_id: str | None = None) -> dict:
+        return _doc_create(project_id, title, "api", content, metadata, directory_id=directory_id)
+
+    @mcp.tool(name="docs.api.get")
+    @sessioned
+    def docs_api_get(id: str) -> dict:
+        return _doc_get(id, "api")
+
+    @mcp.tool(name="docs.api.children")
+    @sessioned
+    def docs_api_children(project_id: str, parent_id: str | None = None, cursor: str | None = None, limit: int | None = None) -> dict:
+        return _doc_children(project_id, "api", parent_id, cursor, limit)
+
+    @mcp.tool(name="docs.api.list")
+    @sessioned
+    def docs_api_list(project_id: str, cursor: str | None = None, limit: int | None = None) -> dict:
+        return _doc_children(project_id, "api", None, cursor, limit)
+
+    @mcp.tool(name="docs.api.ancestors")
+    @sessioned
+    def docs_api_ancestors(project_id: str, id: str, node_kind: str = "document") -> dict:
+        return _doc_path(project_id, "api", node_kind, id)
+
+    @mcp.tool(name="docs.api.update")
+    @sessioned
+    def docs_api_update(id: str, metadata: dict, title: str | None = None, content: str | None = None) -> dict:
+        return _doc_update(id, "api", title, content, metadata)
+
+    @mcp.tool(name="docs.api.move")
+    @sessioned
+    def docs_api_move(id: str, directory_id: str | None = None) -> dict:
+        return _doc_move(id, "api", directory_id=directory_id)
+
+    @mcp.tool(name="docs.api.deleted")
+    @sessioned
+    def docs_api_deleted(project_id: str, cursor: str | None = None, limit: int | None = None) -> dict:
+        return _doc_deleted(project_id, "api", cursor, limit)
+
+    @mcp.tool(name="docs.api.references")
+    @sessioned
+    def docs_api_references(id: str) -> dict:
+        db, actor = dbc()
+        return document_svc.document_references(db, actor, uuid.UUID(id), "api")
+
+    @mcp.tool(name="docs.api.delete")
+    @sessioned
+    def docs_api_delete(id: str) -> dict:
+        return _doc_delete(id, "api")
+
+    @mcp.tool(name="docs.api.restore")
+    @sessioned
+    def docs_api_restore(id: str) -> dict:
+        return _doc_restore(id, "api")
+
+    _register_directory_tools(mcp, "glossary")
+    _register_directory_tools(mcp, "api")
 
     # ---------- comment.* ----------
     @mcp.tool(name="comment.create")

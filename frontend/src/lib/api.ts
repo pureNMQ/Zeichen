@@ -148,6 +148,62 @@ export interface Page<T> {
   next_cursor: string | null
 }
 
+export type DocumentType = 'wiki' | 'glossary' | 'api'
+
+export interface ApiSchemaField {
+  name: string
+  type: 'string' | 'number' | 'integer' | 'boolean' | 'array' | 'object'
+  required?: boolean
+}
+
+export interface DocumentRow {
+  id: string
+  node_kind: 'document'
+  title: string
+  doc_type: DocumentType
+  content: string | null
+  metadata: {
+    endpoint?: { method: string; path: string }
+    schema?: { fields?: ApiSchemaField[] }
+  }
+  project_id: string
+  created_by: string | null
+  created_at: string
+  updated_at: string
+  deleted_at: string | null
+  parent_id: string | null
+  directory_id: string | null
+  has_children: boolean
+  reference_warning?: { count: number; items: ReferenceRow[] }
+}
+
+export interface DocumentDirectoryRow {
+  id: string
+  node_kind: 'directory'
+  name: string
+  title: string
+  module_type: Exclude<DocumentType, 'wiki'>
+  project_id: string
+  parent_id: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+  deleted_at: string | null
+  has_children: boolean
+}
+
+export type DocumentNode = DocumentRow | DocumentDirectoryRow
+
+export interface DocumentVersionRow {
+  id: string
+  version_no: number
+  title: string
+  content: string
+  metadata: DocumentRow['metadata']
+  created_by: string | null
+  created_at: string
+}
+
 export const STATUS_LABEL: Record<WorkflowStatus, string> = {
   backlog: '待办',
   in_progress: '实现中',

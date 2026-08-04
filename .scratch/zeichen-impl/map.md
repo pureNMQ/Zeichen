@@ -29,6 +29,7 @@
 - [13 管理页卡片布局](issues/13-management-card-layout.md) — 成员和 Agent 管理页转为响应式卡片，管理能力集中且沿用权限锁定。
 - [14 Agent Key 管理交互](issues/14-agent-key-management.md) — Key 默认展开、图标操作、即时隐藏吊销项及明文复制闭环。
 - [16 普通成员只读查看成员](issues/16-member-read-access.md) — 已认证工作区成员可查看团队成员；有项目访问权的成员可查看项目成员与角色，所有管理接口及控件仍按 admin/Owner 严格限制。
+- [04 文档闭环](issues/04-docs-slice.md) — Wiki/字典/API 共用版本化文档域；Milkdown 即时渲染编辑、MCP docs.* 工具、API schema 校验与引用预警已完成。
 
 ## Not yet specified
 

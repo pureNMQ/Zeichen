@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Zeichen 文档工作台</title>
+  <style>
+    :root { --background:#fff; --foreground:#252525; --muted:#f7f7f7; --muted-foreground:#737373; --border:#ebebeb; --primary:#252525; --primary-foreground:#fff; --danger:#b82d2d; --radius:10px; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-width:320px; background:var(--background); color:var(--foreground); font:14px/1.5 "Geist Variable", Geist, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+    button,input,textarea { font:inherit; } button { cursor:pointer; }
+    .app { min-height:100vh; display:grid; grid-template-columns:208px 270px minmax(0,1fr); }
+    .module-sidebar { display:flex; min-height:0; flex-direction:column; border-right:1px solid var(--border); background:#fcfcfc; }
+    .brand { padding:17px 16px; font-size:15px; font-weight:600; letter-spacing:-.02em; }
+    .module-nav { flex:1; padding:0 8px; overflow:auto; }
+    .nav-group { margin-bottom:18px; } .nav-group-title { margin:0 8px 7px; color:var(--muted-foreground); font-size:11px; font-weight:600; letter-spacing:.07em; }
+    .nav-item { width:100%; display:flex; align-items:center; gap:9px; min-height:34px; border:0; border-radius:7px; padding:0 9px; background:transparent; color:var(--muted-foreground); text-align:left; }
+    .nav-item:hover { background:var(--muted); color:var(--foreground); } .nav-item.active { background:var(--primary); color:var(--primary-foreground); }
+    .nav-icon { width:16px; text-align:center; } .module-footer { padding:14px 16px; border-top:1px solid var(--border); color:var(--muted-foreground); font-size:12px; }
+    .document-sidebar { display:flex; min-height:0; flex-direction:column; border-right:1px solid var(--border); background:var(--background); }
+    .files-header { padding:16px; border-bottom:1px solid var(--border); } .files-heading { margin:0; font-size:15px; font-weight:600; }
+    .files-subtitle { margin:2px 0 0; color:var(--muted-foreground); font-size:12px; }
+    .file-actions { display:grid; grid-template-columns:1fr 1fr; gap:7px; padding:12px 16px; border-bottom:1px solid var(--border); }
+    .button { min-height:31px; border:1px solid var(--border); border-radius:8px; padding:0 9px; background:var(--background); color:var(--foreground); font-size:12px; font-weight:500; }
+    .button:hover { background:var(--muted); } .button.primary { border-color:var(--primary); background:var(--primary); color:var(--primary-foreground); } .button.primary:hover { opacity:.88; }
+    .button.danger { color:var(--danger); } .button.danger:hover { border-color:#efc8c8; background:#fff6f6; }
+    .file-tree-wrap { flex:1; overflow:auto; padding:12px 8px; }
+    .tree-label { margin:0 8px 7px; color:var(--muted-foreground); font-size:11px; font-weight:600; letter-spacing:.07em; }
+    .tree { display:grid; gap:2px; } .tree-children { display:grid; gap:2px; margin-left:16px; padding-left:7px; border-left:1px solid var(--border); }
+    .file { width:100%; display:flex; align-items:center; gap:8px; min-height:34px; border:0; border-radius:7px; padding:0 8px; background:transparent; color:var(--muted-foreground); text-align:left; }
+    .file:hover { background:var(--muted); color:var(--foreground); } .file.active { background:var(--primary); color:var(--primary-foreground); }
+    .file-icon { width:15px; text-align:center; font-size:13px; } .file-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .file-kind { margin-left:auto; opacity:.62; font-size:10px; }
+    .selected-actions { display:grid; grid-template-columns:1fr 1fr; gap:7px; padding:12px 16px; border-top:1px solid var(--border); }
+    .editor-area { min-width:0; display:flex; flex-direction:column; }
+    .editor-topbar { display:flex; align-items:center; gap:12px; min-height:58px; padding:0 28px; border-bottom:1px solid var(--border); }
+    .crumb { color:var(--muted-foreground); font-size:13px; } .status { display:flex; align-items:center; gap:7px; color:var(--muted-foreground); font-size:12px; }
+    .dot { width:7px; height:7px; border-radius:99px; background:#b7b7b7; } .dot.unsaved { background:#d38b11; } .spacer { flex:1; }
+    .document { width:min(900px, 100%); flex:1; margin:0 auto; padding:48px 44px 64px; } .document-type { display:inline-flex; align-items:center; height:24px; padding:0 8px; border-radius:6px; background:var(--muted); color:#555; font-size:12px; font-weight:500; }
+    .title { width:100%; margin:12px 0 20px; border:0; outline:0; padding:0; background:transparent; color:var(--foreground); font-size:32px; font-weight:600; letter-spacing:-.045em; } .title::placeholder,.editor::placeholder { color:#aaa; }
+    .editor { width:100%; min-height:calc(100vh - 220px); resize:none; border:0; outline:0; padding:0; background:transparent; color:#3b3b3b; font:15px/1.75 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .toast { position:fixed; right:20px; bottom:20px; z-index:3; display:none; border:1px solid var(--border); border-radius:9px; padding:11px 13px; background:#fff; box-shadow:0 12px 28px #00000012; color:var(--foreground); font-size:13px; } .toast.show { display:block; animation:toast-in .18s ease-out; } @keyframes toast-in { from { transform:translateY(6px); opacity:0; } }
+    @media (max-width:900px) { .app { grid-template-columns:208px 240px minmax(0,1fr); } .document { padding:34px 28px 48px; } }
+    @media (max-width:680px) { .app { grid-template-columns:1fr; } .module-sidebar { display:none; } .document-sidebar { min-height:auto; border-right:0; border-bottom:1px solid var(--border); } .files-header { padding:12px 16px; } .file-actions,.selected-actions { padding:9px 12px; } .file-tree-wrap { max-height:172px; } .editor-topbar { min-height:52px; padding:0 16px; } .document { padding:30px 20px 44px; } .title { font-size:27px; } .editor { min-height:420px; } }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="module-sidebar" aria-label="应用模块">
+      <div class="brand">贼船 Zeichen</div>
+      <nav class="module-nav">
+        <section class="nav-group"><p class="nav-group-title">团队功能</p><button class="nav-item" type="button"><span class="nav-icon">▣</span>项目</button><button class="nav-item" type="button"><span class="nav-icon">◉</span>成员</button><button class="nav-item" type="button"><span class="nav-icon">◇</span>Agent</button></section>
+        <section class="nav-group"><p class="nav-group-title">工作区</p><button class="nav-item" type="button"><span class="nav-icon">□</span>需求</button><button class="nav-item" type="button"><span class="nav-icon">✓</span>任务</button><button class="nav-item active" type="button"><span class="nav-icon">▤</span>文档</button></section>
+      </nav>
+      <div class="module-footer">当前项目<br /><strong style="color:#444;font-size:13px">Zeichen 核心产品</strong></div>
+    </aside>
+    <aside class="document-sidebar" aria-label="文档文件管理">
+      <header class="files-header"><h1 class="files-heading">文档</h1><p class="files-subtitle">Zeichen 核心产品</p></header>
+      <div class="file-actions"><button class="button primary" id="newDocument" type="button">+ 新建文档</button><button class="button" id="newChild" type="button">+ 新建子文档</button></div>
+      <div class="file-tree-wrap"><p class="tree-label">全部文档</p><nav class="tree" id="fileTree" aria-label="文档树"></nav></div>
+      <div class="selected-actions"><button class="button" id="renameDocument" type="button">重命名</button><button class="button danger" id="deleteDocument" type="button">删除文档</button></div>
+    </aside>
+    <main class="editor-area">
+      <header class="editor-topbar"><span class="crumb" id="crumb">文档 / Wiki</span><span class="status"><i class="dot" id="dot"></i><span id="statusText">已保存</span></span><span class="spacer"></span><button class="button primary" id="save" type="button">保存版本</button></header>
+      <section class="document" aria-label="Markdown 文档编辑区"><span class="document-type" id="typeLabel">Wiki</span><input class="title" id="title" autocomplete="off" aria-label="文档标题" value="发布流程说明" /><textarea class="editor" id="content" autocomplete="off" aria-label="Markdown 正文">## 发布前检查
+
+每次发布前，请确认以下事项已经完成。
+
+- 变更已通过自动化测试
+- 已更新相关文档与词典
+- 已准备回滚方案
+
+部署命令：`pnpm deploy`</textarea></section>
+    </main>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script>
+    const documents = {
+      release: { type:'Wiki', title:'发布流程说明', parent:null, content:'## 发布前检查\n\n每次发布前，请确认以下事项已经完成。\n\n- 变更已通过自动化测试\n- 已更新相关文档与词典\n- 已准备回滚方案\n\n部署命令：`pnpm deploy`' },
+      checklist: { type:'Wiki', title:'上线检查清单', parent:'release', content:'## 上线检查\n\n- [ ] 已完成代码审查\n- [ ] 已更新变更说明\n- [ ] 已通知相关成员' },
+      overview: { type:'Wiki', title:'项目概览', parent:null, content:'# Zeichen\n\n项目协同管理工具，为团队提供需求、任务、文档与记忆空间。' },
+      snapshot: { type:'词典', title:'版本快照', parent:null, content:'## 定义\n\n**版本快照**是某一时刻文档的完整、可恢复状态。' },
+      members: { type:'API 定义', title:'获取成员信息', parent:null, content:'## GET /members/{id}\n\n根据成员 ID 返回该成员在当前工作区中的基础资料。' },
+      auth: { type:'API 定义', title:'认证约定', parent:'members', content:'## 请求认证\n\n所有受保护的接口均应携带有效会话。\n\n```http\nAuthorization: Bearer <token>\n```' }
+    };
+    const title = document.getElementById('title'); const content = document.getElementById('content'); const dot = document.getElementById('dot'); const statusText = document.getElementById('statusText'); const typeLabel = document.getElementById('typeLabel'); const crumb = document.getElementById('crumb'); const tree = document.getElementById('fileTree');
+    let current = 'release'; let dirty = false;
+    function toast(message) { const notice = document.getElementById('toast'); notice.textContent = message; notice.classList.add('show'); window.setTimeout(() => notice.classList.remove('show'), 1600); }
+    function setDirty(value) { dirty = value; dot.classList.toggle('unsaved', value); statusText.textContent = value ? '未保存的更改' : '已保存'; }
+    function iconFor(type) { return type === '词典' ? '◇' : type === 'API 定义' ? '⌘' : '▤'; }
+    function descendants(id) { const ids = [id]; for (const [key, doc] of Object.entries(documents)) if (doc.parent === id) ids.push(...descendants(key)); return ids; }
+    function renderBranch(parent, container) { Object.entries(documents).filter(([, doc]) => doc.parent === parent).forEach(([id, doc]) => { const button = document.createElement('button'); button.className = `file${id === current ? ' active' : ''}`; button.type = 'button'; button.dataset.file = id; button.innerHTML = `<span class="file-icon">${iconFor(doc.type)}</span><span class="file-title"></span><span class="file-kind"></span>`; button.querySelector('.file-title').textContent = doc.title; button.querySelector('.file-kind').textContent = doc.type === 'API 定义' ? 'API' : doc.type; container.appendChild(button); const children = Object.values(documents).some((item) => item.parent === id); if (children) { const nested = document.createElement('div'); nested.className = 'tree-children'; container.appendChild(nested); renderBranch(id, nested); } }); }
+    function renderTree() { tree.replaceChildren(); renderBranch(null, tree); }
+    function openDocument(id) { if (dirty && !window.confirm('当前文档有未保存的更改，仍要切换吗？')) return false; current = id; const doc = documents[id]; title.value = doc.title; content.value = doc.content; typeLabel.textContent = doc.type; crumb.textContent = `文档 / ${doc.type}`; setDirty(false); renderTree(); return true; }
+    function nameFromUser(promptText, initial = '') { const name = window.prompt(promptText, initial); return name?.trim() || null; }
+    tree.addEventListener('click', (event) => { const file = event.target.closest('.file'); if (file) openDocument(file.dataset.file); });
+    title.addEventListener('input', () => setDirty(true)); content.addEventListener('input', () => setDirty(true));
+    document.getElementById('save').addEventListener('click', () => { const doc = documents[current]; doc.title = title.value.trim() || '未命名文档'; doc.content = content.value; setDirty(false); renderTree(); toast('已保存为新版本'); });
+    document.getElementById('newDocument').addEventListener('click', () => { const name = nameFromUser('新文档标题'); if (!name) return; const id = `document-${Date.now()}`; documents[id] = { type:'Wiki', title:name, parent:null, content:'' }; openDocument(id); });
+    document.getElementById('newChild').addEventListener('click', () => { const name = nameFromUser(`在“${documents[current].title}”下新建子文档`); if (!name) return; const id = `document-${Date.now()}`; documents[id] = { type:'Wiki', title:name, parent:current, content:'' }; openDocument(id); });
+    document.getElementById('renameDocument').addEventListener('click', () => { const name = nameFromUser('重命名文档', documents[current].title); if (!name) return; documents[current].title = name; title.value = name; renderTree(); setDirty(true); });
+    document.getElementById('deleteDocument').addEventListener('click', () => { const doc = documents[current]; const remove = descendants(current); const suffix = remove.length > 1 ? `及其 ${remove.length - 1} 个子文档` : ''; if (!window.confirm(`确定删除“${doc.title}”${suffix}吗？`)) return; remove.forEach((id) => delete documents[id]); const next = Object.keys(documents)[0]; if (!next) { const id = `document-${Date.now()}`; documents[id] = { type:'Wiki', title:'未命名文档', parent:null, content:'' }; openDocument(id); } else { current = next; const nextDoc = documents[next]; title.value = nextDoc.title; content.value = nextDoc.content; typeLabel.textContent = nextDoc.type; crumb.textContent = `文档 / ${nextDoc.type}`; setDirty(false); renderTree(); } toast('文档已删除'); });
+    renderTree();
+  </script>
+</body>
+</html>

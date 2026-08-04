@@ -1,9 +1,10 @@
-import { useState, type FormEvent } from 'react'
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { LogOut, KeyRound, Settings } from 'lucide-react'
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { ChevronDown, LogOut, KeyRound, Settings } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { useCurrentProject } from '@/lib/current-project'
+import { useDocumentNavigation } from '@/lib/document-navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -42,6 +43,35 @@ const WORKSPACE_NAV = [
   { to: '/tasks', label: '任务' },
 ]
 
+const DOCUMENT_NAV = [
+  { to: '/documents/wiki', label: 'Wiki' },
+  { to: '/documents/glossary', label: '词条' },
+  { to: '/documents/api', label: 'API' },
+]
+
+function GuardedNavLink({ to, children }: { to: string; children: ReactNode }) {
+  const { requestNavigation } = useDocumentNavigation()
+
+  return (
+    <NavLink
+      to={to}
+      onClick={(event) => {
+        if (event.button !== 0 || event.metaKey || event.altKey || event.ctrlKey || event.shiftKey) return
+        if (requestNavigation(to)) event.preventDefault()
+      }}
+      className={({ isActive }) =>
+        `block rounded-md px-3 py-2 text-sm ${
+          isActive
+            ? 'bg-primary text-primary-foreground'
+            : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+        }`
+      }
+    >
+      {children}
+    </NavLink>
+  )
+}
+
 function NavGroup({ title, items, isAdmin }: { title: string; items: { to: string; label: string; adminOnly?: boolean }[]; isAdmin: boolean }) {
   return (
     <div className="space-y-1">
@@ -51,20 +81,39 @@ function NavGroup({ title, items, isAdmin }: { title: string; items: { to: strin
       {items
         .filter((item) => !item.adminOnly || isAdmin)
         .map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            className={({ isActive }) =>
-              `block rounded-md px-3 py-2 text-sm ${
-                isActive
-                  ? 'bg-primary text-primary-foreground'
-                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-              }`
-            }
-          >
-            {item.label}
-          </NavLink>
+          <GuardedNavLink key={item.to} to={item.to}>{item.label}</GuardedNavLink>
         ))}
+    </div>
+  )
+}
+
+function DocumentNav() {
+  const location = useLocation()
+  const documentsActive = location.pathname.startsWith('/documents')
+  const [open, setOpen] = useState(documentsActive)
+
+  useEffect(() => {
+    if (documentsActive) setOpen(true)
+  }, [documentsActive])
+
+  return (
+    <div className="space-y-1">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        className="flex w-full items-center justify-between rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+      >
+        文档
+        <ChevronDown className={`h-4 w-4 transition-transform ${open ? '' : '-rotate-90'}`} />
+      </button>
+      {open && (
+        <div className="space-y-1 pl-3">
+          {DOCUMENT_NAV.map((item) => (
+            <GuardedNavLink key={item.to} to={item.to}>{item.label}</GuardedNavLink>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -199,6 +248,7 @@ export function AppShell() {
           <NavGroup title="团队功能" items={TEAM_NAV} isAdmin={isAdmin} />
           <div className="mx-3 my-1 border-t" />
           <NavGroup title="工作区" items={WORKSPACE_NAV} isAdmin={isAdmin} />
+          <DocumentNav />
         </nav>
         <ProjectSwitcher />
         <div className="border-t p-2">

@@ -4,6 +4,7 @@ import { ShieldAlert } from 'lucide-react'
 import { AppShell } from '@/components/app-shell'
 import { api } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
+import { DocumentNavigationProvider } from '@/lib/document-navigation'
 import { CurrentProjectProvider } from '@/lib/current-project'
 import { AgentsPage } from '@/pages/agents'
 import { BootstrapPage } from '@/pages/bootstrap'
@@ -16,6 +17,7 @@ import { TasksPage } from '@/pages/tasks'
 import { RequirementDetailPage } from '@/pages/requirement-detail'
 import { SetPasswordPage } from '@/pages/set-password'
 import { TaskDetailPage } from '@/pages/task-detail'
+import { DocumentWorkbenchPage } from '@/pages/documents'
 
 function BootstrapGate() {
   const navigate = useNavigate()
@@ -71,7 +73,9 @@ function RequireAuth() {
   }
   return (
     <CurrentProjectProvider>
-      <AppShell />
+      <DocumentNavigationProvider>
+        <AppShell />
+      </DocumentNavigationProvider>
     </CurrentProjectProvider>
   )
 }
@@ -103,6 +107,14 @@ export function App() {
         <Route path="tasks" element={<TasksPage />} />
         <Route path="requirements/:id" element={<RequirementDetailPage />} />
         <Route path="tasks/:id" element={<TaskDetailPage />} />
+        <Route path="documents/wiki" element={<DocumentWorkbenchPage module="wiki" />} />
+        <Route path="documents/wiki/:id" element={<DocumentWorkbenchPage module="wiki" />} />
+        <Route path="documents/glossary" element={<DocumentWorkbenchPage module="glossary" />} />
+        <Route path="documents/glossary/directory/:id" element={<DocumentWorkbenchPage module="glossary" routeNodeKind="directory" />} />
+        <Route path="documents/glossary/term/:id" element={<DocumentWorkbenchPage module="glossary" routeNodeKind="document" />} />
+        <Route path="documents/api" element={<DocumentWorkbenchPage module="api" />} />
+        <Route path="documents/api/directory/:id" element={<DocumentWorkbenchPage module="api" routeNodeKind="directory" />} />
+        <Route path="documents/api/definition/:id" element={<DocumentWorkbenchPage module="api" routeNodeKind="document" />} />
         <Route path="members" element={<MembersPage />} />
         <Route path="agents" element={<RequireAdmin />}>
           <Route index element={<AgentsPage />} />

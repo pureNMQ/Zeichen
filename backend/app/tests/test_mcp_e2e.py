@@ -64,8 +64,8 @@ class RawMcpClient:
         result = self._post("tools/list", {})
         return [t["name"] for t in result["tools"]]
 
-    def call(self, name: str, **arguments) -> dict:
-        result = self._post("tools/call", {"name": name, "arguments": arguments})
+    def call(self, tool_name: str, **arguments) -> dict:
+        result = self._post("tools/call", {"name": tool_name, "arguments": arguments})
         if "error" in result:
             return result
         if result.get("isError"):
@@ -86,7 +86,9 @@ class RawMcpClient:
             headers["Mcp-Session-Id"] = self.session_id
         self._id += 1
         payload = {"jsonrpc": "2.0", "id": self._id, "method": method, "params": params}
-        with httpx.Client(timeout=30) as client:
+        # 本地 uvicorn 回环请求不应继承机器代理设置；否则部分环境会把
+        # 127.0.0.1 的 MCP 初始化转发并返回空的 502。
+        with httpx.Client(timeout=30, trust_env=False) as client:
             resp = client.post(self.url, headers=headers, json=payload)
             resp.raise_for_status()
             if is_initialize:
@@ -190,11 +192,17 @@ def test_agent_claim_to_requirement_done(mcp_server: dict):
     assert client.session_id is not None
 
     tools = client.list_tools()
-    assert len(tools) == 28
-    for ns in ("requirements.", "tasks.", "comment.", "ref.", "project.", "agent."):
+    assert len(tools) >= 70
+    for ns in ("requirements.", "tasks.", "docs.wiki.", "docs.glossary.", "docs.api.", "comment.", "ref.", "project.", "agent."):
         assert any(t.startswith(ns) for t in tools), f"缺少 {ns} 工具"
     assert "requirements.set_status" in tools and "requirements.complete" not in tools
     assert "tasks.set_status" in tools and "tasks.start" not in tools and "tasks.complete" not in tools
+    for name in (
+        "docs.wiki.children", "docs.wiki.ancestors", "docs.wiki.move",
+        "docs.glossary.directory_create", "docs.glossary.directory_move",
+        "docs.api.directory_create", "docs.api.children",
+    ):
+        assert name in tools
 
     me = client.call("agent.whoami")
     assert me["username"] == "agent-e2e"
@@ -285,6 +293,31 @@ def test_task_requirement_link_over_mcp(mcp_server: dict):
     # 清理本测试建的需求(恢复 pagination 基线)
     assert client.call("requirements.delete", id=r1["id"], confirm_task_count=1)["deleted"] is True
     assert client.call("requirements.delete", id=r2["id"])["deleted"] is True
+
+
+def test_document_hierarchy_over_mcp(mcp_server: dict):
+    """MCP 与 HTTP 共用层级/目录 service，而不是第二套规则。"""
+    client = RawMcpClient(mcp_server["url"], mcp_server["token"])
+    client.initialize()
+    project_id = mcp_server["project_id"]
+    root = client.call("docs.wiki.create", project_id=project_id, title="MCP 根")
+    child = client.call("docs.wiki.create", project_id=project_id, title="MCP 子", parent_id=root["id"])
+    children = client.call("docs.wiki.children", project_id=project_id, parent_id=root["id"])
+    assert [node["id"] for node in children["items"]] == [child["id"]]
+    path = client.call("docs.wiki.ancestors", project_id=project_id, id=child["id"])
+    assert [node["id"] for node in path["items"]] == [root["id"], child["id"]]
+    assert "invalid_request" in client.call("docs.wiki.move", id=root["id"], parent_id=child["id"])["error"]
+
+    directory = client.call("docs.api.directory_create", project_id=project_id, name="MCP 服务")
+    definition = client.call(
+        "docs.api.create",
+        project_id=project_id,
+        title="MCP 接口",
+        directory_id=directory["id"],
+        metadata={"endpoint": {"method": "GET", "path": "/mcp"}, "schema": {"fields": []}},
+    )
+    api_children = client.call("docs.api.children", project_id=project_id, parent_id=directory["id"])
+    assert [node["id"] for node in api_children["items"]] == [definition["id"]]
 
 
 def test_cursor_pagination_over_mcp(mcp_server: dict):

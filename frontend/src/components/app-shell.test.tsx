@@ -43,7 +43,7 @@ const projects: ProjectRow[] = [
   { id: 'p2', name: '网站改版', created_at: '2026-08-02T00:00:00Z', my_role: 'viewer' },
 ]
 
-function renderShell(role: 'admin' | 'member' = 'admin') {
+function renderShell(role: 'admin' | 'member' = 'admin', initialPath = '/projects') {
   mockRole = role
   vi.mocked(api.get).mockImplementation((path: string) => {
     if (path === '/projects') return Promise.resolve(projects)
@@ -52,7 +52,7 @@ function renderShell(role: 'admin' | 'member' = 'admin') {
   return render(
     <QueryClientProvider client={qc}>
       <CurrentProjectProvider>
-        <MemoryRouter initialEntries={['/projects']}>
+        <MemoryRouter initialEntries={[initialPath]}>
           <AppShell />
         </MemoryRouter>
       </CurrentProjectProvider>
@@ -82,6 +82,21 @@ describe('AppShell 侧边栏', () => {
     expect(screen.getByRole('link', { name: '项目' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '成员' })).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Agent' })).not.toBeInTheDocument()
+  })
+
+  it('文档为可折叠父项，展开后显示 Wiki、词条与 API 子页', async () => {
+    const user = (await import('@testing-library/user-event')).default.setup()
+    renderShell('admin')
+    const documentToggle = await screen.findByRole('button', { name: '文档' })
+    expect(documentToggle).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('link', { name: 'Wiki' })).not.toBeInTheDocument()
+
+    await user.click(documentToggle)
+
+    expect(documentToggle).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('link', { name: 'Wiki' })).toHaveAttribute('href', '/documents/wiki')
+    expect(screen.getByRole('link', { name: '词条' })).toHaveAttribute('href', '/documents/glossary')
+    expect(screen.getByRole('link', { name: 'API' })).toHaveAttribute('href', '/documents/api')
   })
 
   it('当前项目切换器:默认第一个可见项目,选择后持久化', async () => {
