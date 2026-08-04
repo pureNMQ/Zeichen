@@ -58,8 +58,26 @@ describe('VditorIrEditor', () => {
     const { unmount } = render(<VditorIrEditor initialMarkdown="" onChange={vi.fn()} />)
 
     await waitFor(() => expect(vditorMock.constructor).toHaveBeenCalledTimes(1))
+    const [, options] = vditorMock.constructor.mock.calls[0]! as unknown as [HTMLElement, { after: () => void }]
+    act(() => options.after())
     unmount()
 
+    expect(vditorMock.instance.destroy).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not call Vditor instance methods before asynchronous initialization completes', async () => {
+    const { unmount } = render(<VditorIrEditor initialMarkdown="" onChange={vi.fn()} />)
+
+    await waitFor(() => expect(vditorMock.constructor).toHaveBeenCalledTimes(1))
+    const [, options] = vditorMock.constructor.mock.calls[0]! as unknown as [HTMLElement, { after: () => void }]
+
+    expect(vditorMock.instance.enable).not.toHaveBeenCalled()
+    expect(vditorMock.instance.disabled).not.toHaveBeenCalled()
+
+    unmount()
+    expect(vditorMock.instance.destroy).not.toHaveBeenCalled()
+
+    act(() => options.after())
     expect(vditorMock.instance.destroy).toHaveBeenCalledTimes(1)
   })
 })

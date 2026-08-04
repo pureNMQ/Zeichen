@@ -68,11 +68,12 @@ export function VditorIrEditor({
   const hostRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<Vditor | null>(null)
   const initialMarkdownRef = useRef(initialMarkdown)
-  const lastExternalMarkdownRef = useRef(initialMarkdown)
+  const pendingMarkdownRef = useRef(initialMarkdown)
   const latestLocalMarkdownRef = useRef(initialMarkdown)
   const onChangeRef = useRef(onChange)
   const onReadyRef = useRef(onReady)
   const disabledRef = useRef(disabled)
+  const readyRef = useRef(false)
   const [ready, setReady] = useState(false)
 
   onChangeRef.current = onChange
@@ -95,7 +96,15 @@ export function VditorIrEditor({
         onChangeRef.current(markdown)
       },
       after() {
-        if (destroyed) return
+        if (destroyed) {
+          editor.destroy()
+          return
+        }
+        readyRef.current = true
+        const pendingMarkdown = pendingMarkdownRef.current
+        if (pendingMarkdown !== latestLocalMarkdownRef.current && editor.getValue() !== pendingMarkdown) {
+          editor.setValue(pendingMarkdown, true)
+        }
         if (disabledRef.current) editor.disabled()
         setReady(true)
         onReadyRef.current?.(editor)
@@ -106,16 +115,17 @@ export function VditorIrEditor({
 
     return () => {
       destroyed = true
-      editorRef.current = null
-      editor.destroy()
+      if (editorRef.current === editor) editorRef.current = null
+      if (readyRef.current) {
+        readyRef.current = false
+        editor.destroy()
+      }
     }
   }, [])
 
   useEffect(() => {
-    if (initialMarkdown === lastExternalMarkdownRef.current) return
-
-    lastExternalMarkdownRef.current = initialMarkdown
-    if (initialMarkdown === latestLocalMarkdownRef.current) return
+    pendingMarkdownRef.current = initialMarkdown
+    if (!readyRef.current || initialMarkdown === latestLocalMarkdownRef.current) return
 
     const editor = editorRef.current
     if (editor && editor.getValue() !== initialMarkdown) {
@@ -125,7 +135,7 @@ export function VditorIrEditor({
 
   useEffect(() => {
     const editor = editorRef.current
-    if (!editor) return
+    if (!editor || !readyRef.current) return
     if (disabled) editor.disabled()
     else editor.enable()
   }, [disabled])
