@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, type DragEvent, type FormEvent } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { History, Plus, RotateCcw, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, History, MoreHorizontal, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react'
 import { VditorIrEditor, VditorMarkdownViewer } from '@/components/vditor-ir-editor'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { ErrorNotification } from '@/components/ui/notification'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -68,6 +69,8 @@ function TreeChildren({
   selectedId,
   canEdit,
   onMove,
+  onRename,
+  onDelete,
 }: {
   projectId: string
   module: DocumentType
@@ -78,6 +81,8 @@ function TreeChildren({
   selectedId?: string
   canEdit: boolean
   onMove: (source: DocumentNode, target: DocumentNode | null) => void
+  onRename: (node: DocumentNode) => void
+  onDelete: (node: DocumentNode) => void
 }) {
   const { data, isLoading } = useQuery({
     queryKey: treeKey(projectId, module, parentId),
@@ -86,7 +91,7 @@ function TreeChildren({
   if (isLoading) return parentId ? <p className="px-3 py-1 text-xs text-muted-foreground">加载中…</p> : <p className="px-3 py-2 text-sm text-muted-foreground">加载中…</p>
   if (!data?.items.length) return parentId ? null : <p className="px-3 py-2 text-sm text-muted-foreground">暂无内容</p>
   return <div className={parentId ? 'ml-3 border-l pl-1.5' : 'space-y-0.5'}>{data.items.map((node) => (
-    <TreeNode key={node.id} node={node} projectId={projectId} module={module} expanded={expanded} onToggle={onToggle} onNavigate={onNavigate} selectedId={selectedId} canEdit={canEdit} onMove={onMove} />
+    <TreeNode key={node.id} node={node} projectId={projectId} module={module} expanded={expanded} onToggle={onToggle} onNavigate={onNavigate} selectedId={selectedId} canEdit={canEdit} onMove={onMove} onRename={onRename} onDelete={onDelete} />
   ))}</div>
 }
 
@@ -100,6 +105,8 @@ function TreeNode({
   selectedId,
   canEdit,
   onMove,
+  onRename,
+  onDelete,
 }: {
   node: DocumentNode
   projectId: string
@@ -110,6 +117,8 @@ function TreeNode({
   selectedId?: string
   canEdit: boolean
   onMove: (source: DocumentNode, target: DocumentNode | null) => void
+  onRename: (node: DocumentNode) => void
+  onDelete: (node: DocumentNode) => void
 }) {
   const open = expanded.has(node.id)
   function drop(event: DragEvent<HTMLDivElement>) {
@@ -119,7 +128,7 @@ function TreeNode({
   }
   return <div onDragOver={canEdit ? (event) => event.preventDefault() : undefined} onDrop={canEdit ? drop : undefined}>
     <div className={`group flex min-w-0 items-center gap-1 rounded-md pr-1 ${selectedId === node.id ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
-      {node.has_children ? <button type="button" onClick={() => onToggle(node.id)} aria-label={`${open ? '收起' : '展开'}${node.title}`} className="h-7 w-5 shrink-0 text-xs" aria-expanded={open}>{open ? '⌄' : '›'}</button> : <span className="w-5 shrink-0" />}
+      {node.has_children ? <button type="button" onClick={() => onToggle(node.id)} aria-label={`${open ? '收起' : '展开'}${node.title}`} className="flex h-7 w-5 shrink-0 items-center justify-center" aria-expanded={open}>{open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}</button> : <span className="w-5 shrink-0" />}
       <button
         type="button"
         draggable={canEdit}
@@ -130,8 +139,9 @@ function TreeNode({
       >
         {node.title}
       </button>
+      {canEdit && <DropdownMenu><DropdownMenuTrigger asChild><Button type="button" size="icon-xs" variant="ghost" aria-label={`${node.title}更多操作`}><MoreHorizontal className="h-3.5 w-3.5" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={() => onRename(node)}><Pencil />重命名</DropdownMenuItem><DropdownMenuItem variant="destructive" onClick={() => onDelete(node)}><Trash2 />删除</DropdownMenuItem></DropdownMenuContent></DropdownMenu>}
     </div>
-    {node.has_children && open && <TreeChildren projectId={projectId} module={module} parentId={node.id} expanded={expanded} onToggle={onToggle} onNavigate={onNavigate} selectedId={selectedId} canEdit={canEdit} onMove={onMove} />}
+    {node.has_children && open && <TreeChildren projectId={projectId} module={module} parentId={node.id} expanded={expanded} onToggle={onToggle} onNavigate={onNavigate} selectedId={selectedId} canEdit={canEdit} onMove={onMove} onRename={onRename} onDelete={onDelete} />}
   </div>
 }
 
@@ -241,6 +251,7 @@ function ModuleTreeSidebar({
   const [renameOpen, setRenameOpen] = useState(false)
   const [createDirectoryOpen, setCreateDirectoryOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [actionNode, setActionNode] = useState<DocumentNode | null>(null)
   const [deleteImpact, setDeleteImpact] = useState<{ documents: number; directories: number } | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
 
@@ -275,18 +286,18 @@ function ModuleTreeSidebar({
     const body = source.node_kind === 'directory' || module === 'wiki' ? { parent_id: targetId } : { directory_id: targetId }
     void api.post(path, body).then(() => invalidate()).catch((err) => setActionError(err instanceof ApiError ? err.message : '移动失败'))
   }
-  async function beginDelete() {
-    if (!selectedNode) return
+  async function beginDelete(node: DocumentNode) {
     try {
-      const path = selectedNode.node_kind === 'directory' ? `/directories/${module}/${selectedNode.id}/delete-impact` : `/documents/${module}/${selectedNode.id}/delete-impact`
+      const path = node.node_kind === 'directory' ? `/directories/${module}/${node.id}/delete-impact` : `/documents/${module}/${node.id}/delete-impact`
       setDeleteImpact(await api.get(path))
+      setActionNode(node)
       setDeleteOpen(true)
     } catch (err) { setActionError(err instanceof ApiError ? err.message : '无法获取删除影响范围') }
   }
   async function confirmDelete() {
-    if (!selectedNode) return
+    if (!actionNode) return
     try {
-      const path = selectedNode.node_kind === 'directory' ? `/directories/${module}/${selectedNode.id}/delete` : `/documents/${module}/${selectedNode.id}/delete`
+      const path = actionNode.node_kind === 'directory' ? `/directories/${module}/${actionNode.id}/delete` : `/documents/${module}/${actionNode.id}/delete`
       await api.post(path)
       setDeleteOpen(false)
       await invalidate()
@@ -298,13 +309,13 @@ function ModuleTreeSidebar({
   return <aside className="flex w-64 shrink-0 flex-col border-r bg-background" aria-label={`${documentLabel(module)}文件组织`}>
     <div className="border-b px-4 py-4"><p className="font-semibold">{documentLabel(module)}</p><p className="mt-1 truncate text-xs text-muted-foreground">{currentProject.name}</p></div>
     <div className="border-b p-3"><Input aria-label="搜索文档（即将支持）" autoComplete="off" placeholder="搜索文档（即将支持）" disabled /></div>
-    {canEdit && <div className="flex flex-wrap gap-2 border-b p-3"><Button size="sm" onClick={createDocument}><Plus className="mr-1.5 h-3.5 w-3.5" />新建{module === 'wiki' && selected?.kind === 'document' ? '子 Wiki' : documentLabel(module)}</Button>{module !== 'wiki' && <Button size="sm" variant="outline" onClick={createDirectory}>新建目录</Button>}{selectedNode && <><Button size="sm" variant="ghost" onClick={() => setRenameOpen(true)}>重命名</Button><Button size="sm" variant="ghost" onClick={() => void beginDelete()}>删除</Button></>}</div>}
+    {canEdit && <div className="flex justify-end border-b p-3"><Button type="button" size="icon-sm" variant="ghost" aria-label={`新建${module === 'wiki' && selected?.kind === 'document' ? '子 Wiki' : documentLabel(module)}`} onClick={createDocument}><Plus className="h-4 w-4" /></Button>{module !== 'wiki' && <Button type="button" size="icon-sm" variant="ghost" aria-label="新建目录" onClick={createDirectory}><Plus className="h-4 w-4" /></Button>}</div>}
     <div className="flex items-center justify-between px-3 pt-3"><p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">文件组织</p><Button size="xs" variant="ghost" onClick={() => setDeletedOpen((value) => !value)}>{deletedOpen ? '返回树' : '已删除'}</Button></div>
     <div className="flex-1 overflow-y-auto p-3" onDragOver={canEdit ? (event) => event.preventDefault() : undefined} onDrop={canEdit ? (event) => { const source = JSON.parse(event.dataTransfer.getData('application/x-zeichen-document-node')) as DocumentNode; move(source, null) } : undefined}>
-      {deletedOpen ? <DeletedNodes projectId={projectId} module={module} canEdit={canEdit} onChanged={invalidate} /> : <TreeChildren projectId={projectId} module={module} parentId={null} expanded={expanded} onToggle={toggle} onNavigate={onNavigate} selectedId={selected?.id} canEdit={canEdit} onMove={move} />}
+      {deletedOpen ? <DeletedNodes projectId={projectId} module={module} canEdit={canEdit} onChanged={invalidate} /> : <TreeChildren projectId={projectId} module={module} parentId={null} expanded={expanded} onToggle={toggle} onNavigate={onNavigate} selectedId={selected?.id} canEdit={canEdit} onMove={move} onRename={(node) => { setActionNode(node); setRenameOpen(true) }} onDelete={(node) => void beginDelete(node)} />}
     </div>
     <ErrorNotification message={actionError} />
-    <RenameDialog node={selectedNode} module={module} open={renameOpen} onOpenChange={setRenameOpen} onSaved={invalidate} />
+    <RenameDialog node={actionNode} module={module} open={renameOpen} onOpenChange={setRenameOpen} onSaved={invalidate} />
     {module !== 'wiki' && <CreateDirectoryDialog module={module} projectId={projectId} parentId={selected?.kind === 'directory' ? selected.id : selectedNode?.node_kind === 'document' ? selectedNode.directory_id : null} open={createDirectoryOpen} onOpenChange={setCreateDirectoryOpen} onCreated={invalidate} />}
     <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}><DialogContent><DialogHeader><DialogTitle>确认删除</DialogTitle><DialogDescription>将递归软删除 {deleteImpact?.directories ?? 0} 个目录和 {deleteImpact?.documents ?? 0} 篇文档；引用会保留并标记为已删除。</DialogDescription></DialogHeader><DialogFooter><Button variant="outline" onClick={() => setDeleteOpen(false)}>取消</Button><Button variant="destructive" onClick={() => void confirmDelete()}>删除</Button></DialogFooter></DialogContent></Dialog>
   </aside>
@@ -386,7 +397,7 @@ function DocumentEditor({
     ? `${documentLabel(module)} / ${document.title || '未命名文档'}`
     : `${documentLabel(module)} / 新建文档`
   return <form onSubmit={(event) => { event.preventDefault(); void save() }} className="flex min-w-0 flex-1 flex-col"><ErrorNotification message={error} />
-    <header className="border-b bg-background"><div className="mx-auto flex min-h-14 w-full max-w-5xl items-center justify-between gap-3 px-5 sm:px-8"><div className="flex min-w-0 items-center gap-3"><span className="rounded-md bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">{documentLabel(module)}</span><span className="hidden items-center gap-1.5 text-xs text-muted-foreground sm:flex"><span className={`h-1.5 w-1.5 rounded-full ${dirty ? 'bg-amber-500' : 'bg-emerald-500'}`} />{status}</span></div><div className="flex items-center gap-2"><Button type="button" size="sm" variant="outline" onClick={onCancel}>取消</Button><Button type="submit" size="sm" disabled={submitting}>{submitting ? '保存中…' : document ? '重新保存' : '保存'}</Button></div></div></header>
+    <header className="border-b bg-background"><div className="mx-auto flex min-h-14 w-full max-w-5xl items-center justify-between gap-3 px-5 sm:px-8"><div className="flex min-w-0 items-center gap-3"><span className="rounded-md bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">{documentLabel(module)}</span><span className="hidden items-center gap-1.5 text-xs text-muted-foreground sm:flex"><span className={`h-1.5 w-1.5 rounded-full ${dirty ? 'bg-amber-500' : 'bg-emerald-500'}`} />{status}</span></div><div className="flex items-center gap-2"><Button type="button" size="sm" variant="outline" onClick={onCancel}>取消</Button><Button type="submit" size="sm" disabled={submitting}>{submitting ? '保存中…' : '保存'}</Button></div></div></header>
     <main className="flex flex-1 flex-col bg-muted/30"><article data-testid="document-writing-canvas" className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-6 py-8 sm:px-10 sm:py-10"><h1 className="sr-only">{document ? `编辑${document.title}` : `新建${documentLabel(module)}`}</h1><div className="text-xs text-muted-foreground">{canvasBreadcrumb}</div><div className="mt-5"><Label htmlFor="document-title" className="sr-only">标题</Label><Input id="document-title" autoComplete="off" value={title} onChange={(event) => { setTitle(event.target.value); markDirty() }} maxLength={256} required placeholder="无标题" className="h-auto rounded-none border-0 bg-transparent px-0 py-0 text-[2.5rem] font-semibold leading-tight tracking-[-0.045em] shadow-none placeholder:text-muted-foreground/55 focus-visible:ring-0 md:!text-5xl" /></div>
       {module === 'api' && <section className="mt-8 space-y-4 rounded-xl border bg-muted/20 p-4 sm:p-5"><div><h2 className="font-medium">接口定义</h2><p className="mt-1 text-sm text-muted-foreground">端点和 Schema 会随正文一起保存为同一版本。</p></div><div className="grid gap-3 sm:grid-cols-[140px_1fr]"><div className="space-y-1.5"><Label htmlFor="api-method">方法</Label><Input id="api-method" autoComplete="off" value={method} onChange={(event) => { setMethod(event.target.value.toUpperCase()); markDirty() }} required /></div><div className="space-y-1.5"><Label htmlFor="api-path">路径</Label><Input id="api-path" autoComplete="off" value={path} onChange={(event) => { setPath(event.target.value); markDirty() }} required /></div></div><div className="space-y-2"><div className="flex items-center justify-between"><Label>Schema 字段</Label><Button type="button" size="sm" variant="outline" onClick={() => { setFields((current) => [...current, { name: '', type: 'string' }]); markDirty() }}>添加字段</Button></div>{fields.map((field, index) => <div key={index} className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_130px_auto_auto]"><Input aria-label={`字段名 ${index + 1}`} autoComplete="off" value={field.name} onChange={(event) => changeField(index, { name: event.target.value })} placeholder="字段名" required /><select aria-label={`字段类型 ${index + 1}`} value={field.type} onChange={(event) => changeField(index, { type: event.target.value as ApiSchemaField['type'] })} className="h-8 rounded-lg border bg-background px-2 text-sm">{API_TYPES.map((item) => <option key={item}>{item}</option>)}</select><label className="flex h-8 items-center gap-1.5 text-sm"><input type="checkbox" autoComplete="off" checked={Boolean(field.required)} onChange={(event) => changeField(index, { required: event.target.checked })} />必填</label><Button type="button" size="sm" variant="ghost" onClick={() => { setFields((current) => current.filter((_, i) => i !== index)); markDirty() }}>移除</Button></div>)}</div></section>}
       <section className="mt-10 flex-1 pb-24"><Label id="document-content-label" className="sr-only">正文</Label><p id="document-content-hint" className="sr-only">Markdown 即时渲染。选中文本时可使用格式工具，也可直接输入 Markdown 语法。</p><VditorIrEditor className="document-vditor min-h-[26rem]" initialMarkdown={content} onChange={(markdown) => { setContent(markdown); markDirty() }} disabled={submitting} ariaLabelledBy="document-content-label" ariaDescribedBy="document-content-hint" /></section></article></main>
@@ -415,7 +426,7 @@ function DocumentDetail({ module, document, onEdit }: { module: DocumentType; do
     }
   }
   async function remove() { try { await api.post(`/documents/${module}/${document.id}/delete`); navigate(moduleBase(module)); } catch (err) { setError(err instanceof ApiError ? err.message : '删除失败') } }
-  return <main className="mx-auto w-full max-w-5xl px-6 py-10 sm:px-10"><div className="mx-auto max-w-3xl"><div className="flex flex-wrap items-start justify-between gap-4 border-b pb-5"><div><span className="rounded-md bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">{documentLabel(module)}</span><h1 className="mt-4 text-3xl font-semibold tracking-tight">{document.title}</h1><p className="mt-2 text-sm text-muted-foreground">更新于 {new Date(document.updated_at).toLocaleString()}</p></div>{canEdit && <div className="flex gap-2"><Button variant="outline" onClick={() => setVersionsOpen(true)}><History className="mr-2 h-4 w-4" />版本</Button><Button variant="outline" onClick={onEdit}>编辑</Button><Button variant="destructive" onClick={() => void beginDelete()}><Trash2 className="mr-2 h-4 w-4" />删除</Button></div>}</div>
+  return <main className="mx-auto w-full max-w-5xl px-6 py-10 sm:px-10"><div className="mx-auto max-w-3xl"><div className="flex flex-wrap items-start justify-between gap-4 border-b pb-5"><div><span className="rounded-md bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">{documentLabel(module)}</span><h1 className="mt-4 text-3xl font-semibold tracking-tight">{document.title}</h1><p className="mt-2 text-sm text-muted-foreground">更新于 {new Date(document.updated_at).toLocaleString()}</p></div>{canEdit && <div className="flex gap-2"><Button variant="destructive" onClick={() => void beginDelete()}><Trash2 className="mr-2 h-4 w-4" />删除</Button><Button variant="outline" onClick={() => setVersionsOpen(true)}><History className="mr-2 h-4 w-4" />版本</Button><Button onClick={onEdit}><Pencil className="mr-2 h-4 w-4" />编辑</Button></div>}</div>
     {module === 'api' && <section className="mt-7 rounded-xl border bg-muted/20 p-5"><h2 className="font-medium">{document.metadata.endpoint?.method} {document.metadata.endpoint?.path}</h2><div className="mt-4 space-y-2">{(document.metadata.schema?.fields ?? []).map((field) => <div key={field.name} className="flex gap-3 text-sm"><code>{field.name}</code><span className="text-muted-foreground">{field.type}</span>{field.required && <span className="text-destructive">必填</span>}</div>)}</div></section>}
     <section className="mt-8"><VditorMarkdownViewer markdown={document.content ?? ''} /></section><section className="mt-8 rounded-xl border p-5"><h2 className="font-medium">引用</h2><div className="mt-3 space-y-2 text-sm">{references?.items.length ? references.items.map((reference) => <p key={reference.id}>{reference.from_id === document.id ? '引用了' : '被引用于'} {reference.from_id === document.id ? reference.to_type : reference.from_type}:{(reference.from_id === document.id ? reference.to_id : reference.from_id).slice(0, 8)}</p>) : <p className="text-muted-foreground">暂无引用</p>}</div></section></div><ErrorNotification message={error} />
     <Dialog open={versionsOpen} onOpenChange={setVersionsOpen}><DialogContent><DialogHeader><DialogTitle>版本历史</DialogTitle><DialogDescription>回滚会复制历史快照并创建新版本。</DialogDescription></DialogHeader><div className="max-h-96 space-y-2 overflow-y-auto">{versions?.items.map((version) => <div key={version.id} className="flex items-center justify-between rounded border p-3 text-sm"><span>版本 {version.version_no} · {version.title}</span>{canEdit && <Button size="sm" variant="outline" onClick={() => setRollbackTarget(version.version_no)}><RotateCcw className="mr-1.5 h-3.5 w-3.5" />回滚</Button>}</div>)}</div></DialogContent></Dialog>
