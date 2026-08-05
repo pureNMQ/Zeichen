@@ -128,3 +128,53 @@
     @apply font-sans;
     }
 }
+
+.document-vditor .vditor {
+  --border-color: var(--border);
+  --panel-background-color: transparent;
+  --textarea-background-color: transparent;
+  --toolbar-background-color: var(--popover);
+  border: 0;
+  border-radius: 0;
+  min-height: 26rem;
+  position: relative;
+}
+
+.document-vditor .vditor-content,
+.document-vditor .vditor-ir,
+.document-vditor .vditor-ir pre.vditor-reset,
+.document-vditor .vditor-ir pre.vditor-reset:focus {
+  background: transparent;
+}
+
+.document-vditor .vditor-ir pre.vditor-reset {
+  min-height: 26rem;
+  padding: 0;
+  color: var(--foreground);
+  font-family: ui-serif, Georgia, "Noto Serif SC", serif;
+  font-size: 1.0625rem;
+  line-height: 1.85;
+}
+
+.document-vditor .vditor-toolbar {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 10px 24px rgb(0 0 0 / 0.1);
+  left: 0;
+  max-width: min(100%, 32rem);
+  position: absolute;
+  top: 0;
+  width: max-content;
+  z-index: 20;
+}
+
+.document-vditor .vditor-toolbar.vditor-toolbar--hide {
+  display: none;
+}
+
+.document-vditor .vditor-reset h1,
+.document-vditor .vditor-reset h2,
+.document-vditor .vditor-reset h3 {
+  font-family: var(--font-sans);
+  letter-spacing: -0.025em;
+}

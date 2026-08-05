@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>文档工作台：两种正文编辑体验</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #1c1c1c;
+      --muted: #777;
+      --line: #e9e9e7;
+      --wash: #f7f7f5;
+      --paper: #fff;
+      --accent: #2563eb;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f1f1ef; color: var(--ink); font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .page { max-width: 1480px; margin: 0 auto; padding: 32px; }
+    h1 { margin: 0; font-size: 24px; font-weight: 650; letter-spacing: -.03em; }
+    .intro { max-width: 760px; margin: 10px 0 28px; color: var(--muted); line-height: 1.65; }
+    .comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
+    .option { overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: var(--paper); box-shadow: 0 16px 40px rgb(0 0 0 / 5%); }
+    .option-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
+    .option-heading h2 { margin: 0; font-size: 15px; font-weight: 650; }
+    .tag { padding: 4px 8px; border-radius: 999px; background: var(--wash); color: var(--muted); font-size: 12px; white-space: nowrap; }
+    .shell { display: grid; min-height: 565px; grid-template-columns: 150px 1fr; background: #fafaf9; }
+    .tree { padding: 16px 12px; border-right: 1px solid var(--line); color: #555; font-size: 12px; }
+    .tree p { margin: 0 0 14px; color: #9a9a96; font-size: 11px; font-weight: 650; letter-spacing: .04em; }
+    .tree-item { margin: 4px 0; padding: 8px 9px; border-radius: 6px; }
+    .tree-item.active { background: #252525; color: white; }
+    .work { min-width: 0; background: var(--paper); }
+    .bar { display: flex; align-items: center; justify-content: space-between; height: 52px; padding: 0 18px; border-bottom: 1px solid var(--line); color: #555; font-size: 12px; }
+    .save { padding: 7px 10px; border-radius: 7px; background: #222; color: white; font-size: 12px; }
+    .old-body { padding: 25px 28px; }
+    .old-title { color: #a6a6a2; font-size: 26px; font-weight: 600; }
+    .old-help { margin: 10px 0 28px; color: #888; font-size: 12px; }
+    .input-label { display: flex; justify-content: space-between; padding: 0 0 9px; font-size: 12px; font-weight: 650; }
+    .input-label span:last-child { color: #8d8d8a; font-weight: 400; }
+    .old-editor { height: 365px; border: 1px solid #aac8ff; border-radius: 4px; background: #fbfdff; }
+    .toolbar { display: flex; align-items: center; gap: 11px; height: 47px; padding: 0 16px; border-bottom: 1px solid #cdddf9; background: #f4f8ff; color: #63728b; font-size: 17px; }
+    .toolbar i { font-style: normal; }
+    .old-placeholder { padding: 16px; color: #b1b7c0; font-size: 13px; }
+    .new-work { background: #fbfbfa; }
+    .new-canvas { max-width: 420px; margin: 0 auto; padding: 72px 0 90px; }
+    .breadcrumb { margin-bottom: 28px; color: #999; font-size: 12px; }
+    .new-title { margin: 0; font-size: 34px; font-weight: 650; letter-spacing: -.045em; line-height: 1.15; }
+    .meta { display: flex; gap: 12px; margin: 16px 0 43px; color: #999; font-size: 12px; }
+    .doc-copy { color: #3d3d3b; font-family: ui-serif, Georgia, "Noto Serif SC", serif; font-size: 16px; line-height: 1.85; }
+    .doc-copy p { margin: 0 0 18px; }
+    .doc-copy h3 { margin: 33px 0 12px; font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 20px; letter-spacing: -.025em; }
+    .edit-line { display: flex; align-items: center; gap: 9px; min-height: 34px; margin-top: 28px; color: #a2a29f; font-family: ui-serif, Georgia, "Noto Serif SC", serif; font-size: 16px; }
+    .plus { display: grid; place-items: center; width: 20px; height: 20px; border: 1px solid #d7d7d3; border-radius: 5px; color: #888; font-family: Inter, sans-serif; font-size: 16px; line-height: 1; }
+    .bubble { display: flex; align-items: center; gap: 9px; width: max-content; margin: -3px 0 18px 108px; padding: 7px 10px; border: 1px solid #e5e5e1; border-radius: 8px; background: white; box-shadow: 0 8px 18px rgb(0 0 0 / 7%); color: #4f4f4c; font-size: 12px; }
+    .bubble b { font-size: 13px; }
+    .bubble .divider { width: 1px; height: 14px; background: #e7e7e4; }
+    .notes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; margin-top: 16px; color: #666; font-size: 13px; line-height: 1.6; }
+    .notes strong { color: #292927; }
+    @media (max-width: 900px) { .comparison, .notes { grid-template-columns: 1fr; } .page { padding: 18px; } }
+    @media (max-width: 460px) { .shell { grid-template-columns: 1fr; } .tree { display: none; } .new-canvas { padding: 42px 24px; } .old-body { padding: 22px 18px; } }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <h1>正文不该像“提交评论”</h1>
+    <p class="intro">两种方案保留相同的全局导航、文档树和显式保存；区别只在右侧正文区如何让人进入写文档的状态。</p>
+    <section class="comparison" aria-label="文档编辑体验对比">
+      <article class="option">
+        <div class="option-heading"><h2>当前：编辑器是一个控件</h2><span class="tag">输入框感</span></div>
+        <div class="shell">
+          <aside class="tree"><p>文件组织</p><div class="tree-item active">产品需求</div><div class="tree-item">发布说明</div><div class="tree-item">技术方案</div></aside>
+          <div class="work">
+            <div class="bar"><span>← 返回　·　Wiki　·　未保存</span><span class="save">保存版本</span></div>
+            <div class="old-body">
+              <div class="old-title">输入文档标题</div>
+              <div class="old-help">保存会创建一个新的版本。</div>
+              <div class="input-label"><span>正文</span><span>Markdown 即时渲染</span></div>
+              <div class="old-editor"><div class="toolbar"><i>H</i><i><b>B</b></i><i><em>I</em></i><i>⌁</i><i>❯</i><i>—</i><i>☷</i><i>↗</i><i>⌘</i><i>↶</i><i>↷</i></div><div class="old-placeholder">在这里开始输入……</div></div>
+            </div>
+          </div>
+        </div>
+      </article>
+      <article class="option">
+        <div class="option-heading"><h2>建议：编辑器就是文档页面</h2><span class="tag">写作画布</span></div>
+        <div class="shell">
+          <aside class="tree"><p>文件组织</p><div class="tree-item active">产品需求</div><div class="tree-item">发布说明</div><div class="tree-item">技术方案</div></aside>
+          <div class="work new-work">
+            <div class="bar"><span>← 返回　·　Wiki　·　已保存</span><span class="save">保存版本</span></div>
+            <article class="new-canvas">
+              <div class="breadcrumb">Wiki / 产品 / 需求说明</div>
+              <h2 class="new-title">产品需求</h2>
+              <div class="meta"><span>今天 10:24</span><span>·</span><span>由 puremi 编辑</span></div>
+              <div class="doc-copy">
+                <p>这是一份关于产品目标、用户场景与交付范围的说明。文字从标题下自然开始，没有另一层巨大的输入框。</p>
+                <h3>目标</h3>
+                <p>让团队在同一处形成清晰、可持续维护的项目共识，并在阅读和编辑之间保持一致的体验。</p>
+              </div>
+              <div class="edit-line"><span class="plus">+</span><span>输入 <b>/</b> 添加内容，或直接开始写作</span></div>
+              <div class="bubble" aria-label="选中文本时出现的格式工具"><b>B</b><em>I</em><span>链接</span><span class="divider"></span><span>标题</span><span>引用</span></div>
+            </article>
+          </div>
+        </div>
+      </article>
+    </section>
+    <div class="notes"><div><strong>左侧：</strong>焦点被编辑器边框、固定高度和持续可见的格式按钮占据；页面主体是控件。</div><div><strong>右侧：</strong>焦点是内容本身；工具只在需要格式化时出现，页面随内容生长，并保持适合长文阅读的行宽。</div></div>
+  </main>
+</body>
+</html>

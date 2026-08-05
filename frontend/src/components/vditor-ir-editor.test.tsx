@@ -6,6 +6,7 @@ const vditorMock = vi.hoisted(() => {
     destroy: vi.fn(),
     disabled: vi.fn(),
     enable: vi.fn(),
+    updateToolbarConfig: vi.fn(),
     getValue: vi.fn(() => ''),
     setValue: vi.fn(),
   }
@@ -35,7 +36,9 @@ describe('VditorIrEditor', () => {
     const [, options] = vditorMock.constructor.mock.calls[0]! as unknown as [HTMLElement, {
       mode: string
       value: string
+      placeholder: string
       toolbar: string[]
+      toolbarConfig: { hide: boolean; pin: boolean }
       cache: { enable: boolean }
       input: (markdown: string) => void
       after: () => void
@@ -43,8 +46,10 @@ describe('VditorIrEditor', () => {
     expect(options).toMatchObject({
       mode: 'ir',
       value: '# Title',
+      placeholder: '输入 / 添加内容，或直接开始写作',
       cache: { enable: false },
       toolbar: ['headings', 'bold', 'italic', 'strike', 'quote', 'line', 'list', 'ordered-list', 'link', 'inline-code', 'code', 'undo', 'redo'],
+      toolbarConfig: { hide: true, pin: false },
     })
 
     act(() => options.input('updated markdown'))
@@ -79,6 +84,28 @@ describe('VditorIrEditor', () => {
 
     act(() => options.after())
     expect(vditorMock.instance.destroy).toHaveBeenCalledTimes(1)
+  })
+
+  it('reveals formatting tools only for a text selection inside the document canvas', async () => {
+    const { container } = render(<VditorIrEditor initialMarkdown="" onChange={vi.fn()} />)
+
+    await waitFor(() => expect(vditorMock.constructor).toHaveBeenCalledTimes(1))
+    const [, options] = vditorMock.constructor.mock.calls[0]! as unknown as [HTMLElement, { after: () => void }]
+    const host = container.querySelector('[aria-busy]')!
+    host.innerHTML = '<div class="vditor-toolbar"></div><pre class="vditor-reset" contenteditable="true">format this text</pre>'
+    const text = host.querySelector('pre')!.firstChild!
+    const range = document.createRange()
+    range.selectNodeContents(text)
+    Object.assign(range, { getBoundingClientRect: () => ({ left: 20, top: 20, width: 80 }) })
+    const selection = window.getSelection()!
+    selection.removeAllRanges()
+    selection.addRange(range)
+
+    act(() => options.after())
+    act(() => document.dispatchEvent(new Event('selectionchange')))
+
+    expect(vditorMock.instance.updateToolbarConfig).toHaveBeenCalledWith({ hide: false, pin: false })
+    selection.removeAllRanges()
   })
 })
 

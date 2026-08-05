@@ -88,7 +88,9 @@ export function VditorIrEditor({
     const editor = new Vditor(host, {
       mode: 'ir',
       value: initialMarkdownRef.current,
+      placeholder: '输入 / 添加内容，或直接开始写作',
       toolbar: IR_TOOLBAR,
+      toolbarConfig: { hide: true, pin: false },
       cache: { enable: false },
       cdn: VDITOR_CDN,
       input(markdown) {
@@ -139,6 +141,56 @@ export function VditorIrEditor({
     if (disabled) editor.disabled()
     else editor.enable()
   }, [disabled])
+
+  useEffect(() => {
+    const host = hostRef.current
+    const editor = editorRef.current
+    if (!host || !editor || !ready) return
+    const editorHost = host
+    const activeEditor = editor
+
+    let toolbarVisible = false
+    let blurTimer: number | undefined
+
+    function setToolbarVisible(visible: boolean, range?: Range) {
+      if (toolbarVisible === visible) return
+      toolbarVisible = visible
+      activeEditor.updateToolbarConfig({ hide: !visible, pin: false })
+      if (!visible || !range) return
+
+      const toolbar = editorHost.querySelector<HTMLElement>('.vditor-toolbar')
+      const hostBox = editorHost.getBoundingClientRect()
+      const selectionBox = range.getBoundingClientRect()
+      if (!toolbar || !selectionBox.width) return
+      toolbar.style.left = `${Math.max(0, selectionBox.left - hostBox.left)}px`
+      toolbar.style.top = `${Math.max(0, selectionBox.top - hostBox.top - toolbar.offsetHeight - 10)}px`
+    }
+
+    function updateToolbarFromSelection() {
+      const selection = window.getSelection()
+      if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+        setToolbarVisible(false)
+        return
+      }
+      const range = selection.getRangeAt(0)
+      setToolbarVisible(editorHost.contains(range.commonAncestorContainer), range)
+    }
+
+    function hideAfterFocusLeaves() {
+      window.clearTimeout(blurTimer)
+      blurTimer = window.setTimeout(() => {
+        if (!editorHost.contains(document.activeElement)) setToolbarVisible(false)
+      }, 0)
+    }
+
+    document.addEventListener('selectionchange', updateToolbarFromSelection)
+    editorHost.addEventListener('focusout', hideAfterFocusLeaves)
+    return () => {
+      window.clearTimeout(blurTimer)
+      document.removeEventListener('selectionchange', updateToolbarFromSelection)
+      editorHost.removeEventListener('focusout', hideAfterFocusLeaves)
+    }
+  }, [ready])
 
   useEffect(() => {
     const editable = hostRef.current?.querySelector<HTMLElement>('pre.vditor-reset[contenteditable="true"]')
