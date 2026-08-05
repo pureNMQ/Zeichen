@@ -49,6 +49,8 @@ const rootNodes = [
     deleted_at: null, parent_id: null, directory_id: null, has_children: false,
   },
 ]
+let treeNodes = rootNodes
+let createdNode: (typeof rootNodes)[number] | null = null
 
 function renderWorkbench(initialEntry = '/documents/wiki') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -73,18 +75,30 @@ describe('文档工作台', () => {
     vi.clearAllMocks()
     localStorage.clear()
     role = 'owner'
+    treeNodes = rootNodes
+    createdNode = null
     vi.mocked(api.get).mockImplementation((path: string) => {
       if (path === '/projects') {
         return Promise.resolve([{ id: 'p1', name: '测试项目', created_at: '2026-08-01T00:00:00Z', my_role: role }])
       }
-      if (path === '/projects/p1/documents/wiki/children?limit=100') return Promise.resolve({ items: rootNodes, next_cursor: null })
+      if (path === '/projects/p1/documents/wiki/children?limit=100') return Promise.resolve({ items: treeNodes, next_cursor: null })
       if (path === '/projects/p1/documents/wiki/children?parent_id=parent&limit=100') return Promise.resolve({ items: [rootNodes[1]], next_cursor: null })
       if (path === '/projects/p1/documents/wiki/ancestors/document/child') return Promise.resolve({ items: [rootNodes[0], { ...rootNodes[1], id: 'child', parent_id: 'parent' }] })
       if (path === '/documents/wiki/child') return Promise.resolve({ ...rootNodes[1], id: 'child', parent_id: 'parent' })
       if (path === '/documents/wiki/other') return Promise.resolve(rootNodes[1])
       if (path === '/documents/wiki/other/references') return Promise.resolve({ count: 0, items: [] })
       if (path === '/documents/wiki/child/references') return Promise.resolve({ count: 0, items: [] })
+      if (path === '/documents/wiki/new-document' && createdNode) return Promise.resolve(createdNode)
+      if (path === '/documents/wiki/new-document/references') return Promise.resolve({ count: 0, items: [] })
       return Promise.resolve({ items: [], next_cursor: null })
+    })
+    vi.mocked(api.post).mockImplementation((path: string, body?: unknown) => {
+      if (path === '/projects/p1/documents/wiki') {
+        createdNode = { ...rootNodes[1], id: 'new-document', title: (body as { title: string }).title }
+        treeNodes = [...treeNodes, createdNode]
+        return Promise.resolve(createdNode)
+      }
+      return Promise.resolve({})
     })
   })
 
@@ -130,6 +144,16 @@ describe('文档工作台', () => {
     expect(screen.queryByText('尚未创建 · Markdown 文档')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '返回' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '保存' })).toBeInTheDocument()
+  })
+
+  it('保存新建 Wiki 后会刷新左侧文件树', async () => {
+    const user = userEvent.setup()
+    renderWorkbench('/documents/wiki?mode=new')
+
+    await user.type(await screen.findByLabelText('标题'), '新文档')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    expect(await screen.findByRole('button', { name: '新文档' })).toBeInTheDocument()
   })
 
   it('编辑器有未保存变更时，切换树节点会显示三选一保护', async () => {

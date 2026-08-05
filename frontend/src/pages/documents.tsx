@@ -251,9 +251,11 @@ function ModuleTreeSidebar({
     }).catch(() => undefined)
   }, [module, projectId, selected?.id, selected?.kind])
 
-  function invalidate() {
-    void qc.invalidateQueries({ queryKey: ['document-tree', projectId, module] })
-    void qc.invalidateQueries({ queryKey: ['document-node'] })
+  async function invalidate() {
+    await Promise.all([
+      qc.invalidateQueries({ queryKey: ['document-tree', projectId, module] }),
+      qc.invalidateQueries({ queryKey: ['document-node'] }),
+    ])
   }
   function toggle(id: string) { setExpanded((current) => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next }) }
   function createDocument() {
@@ -287,7 +289,7 @@ function ModuleTreeSidebar({
       const path = selectedNode.node_kind === 'directory' ? `/directories/${module}/${selectedNode.id}/delete` : `/documents/${module}/${selectedNode.id}/delete`
       await api.post(path)
       setDeleteOpen(false)
-      invalidate()
+      await invalidate()
       navigate(moduleBase(module))
     } catch (err) { setActionError(err instanceof ApiError ? err.message : '删除失败') }
   }
@@ -339,6 +341,7 @@ function DocumentEditor({
   onCancel: () => void
 }) {
   const { projectId } = useCurrentProject()
+  const qc = useQueryClient()
   const [title, setTitle] = useState(document?.title ?? '')
   const [content, setContent] = useState(document?.content ?? '')
   const [method, setMethod] = useState(document?.metadata.endpoint?.method ?? 'GET')
@@ -363,6 +366,10 @@ function DocumentEditor({
       const saved = document
         ? await api.patch<DocumentRow>(`/documents/${module}/${document.id}`, { title: title.trim(), content, metadata })
         : await api.post<DocumentRow>(`/projects/${projectId}/documents/${module}`, { title: title.trim(), doc_type: module, content, metadata, ...(module === 'wiki' ? { parent_id: containerId } : { directory_id: containerId }) })
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['document-tree', projectId, module] }),
+        qc.invalidateQueries({ queryKey: ['document-node', module, saved.id] }),
+      ])
       setDirty(false)
       onDirtyChange(false)
       if (!stayOnPage) onSaved(saved)
