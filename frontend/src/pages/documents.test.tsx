@@ -122,6 +122,15 @@ describe('文档工作台', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
+  it('新建页使用阅读优先的文档画布，而不是表单式编辑框', async () => {
+    renderWorkbench('/documents/wiki?mode=new')
+
+    expect(await screen.findByTestId('document-writing-canvas')).toBeInTheDocument()
+    expect(screen.getByText('Wiki / 新建文档')).toBeInTheDocument()
+    expect(screen.getByText('尚未创建 · Markdown 文档')).toBeInTheDocument()
+    expect(screen.queryByText('保存会创建一个新的版本。')).not.toBeInTheDocument()
+  })
+
   it('编辑器有未保存变更时，切换树节点会显示三选一保护', async () => {
     const user = userEvent.setup()
     renderWorkbench('/documents/wiki?mode=new')
