@@ -269,10 +269,11 @@ function ModuleTreeSidebar({
     ])
   }
   function toggle(id: string) { setExpanded((current) => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next }) }
-  function createDocument() {
-    const parent = module === 'wiki' ? (selected?.kind === 'document' ? selected.id : null) : (selected?.kind === 'directory' ? selected.id : selectedNode && selectedNode.node_kind === 'document' ? selectedNode.directory_id : null)
+  function createDocument(parentId?: string | null) {
+    const parent = parentId === undefined ? (module === 'wiki' ? (selected?.kind === 'document' ? selected.id : null) : (selected?.kind === 'directory' ? selected.id : selectedNode && selectedNode.node_kind === 'document' ? selectedNode.directory_id : null)) : parentId
     onNavigate(`${moduleBase(module)}?mode=new${parent ? `&container_id=${parent}` : ''}`)
   }
+  function createRootDocument() { createDocument(null) }
   function createDirectory() {
     if (module !== 'wiki') setCreateDirectoryOpen(true)
   }
@@ -309,7 +310,7 @@ function ModuleTreeSidebar({
   return <aside className="flex w-64 shrink-0 flex-col border-r bg-background" aria-label={`${documentLabel(module)}文件组织`}>
     <div className="border-b px-4 py-4"><p className="font-semibold">{documentLabel(module)}</p><p className="mt-1 truncate text-xs text-muted-foreground">{currentProject.name}</p></div>
     <div className="border-b p-3"><Input aria-label="搜索文档（即将支持）" autoComplete="off" placeholder="搜索文档（即将支持）" disabled /></div>
-    {canEdit && <div className="flex justify-end border-b p-3"><Button type="button" size="icon-sm" variant="ghost" aria-label={`新建${module === 'wiki' && selected?.kind === 'document' ? '子 Wiki' : documentLabel(module)}`} onClick={createDocument}><Plus className="h-4 w-4" /></Button>{module !== 'wiki' && <Button type="button" size="icon-sm" variant="ghost" aria-label="新建目录" onClick={createDirectory}><Plus className="h-4 w-4" /></Button>}</div>}
+    {canEdit && <div className="flex justify-end border-b p-3"><DropdownMenu><DropdownMenuTrigger asChild><Button type="button" size="icon-sm" variant="default" aria-label="新建"><Plus className="h-4 w-4" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-36">{module === 'wiki' ? <><DropdownMenuItem onClick={createRootDocument}>新建 Wiki</DropdownMenuItem>{selected?.kind === 'document' && <DropdownMenuItem onClick={() => createDocument(selected.id)}>新建子 Wiki</DropdownMenuItem>}</> : <><DropdownMenuItem onClick={() => createDocument()}>新建{documentLabel(module)}</DropdownMenuItem><DropdownMenuItem onClick={createDirectory}>新建目录</DropdownMenuItem></>}</DropdownMenuContent></DropdownMenu></div>}
     <div className="flex items-center justify-between px-3 pt-3"><p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">文件组织</p><Button size="xs" variant="ghost" onClick={() => setDeletedOpen((value) => !value)}>{deletedOpen ? '返回树' : '已删除'}</Button></div>
     <div className="flex-1 overflow-y-auto p-3" onDragOver={canEdit ? (event) => event.preventDefault() : undefined} onDrop={canEdit ? (event) => { const source = JSON.parse(event.dataTransfer.getData('application/x-zeichen-document-node')) as DocumentNode; move(source, null) } : undefined}>
       {deletedOpen ? <DeletedNodes projectId={projectId} module={module} canEdit={canEdit} onChanged={invalidate} /> : <TreeChildren projectId={projectId} module={module} parentId={null} expanded={expanded} onToggle={toggle} onNavigate={onNavigate} selectedId={selected?.id} canEdit={canEdit} onMove={move} onRename={(node) => { setActionNode(node); setRenameOpen(true) }} onDelete={(node) => void beginDelete(node)} />}

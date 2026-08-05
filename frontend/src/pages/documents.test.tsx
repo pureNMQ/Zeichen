@@ -136,6 +136,16 @@ describe('文档工作台', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
+  it('新建主按钮提供根 Wiki 与子 Wiki 两种创建位置', async () => {
+    const user = userEvent.setup()
+    renderWorkbench('/documents/wiki/child')
+
+    await user.click(await screen.findByRole('button', { name: '新建' }))
+
+    expect(await screen.findByRole('menuitem', { name: '新建 Wiki' })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: '新建子 Wiki' })).toBeInTheDocument()
+  })
+
   it('新建页使用阅读优先的文档画布，而不是表单式编辑框', async () => {
     renderWorkbench('/documents/wiki?mode=new')
 
