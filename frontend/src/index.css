@@ -151,9 +151,9 @@
   min-height: 26rem;
   padding: 0;
   color: var(--foreground);
-  font-family: ui-serif, Georgia, "Noto Serif SC", serif;
-  font-size: 1.0625rem;
-  line-height: 1.85;
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  line-height: 1.75;
 }
 
 .document-vditor .vditor-toolbar {

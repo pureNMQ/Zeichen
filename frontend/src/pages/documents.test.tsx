@@ -127,8 +127,9 @@ describe('文档工作台', () => {
 
     expect(await screen.findByTestId('document-writing-canvas')).toBeInTheDocument()
     expect(screen.getByText('Wiki / 新建文档')).toBeInTheDocument()
-    expect(screen.getByText('尚未创建 · Markdown 文档')).toBeInTheDocument()
-    expect(screen.queryByText('保存会创建一个新的版本。')).not.toBeInTheDocument()
+    expect(screen.queryByText('尚未创建 · Markdown 文档')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '返回' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '保存' })).toBeInTheDocument()
   })
 
   it('编辑器有未保存变更时，切换树节点会显示三选一保护', async () => {
