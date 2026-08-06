@@ -29,7 +29,7 @@ def upgrade() -> None:
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_by", sa.Uuid(), nullable=True),
         sa.Column("project_id", sa.Uuid(), nullable=False),
-        sa.CheckConstraint("module_type IN ('glossary', 'api')", name="ck_document_directory_module_type"),
+        sa.CheckConstraint("module_type IN ('glossary')", name="ck_document_directory_module_type"),
         sa.ForeignKeyConstraint(["created_by"], ["user.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["project_id"], ["project.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["parent_id"], ["document_directory.id"], ondelete="SET NULL"),

@@ -1,10 +1,7 @@
 """Create the independent code API reference aggregate.
 
-The preceding API-document tables are intentionally retained as legacy data;
-this migration never deletes HTTP endpoint records or old document history.
-
 Revision ID: 0807coderef
-Revises: 0806codetree
+Revises: 0420docworkbench
 Create Date: 2026-08-05 18:30:00.000000
 """
 
@@ -13,7 +10,7 @@ import sqlalchemy as sa
 
 
 revision = "0807coderef"
-down_revision = "0806codetree"
+down_revision = "0420docworkbench"
 branch_labels = None
 depends_on = None
 

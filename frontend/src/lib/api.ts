@@ -148,7 +148,7 @@ export interface Page<T> {
   next_cursor: string | null
 }
 
-export type DocumentType = 'wiki' | 'glossary' | 'api'
+export type DocumentType = 'wiki' | 'glossary'
 
 export type CodeSymbolKind = 'class' | 'struct' | 'interface' | 'enum' | 'function' | 'constructor' | 'method' | 'field' | 'property' | 'constant'
 
@@ -214,76 +214,13 @@ export interface CodeTreeNode {
   children: CodeTreeNode[]
 }
 
-export interface LibrarySymbolParameter {
-  name: string
-  type: string
-  required?: boolean
-  default_value?: string | null
-  description?: string | null
-}
-
-export interface LibrarySymbolException {
-  type: string
-  description?: string | null
-}
-
-export type LibrarySymbolKind = 'class' | 'struct' | 'interface' | 'enum' | 'function' | 'constructor' | 'method' | 'field' | 'property' | 'constant' | 'enum_value'
-
-export interface LibrarySymbol {
-  id?: string
-  document_id?: string
-  owner_symbol_id?: string | null
-  owner_symbol?: { symbol: string; kind: LibrarySymbolKind } | null
-  members?: { document_id: string; symbol: string; kind: LibrarySymbolKind; summary: string }[]
-  language: string
-  package: string
-  namespace?: string | null
-  symbol: string
-  kind: LibrarySymbolKind
-  visibility?: string | null
-  canonical_signature: string
-  return_type?: string | null
-  return_description?: string | null
-  since_version?: string | null
-  deprecated?: boolean
-  parameters: LibrarySymbolParameter[]
-  exceptions: LibrarySymbolException[]
-}
-
-export interface LibrarySymbolOption {
-  id: string
-  document_id: string
-  language: string
-  symbol: string
-  kind: LibrarySymbolKind
-  package: string
-  namespace?: string | null
-  canonical_signature: string
-}
-
-export interface LegacyCodeTreeNode {
-  node_kind: 'package' | 'namespace' | 'member_group' | 'symbol'
-  id: string
-  title: string
-  language?: string
-  package?: string
-  namespace?: string
-  symbol_kind?: LibrarySymbolKind
-  document?: DocumentRow
-  children: LegacyCodeTreeNode[]
-}
-
 export interface DocumentRow {
   id: string
   node_kind: 'document'
   title: string
   doc_type: DocumentType
   content: string | null
-  metadata: {
-    endpoint?: { method: string; path: string }
-    schema?: { fields?: { name: string; type: string; required?: boolean }[] }
-  }
-  library_symbol?: LibrarySymbol | null
+  metadata: Record<string, unknown>
   project_id: string
   created_by: string | null
   created_at: string
@@ -318,7 +255,6 @@ export interface DocumentVersionRow {
   title: string
   content: string
   metadata: DocumentRow['metadata']
-  library_symbol?: LibrarySymbol | null
   created_by: string | null
   created_at: string
 }

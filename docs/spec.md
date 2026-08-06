@@ -57,7 +57,7 @@
 | `project_member` | user_id, project_id, role | role: owner / editor / viewer;人+agent 共用 |
 | `requirement` | title, description, status | status: 见 §3.1(需求四态) |
 | `task` | title, description, status, assignee_id, requirement_id(可空) | status: 见 §3.2(任务五态);派生任务溯源,独立任务允许 |
-| `document` | title, doc_type(wiki/glossary/api), content, metadata JSON | 三子模块一表,差异进 metadata |
+| `document` | title, doc_type(wiki/glossary), content, metadata JSON | Wiki 与词条共用文档模型；代码参考使用独立的 CodeSymbol |
 | `document_version` | document_id, content, version_no | 全文版本链 |
 | `attachment` | target_type, target_id, file_name, size, storage_path | 挂任意实体 |
 | `comment` | target_type, target_id, author_id, body | 多态,check 约束 |
