@@ -46,7 +46,7 @@ const WORKSPACE_NAV = [
 const DOCUMENT_NAV = [
   { to: '/documents/wiki', label: 'Wiki' },
   { to: '/documents/glossary', label: '词条' },
-  { to: '/documents/api', label: 'API' },
+  { to: '/code-reference', label: '代码 API 参考' },
 ]
 
 function GuardedNavLink({ to, children }: { to: string; children: ReactNode }) {

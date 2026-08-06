@@ -21,7 +21,7 @@ from .base import (
     TimestampMixin,
 )
 
-TARGET_TYPE_VALUES = ("requirement", "task", "document", "project", "user")
+TARGET_TYPE_VALUES = ("requirement", "task", "document", "code_symbol", "project", "user")
 REFERENCE_TYPE_VALUES = ("derives", "documents", "implements", "mentions")
 
 

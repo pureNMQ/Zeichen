@@ -118,7 +118,7 @@ class TaskAssignBody(BaseModel):
 
 class DocumentCreate(BaseModel):
     title: str = Field(min_length=1, max_length=256)
-    doc_type: Literal["wiki", "glossary", "api"]
+    doc_type: Literal["wiki", "glossary"]
     content: str | None = None
     metadata: dict = {}
     parent_id: uuid.UUID | None = None
@@ -129,6 +129,44 @@ class DocumentUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=256)
     content: str | None = None
     metadata: dict | None = None
+
+
+class CodeLibraryCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    language: str = Field(min_length=1, max_length=32)
+    package: str = Field(min_length=1, max_length=256)
+    version: str | None = Field(default=None, max_length=64)
+
+
+class CodeSymbolCreate(BaseModel):
+    owner_symbol_id: uuid.UUID | None = None
+    namespace: str | None = Field(default=None, max_length=256)
+    kind: Literal["class", "struct", "interface", "enum", "function", "constructor", "method", "field", "property", "constant"]
+    name: str = Field(min_length=1, max_length=256)
+    summary: str = Field(min_length=1, max_length=512)
+    remarks: str | None = None
+    accessibility: Literal["public", "protected", "internal", "private"] = "public"
+    source_declaration: str | None = None
+    since_version: str | None = Field(default=None, max_length=64)
+    deprecated: bool = False
+    definition: dict
+
+
+class CodeSymbolUpdate(BaseModel):
+    expected_revision: int = Field(ge=1)
+    name: str | None = Field(default=None, min_length=1, max_length=256)
+    summary: str | None = Field(default=None, min_length=1, max_length=512)
+    remarks: str | None = None
+    accessibility: Literal["public", "protected", "internal", "private"] | None = None
+    source_declaration: str | None = None
+    since_version: str | None = Field(default=None, max_length=64)
+    deprecated: bool | None = None
+    definition: dict | None = None
+
+
+class CodeSymbolRollback(BaseModel):
+    revision: int = Field(ge=1)
+    expected_revision: int = Field(ge=1)
 
 
 class DocumentMove(BaseModel):
@@ -158,8 +196,8 @@ class CommentCreate(BaseModel):
 
 
 class ReferenceCreate(BaseModel):
-    from_type: Literal["requirement", "task", "document", "project"]
+    from_type: Literal["requirement", "task", "document", "code_symbol", "project"]
     from_id: uuid.UUID
-    to_type: Literal["requirement", "task", "document", "project"]
+    to_type: Literal["requirement", "task", "document", "code_symbol", "project"]
     to_id: uuid.UUID
     type: Literal["derives", "documents", "implements", "mentions"]

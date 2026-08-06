@@ -19,8 +19,8 @@ from .pagination import decode_cursor, page_result
 from .permissions import get_accessible_project, require_project_role
 from .polymorphic import record_activity
 
-DOC_TYPES = ("wiki", "glossary", "api")
-DIRECTORY_MODULES = ("glossary", "api")
+DOC_TYPES = ("wiki", "glossary")
+DIRECTORY_MODULES = ("glossary",)
 API_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
 FIELD_TYPES = {"string", "number", "integer", "boolean", "array", "object"}
 _UNSET = object()
@@ -50,6 +50,205 @@ def _document_dict(db: Session, document: Document, warning: dict | None = None)
     if warning is not None:
         result["reference_warning"] = warning
     return result
+
+
+def _library_symbol_dict(symbol: LibrarySymbol) -> dict:
+    return {
+        "id": str(symbol.id),
+        "document_id": str(symbol.document_id),
+        "owner_symbol_id": str(symbol.owner_symbol_id) if symbol.owner_symbol_id else None,
+        "owner_symbol": {"symbol": symbol.owner.symbol, "kind": symbol.owner.kind} if symbol.owner else None,
+        "language": symbol.language,
+        "package": symbol.package,
+        "namespace": symbol.namespace,
+        "symbol": symbol.symbol,
+        "kind": symbol.kind,
+        "visibility": symbol.visibility,
+        "canonical_signature": symbol.canonical_signature,
+        "return_type": symbol.return_type,
+        "return_description": symbol.return_description,
+        "since_version": symbol.since_version,
+        "deprecated": symbol.deprecated,
+        "parameters": [
+            {
+                "name": parameter.name,
+                "type": parameter.type_name,
+                "required": parameter.required,
+                "default_value": parameter.default_value,
+                "description": parameter.description,
+            }
+            for parameter in symbol.parameters
+        ],
+        "exceptions": [
+            {"type": exception.type_name, "description": exception.description}
+            for exception in symbol.exceptions
+        ],
+    }
+
+
+def _library_symbol_members(db: Session, symbol: LibrarySymbol) -> list[dict]:
+    members = db.scalars(
+        select(LibrarySymbol)
+        .join(Document)
+        .where(
+            LibrarySymbol.owner_symbol_id == symbol.id,
+            Document.deleted_at.is_(None),
+        )
+        .order_by(LibrarySymbol.kind, LibrarySymbol.symbol, LibrarySymbol.canonical_signature)
+    ).all()
+    return [{
+        "document_id": str(member.document_id),
+        "symbol": member.symbol,
+        "kind": member.kind,
+        "summary": next((line.strip() for line in (member.document.content or "").splitlines() if line.strip()), ""),
+    } for member in members]
+
+
+def _library_symbol_list_item(symbol: LibrarySymbol) -> dict:
+    """A compact, selectable symbol record for the API-document editor."""
+    return {
+        "id": str(symbol.id),
+        "document_id": str(symbol.document_id),
+        "language": symbol.language,
+        "symbol": symbol.symbol,
+        "kind": symbol.kind,
+        "package": symbol.package,
+        "namespace": symbol.namespace,
+        "canonical_signature": symbol.canonical_signature,
+    }
+
+
+def _code_tree_member_group(symbol: LibrarySymbol) -> tuple[str, str]:
+    groups = {
+        "constructor": ("constructors", "构造函数"),
+        "field": ("fields", "字段"),
+        "constant": ("fields", "字段"),
+        "property": ("properties", "属性"),
+        "method": ("methods", "方法"),
+        "enum_value": ("enum_values", "枚举值"),
+    }
+    return groups.get(symbol.kind, ("members", "成员"))
+
+
+def list_library_symbols(db: Session, user: User, project_id: uuid.UUID) -> dict:
+    get_accessible_project(db, user.id, project_id)
+    symbols = db.scalars(
+        select(LibrarySymbol)
+        .join(Document)
+        .where(Document.project_id == project_id, Document.doc_type == "api", Document.deleted_at.is_(None))
+        .order_by(LibrarySymbol.package, LibrarySymbol.namespace, LibrarySymbol.symbol, LibrarySymbol.canonical_signature)
+    ).all()
+    return {"items": [_library_symbol_list_item(symbol) for symbol in symbols]}
+
+
+def list_api_code_tree(db: Session, user: User, project_id: uuid.UUID) -> dict:
+    """Return API documents in their code ownership hierarchy, not directory order."""
+    get_accessible_project(db, user.id, project_id)
+    symbols = db.scalars(
+        select(LibrarySymbol)
+        .join(Document)
+        .where(Document.project_id == project_id, Document.doc_type == "api", Document.deleted_at.is_(None))
+        .order_by(LibrarySymbol.package, LibrarySymbol.namespace, LibrarySymbol.symbol, LibrarySymbol.canonical_signature)
+    ).all()
+    legacy_documents = db.scalars(
+        select(Document)
+        .outerjoin(LibrarySymbol)
+        .where(
+            Document.project_id == project_id,
+            Document.doc_type == "api",
+            Document.deleted_at.is_(None),
+            LibrarySymbol.id.is_(None),
+        )
+        .order_by(Document.title)
+    ).all()
+    by_id = {symbol.id: symbol for symbol in symbols}
+    children: dict[uuid.UUID, list[LibrarySymbol]] = {}
+    roots: list[LibrarySymbol] = []
+    for symbol in symbols:
+        if symbol.owner_symbol_id in by_id:
+            children.setdefault(symbol.owner_symbol_id, []).append(symbol)
+        else:
+            roots.append(symbol)
+
+    def symbol_node(symbol: LibrarySymbol) -> dict:
+        grouped: dict[tuple[str, str], list[dict]] = {}
+        for child in children.get(symbol.id, []):
+            grouped.setdefault(_code_tree_member_group(child), []).append(symbol_node(child))
+        member_nodes = [
+            {
+                "node_kind": "member_group",
+                "id": f"group:{symbol.id}:{key}",
+                "title": label,
+                "children": entries,
+            }
+            for (key, label), entries in grouped.items()
+        ]
+        return {
+            "node_kind": "symbol",
+            "id": str(symbol.id),
+            "title": symbol.symbol,
+            "symbol_kind": symbol.kind,
+            "document": _document_dict(db, symbol.document),
+            "children": member_nodes,
+        }
+
+    packages: dict[tuple[str, str], dict[str, list[LibrarySymbol]]] = {}
+    for symbol in roots:
+        packages.setdefault((symbol.language, symbol.package), {}).setdefault(symbol.namespace or "（全局命名空间）", []).append(symbol)
+    items = []
+    for (language, package), namespaces in packages.items():
+        namespace_nodes: dict[str, dict] = {}
+        for namespace, namespace_symbols in namespaces.items():
+            if namespace == "（全局命名空间）":
+                namespace_nodes[namespace] = {
+                    "node_kind": "namespace", "id": f"namespace:{language}:{package}:{namespace}",
+                    "title": namespace, "language": language, "package": package, "namespace": "",
+                    "children": [symbol_node(symbol) for symbol in namespace_symbols],
+                }
+                continue
+            parts = namespace.split(".")
+            for index in range(1, len(parts) + 1):
+                path = ".".join(parts[:index])
+                namespace_nodes.setdefault(path, {
+                    "node_kind": "namespace", "id": f"namespace:{language}:{package}:{path}",
+                    "title": path, "language": language, "package": package, "namespace": path,
+                    "children": [],
+                })
+            namespace_nodes[namespace]["children"].extend(symbol_node(symbol) for symbol in namespace_symbols)
+        roots: list[dict] = []
+        for namespace, node in namespace_nodes.items():
+            parent_name = namespace.rsplit(".", 1)[0] if "." in namespace else None
+            if parent_name and parent_name in namespace_nodes:
+                namespace_nodes[parent_name]["children"].append(node)
+            else:
+                roots.append(node)
+        items.append({
+            "node_kind": "package",
+            "id": f"package:{language}:{package}",
+            "title": package,
+            "language": language,
+            "package": package,
+            "children": roots,
+        })
+    if legacy_documents:
+        items.append({
+            "node_kind": "package",
+            "id": "package:legacy",
+            "title": "未结构化 API",
+            "children": [{
+                "node_kind": "namespace",
+                "id": "namespace:legacy",
+                "title": "待补充代码结构",
+                "children": [{
+                    "node_kind": "symbol",
+                    "id": f"legacy:{document.id}",
+                    "title": document.title,
+                    "document": _document_dict(db, document),
+                    "children": [],
+                } for document in legacy_documents],
+            }],
+        })
+    return {"items": items}
 
 
 def _directory_dict(db: Session, directory: DocumentDirectory) -> dict:
@@ -277,6 +476,172 @@ def _validate_api_metadata(
     return {**copy.deepcopy(metadata), "endpoint": {**endpoint, "method": method.upper(), "path": path}}
 
 
+def _clean_optional_string(value: object, field: str, max_length: int | None = None) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise invalid_request(f"程序库符号 {field} 必须是字符串")
+    value = value.strip()
+    if not value:
+        return None
+    if max_length is not None and len(value) > max_length:
+        raise invalid_request(f"程序库符号 {field} 过长")
+    return value
+
+
+def _validate_library_symbol(
+    db: Session,
+    document: Document,
+    payload: object,
+    exclude_symbol_id: uuid.UUID | None = None,
+) -> dict:
+    if not isinstance(payload, dict):
+        raise invalid_request("程序库符号必须是对象")
+    required = {"language": 64, "package": 256, "symbol": 256, "canonical_signature": None}
+    cleaned: dict[str, object] = {}
+    for field, max_length in required.items():
+        value = _clean_optional_string(payload.get(field), field, max_length)
+        cleaned[field] = value or ""
+    kind = _clean_optional_string(payload.get("kind"), "kind", 32) or "class"
+    if kind not in LIBRARY_SYMBOL_KINDS:
+        raise invalid_request("程序库符号 kind 无效")
+    cleaned["kind"] = kind
+    for field, max_length in (("namespace", 256), ("visibility", 32), ("return_type", 512), ("return_description", None), ("since_version", 64)):
+        cleaned[field] = _clean_optional_string(payload.get(field), field, max_length)
+    deprecated = payload.get("deprecated", False)
+    if not isinstance(deprecated, bool):
+        raise invalid_request("程序库符号 deprecated 必须是布尔值")
+    cleaned["deprecated"] = deprecated
+
+    owner_id = payload.get("owner_symbol_id")
+    if owner_id is not None:
+        try:
+            owner_uuid = uuid.UUID(str(owner_id))
+        except (TypeError, ValueError):
+            raise invalid_request("程序库符号 owner_symbol_id 无效") from None
+        owner = db.get(LibrarySymbol, owner_uuid)
+        if owner is None or owner.document.project_id != document.project_id:
+            raise invalid_request("所属符号必须属于同一项目")
+        if owner.document.deleted_at is not None:
+            raise invalid_request("所属符号的文档已删除")
+        if owner.document_id == document.id:
+            raise invalid_request("符号不能归属自身")
+        existing_symbol_id = document.library_symbol.id if document.library_symbol is not None else None
+        ancestor = owner
+        seen_owners: set[uuid.UUID] = set()
+        while ancestor.owner_symbol_id is not None:
+            if ancestor.id in seen_owners or ancestor.id == existing_symbol_id:
+                raise invalid_request("所属符号不能形成循环")
+            seen_owners.add(ancestor.id)
+            ancestor = db.get(LibrarySymbol, ancestor.owner_symbol_id)
+            if ancestor is None:
+                break
+        if ancestor is not None and ancestor.id == existing_symbol_id:
+            raise invalid_request("所属符号不能形成循环")
+        cleaned["language"] = owner.language
+        cleaned["package"] = owner.package
+        cleaned["namespace"] = owner.namespace
+        if kind == "constructor":
+            cleaned["symbol"] = owner.symbol
+            cleaned["return_type"] = None
+            cleaned["return_description"] = None
+        if kind == "enum_value" and owner.kind != "enum":
+            raise invalid_request("枚举值只能归属于枚举")
+        if kind in TYPE_MEMBER_KINDS and owner.kind not in TYPE_SYMBOL_KINDS:
+            raise invalid_request("构造函数、字段、属性和方法只能归属于类、结构体或接口")
+        if kind not in TYPE_MEMBER_KINDS | {"enum_value"}:
+            raise invalid_request("只有成员或枚举值可以设置所属符号")
+        cleaned["owner_symbol_id"] = owner_uuid
+    else:
+        cleaned["owner_symbol_id"] = None
+
+    parameters = payload.get("parameters", [])
+    if not isinstance(parameters, list):
+        raise invalid_request("程序库符号 parameters 必须是数组")
+    names: set[str] = set()
+    cleaned_parameters: list[dict] = []
+    for parameter in parameters:
+        if not isinstance(parameter, dict):
+            raise invalid_request("程序库参数必须是对象")
+        name = _clean_optional_string(parameter.get("name"), "参数 name", 128)
+        type_name = _clean_optional_string(parameter.get("type"), "参数 type", 512)
+        if name is None and type_name is None:
+            continue
+        if name and name in names:
+            raise invalid_request(f"程序库参数重复: {name}")
+        if name:
+            names.add(name)
+        parameter_required = parameter.get("required", False)
+        if not isinstance(parameter_required, bool):
+            raise invalid_request("程序库参数 required 必须是布尔值")
+        cleaned_parameters.append({
+            "name": name or "", "type": type_name or "", "required": parameter_required,
+            "default_value": _clean_optional_string(parameter.get("default_value"), "参数 default_value"),
+            "description": _clean_optional_string(parameter.get("description"), "参数 description"),
+        })
+    cleaned["parameters"] = cleaned_parameters
+
+    exceptions = payload.get("exceptions", [])
+    if not isinstance(exceptions, list):
+        raise invalid_request("程序库符号 exceptions 必须是数组")
+    cleaned_exceptions: list[dict] = []
+    for exception in exceptions:
+        if not isinstance(exception, dict):
+            raise invalid_request("程序库异常必须是对象")
+        type_name = _clean_optional_string(exception.get("type"), "异常 type", 512)
+        if type_name is None:
+            continue
+        cleaned_exceptions.append({
+            "type": type_name,
+            "description": _clean_optional_string(exception.get("description"), "异常 description"),
+        })
+    cleaned["exceptions"] = cleaned_exceptions
+
+    candidates = db.scalars(
+        select(LibrarySymbol).join(Document).where(
+            Document.project_id == document.project_id,
+            LibrarySymbol.language == cleaned["language"],
+            LibrarySymbol.package == cleaned["package"],
+            LibrarySymbol.namespace == cleaned["namespace"],
+            LibrarySymbol.owner_symbol_id == cleaned["owner_symbol_id"],
+            LibrarySymbol.symbol == cleaned["symbol"],
+            LibrarySymbol.canonical_signature == cleaned["canonical_signature"],
+        )
+    ).all()
+    if any(candidate.id != exclude_symbol_id for candidate in candidates):
+        raise conflict("程序库符号的规范签名已存在")
+    return cleaned
+
+
+def _save_library_symbol(db: Session, document: Document, payload: object) -> LibrarySymbol:
+    existing = document.library_symbol
+    values = _validate_library_symbol(db, document, payload, existing.id if existing else None)
+    if existing is None:
+        existing = LibrarySymbol(document_id=document.id)
+        db.add(existing)
+        document.library_symbol = existing
+    for field in (
+        "owner_symbol_id", "language", "package", "namespace", "symbol", "kind", "visibility",
+        "canonical_signature", "return_type", "return_description", "since_version", "deprecated",
+    ):
+        setattr(existing, field, values[field])
+    existing.parameters.clear()
+    existing.exceptions.clear()
+    # 先提交 orphan 删除，避免数据库在同一 position 上先插入新行而触发唯一约束。
+    db.flush()
+    for position, parameter in enumerate(values["parameters"]):
+        existing.parameters.append(LibrarySymbolParameter(
+            position=position, name=parameter["name"], type_name=parameter["type"],
+            required=parameter["required"], default_value=parameter["default_value"], description=parameter["description"],
+        ))
+    for position, exception in enumerate(values["exceptions"]):
+        existing.exceptions.append(LibrarySymbolException(
+            position=position, type_name=exception["type"], description=exception["description"],
+        ))
+    db.flush()
+    return existing
+
+
 def _create_version(db: Session, document: Document, actor_id: uuid.UUID) -> DocumentVersion:
     next_no = (
         db.scalar(
@@ -327,8 +692,6 @@ def create_document(
     _validate_location(db, project_id, doc_type, parent_id, directory_id)
     _assert_document_title_unique(db, project_id, doc_type, title, parent_id, directory_id)
     doc_metadata = copy.deepcopy(metadata or {})
-    if doc_type == "api":
-        doc_metadata = _validate_api_metadata(db, project_id, doc_metadata)
     document = Document(
         project_id=project_id,
         title=title,
@@ -370,12 +733,6 @@ def update_document(
     if metadata is not _UNSET:
         if not isinstance(metadata, dict):
             raise invalid_request("metadata 必须是对象")
-        if document.doc_type == "api":
-            old_schema = (document.doc_metadata or {}).get("schema")
-            old_endpoint = (document.doc_metadata or {}).get("endpoint")
-            metadata = _validate_api_metadata(db, document.project_id, metadata, {document.id})
-            if old_schema != metadata.get("schema") or old_endpoint != metadata.get("endpoint"):
-                warning = _reverse_references(db, document)
         document.doc_metadata = copy.deepcopy(metadata)
     _create_version(db, document, actor.id)
     record_activity(db, document.project_id, actor.id, "document", document.id, "save", "保存文档版本")
@@ -583,8 +940,6 @@ def _validate_restore_documents(db: Session, documents: list[Document], director
             document.directory_id,
             ids,
         )
-        if document.doc_type == "api":
-            _validate_api_metadata(db, document.project_id, document.doc_metadata or {}, ids)
 
 
 def _validate_restore_directories(db: Session, directories: list[DocumentDirectory]) -> None:
@@ -774,8 +1129,6 @@ def rollback_document(db: Session, actor: User, document_id: uuid.UUID, version_
     _assert_document_title_unique(
         db, document.project_id, document.doc_type, version.title, document.parent_id, document.directory_id, {document.id}
     )
-    if document.doc_type == "api":
-        _validate_api_metadata(db, document.project_id, version.doc_metadata or {}, {document.id})
     document.title = version.title
     document.content = version.content
     document.doc_metadata = copy.deepcopy(version.doc_metadata or {})

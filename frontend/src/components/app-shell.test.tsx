@@ -96,7 +96,7 @@ describe('AppShell 侧边栏', () => {
     expect(documentToggle).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByRole('link', { name: 'Wiki' })).toHaveAttribute('href', '/documents/wiki')
     expect(screen.getByRole('link', { name: '词条' })).toHaveAttribute('href', '/documents/glossary')
-    expect(screen.getByRole('link', { name: 'API' })).toHaveAttribute('href', '/documents/api')
+    expect(screen.getByRole('link', { name: '代码 API 参考' })).toHaveAttribute('href', '/code-reference')
   })
 
   it('当前项目切换器:默认第一个可见项目,选择后持久化', async () => {

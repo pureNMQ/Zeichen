@@ -18,6 +18,7 @@ import { RequirementDetailPage } from '@/pages/requirement-detail'
 import { SetPasswordPage } from '@/pages/set-password'
 import { TaskDetailPage } from '@/pages/task-detail'
 import { DocumentWorkbenchPage } from '@/pages/documents'
+import { CodeReferencePage } from '@/pages/code-reference'
 
 function BootstrapGate() {
   const navigate = useNavigate()
@@ -112,9 +113,8 @@ export function App() {
         <Route path="documents/glossary" element={<DocumentWorkbenchPage module="glossary" />} />
         <Route path="documents/glossary/directory/:id" element={<DocumentWorkbenchPage module="glossary" routeNodeKind="directory" />} />
         <Route path="documents/glossary/term/:id" element={<DocumentWorkbenchPage module="glossary" routeNodeKind="document" />} />
-        <Route path="documents/api" element={<DocumentWorkbenchPage module="api" />} />
-        <Route path="documents/api/directory/:id" element={<DocumentWorkbenchPage module="api" routeNodeKind="directory" />} />
-        <Route path="documents/api/definition/:id" element={<DocumentWorkbenchPage module="api" routeNodeKind="document" />} />
+        <Route path="code-reference" element={<CodeReferencePage />} />
+        <Route path="code-reference/:id" element={<CodeReferencePage />} />
         <Route path="members" element={<MembersPage />} />
         <Route path="agents" element={<RequireAdmin />}>
           <Route index element={<AgentsPage />} />

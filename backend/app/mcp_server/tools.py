@@ -17,6 +17,7 @@ from ..errors import AppError
 from ..models import ProjectMember, User
 from ..services import projects as project_svc
 from ..services import documents as document_svc
+from ..services import code_reference as code_svc
 from ..services import polymorphic as poly_svc
 from ..services import requirements as req_svc
 from ..services import tasks as task_svc
@@ -240,7 +241,7 @@ def _register_all(mcp) -> None:
         db, actor = dbc()
         return task_svc._task_dict(db, task_svc.restore_task(db, actor, uuid.UUID(id)))
 
-    # ---------- docs.wiki.* / docs.glossary.* / docs.api.* ----------
+    # ---------- docs.wiki.* / docs.glossary.* ----------
     def _doc_create(project_id: str, title: str, module: str, content: str, metadata: dict | None, parent_id: str | None = None, directory_id: str | None = None) -> dict:
         db, actor = dbc()
         document = document_svc.create_document(
@@ -262,7 +263,7 @@ def _register_all(mcp) -> None:
         db, actor = dbc()
         document = document_svc.get_document(db, actor, uuid.UUID(id), module)
         saved, warning = document_svc.update_document(
-            db, actor, document.id, title, content, metadata if metadata is not None else document_svc._UNSET
+            db, actor, document.id, title, content, metadata if metadata is not None else document_svc._UNSET,
         )
         return document_svc._document_dict(db, saved, warning)
 
@@ -453,64 +454,75 @@ def _register_all(mcp) -> None:
     def docs_glossary_restore(id: str) -> dict:
         return _doc_restore(id, "glossary")
 
-    @mcp.tool(name="docs.api.create")
-    @sessioned
-    def docs_api_create(project_id: str, title: str, metadata: dict, content: str = "", directory_id: str | None = None) -> dict:
-        return _doc_create(project_id, title, "api", content, metadata, directory_id=directory_id)
-
-    @mcp.tool(name="docs.api.get")
-    @sessioned
-    def docs_api_get(id: str) -> dict:
-        return _doc_get(id, "api")
-
-    @mcp.tool(name="docs.api.children")
-    @sessioned
-    def docs_api_children(project_id: str, parent_id: str | None = None, cursor: str | None = None, limit: int | None = None) -> dict:
-        return _doc_children(project_id, "api", parent_id, cursor, limit)
-
-    @mcp.tool(name="docs.api.list")
-    @sessioned
-    def docs_api_list(project_id: str, cursor: str | None = None, limit: int | None = None) -> dict:
-        return _doc_children(project_id, "api", None, cursor, limit)
-
-    @mcp.tool(name="docs.api.ancestors")
-    @sessioned
-    def docs_api_ancestors(project_id: str, id: str, node_kind: str = "document") -> dict:
-        return _doc_path(project_id, "api", node_kind, id)
-
-    @mcp.tool(name="docs.api.update")
-    @sessioned
-    def docs_api_update(id: str, metadata: dict, title: str | None = None, content: str | None = None) -> dict:
-        return _doc_update(id, "api", title, content, metadata)
-
-    @mcp.tool(name="docs.api.move")
-    @sessioned
-    def docs_api_move(id: str, directory_id: str | None = None) -> dict:
-        return _doc_move(id, "api", directory_id=directory_id)
-
-    @mcp.tool(name="docs.api.deleted")
-    @sessioned
-    def docs_api_deleted(project_id: str, cursor: str | None = None, limit: int | None = None) -> dict:
-        return _doc_deleted(project_id, "api", cursor, limit)
-
-    @mcp.tool(name="docs.api.references")
-    @sessioned
-    def docs_api_references(id: str) -> dict:
-        db, actor = dbc()
-        return document_svc.document_references(db, actor, uuid.UUID(id), "api")
-
-    @mcp.tool(name="docs.api.delete")
-    @sessioned
-    def docs_api_delete(id: str) -> dict:
-        return _doc_delete(id, "api")
-
-    @mcp.tool(name="docs.api.restore")
-    @sessioned
-    def docs_api_restore(id: str) -> dict:
-        return _doc_restore(id, "api")
-
     _register_directory_tools(mcp, "glossary")
-    _register_directory_tools(mcp, "api")
+
+    # ---------- docs.code.* ----------
+    @mcp.tool(name="docs.code.library_create")
+    @sessioned
+    def docs_code_library_create(project_id: str, name: str, language: str, package: str, version: str | None = None) -> dict:
+        db, actor = dbc()
+        return code_svc._library_dict(code_svc.create_library(db, actor, uuid.UUID(project_id), name, language, package, version))
+
+    @mcp.tool(name="docs.code.library_list")
+    @sessioned
+    def docs_code_library_list(project_id: str) -> dict:
+        db, actor = dbc()
+        return {"items": code_svc.list_libraries(db, actor, uuid.UUID(project_id))}
+
+    @mcp.tool(name="docs.code.search")
+    @sessioned
+    def docs_code_search(project_id: str, query: str | None = None, library_id: str | None = None, kind: str | None = None) -> dict:
+        db, actor = dbc()
+        return {"items": code_svc.search_symbols(db, actor, uuid.UUID(project_id), query, uuid.UUID(library_id) if library_id else None, kind)}
+
+    @mcp.tool(name="docs.code.get")
+    @sessioned
+    def docs_code_get(id: str) -> dict:
+        db, actor = dbc()
+        return code_svc.get_symbol(db, actor, uuid.UUID(id))
+
+    @mcp.tool(name="docs.code.create")
+    @sessioned
+    def docs_code_create(library_id: str, symbol: dict) -> dict:
+        db, actor = dbc()
+        return code_svc._symbol_dict(code_svc.create_symbol(db, actor, uuid.UUID(library_id), symbol))
+
+    @mcp.tool(name="docs.code.update")
+    @sessioned
+    def docs_code_update(id: str, expected_revision: int, patch: dict) -> dict:
+        db, actor = dbc()
+        return code_svc._symbol_dict(code_svc.update_symbol(db, actor, uuid.UUID(id), expected_revision, patch))
+
+    @mcp.tool(name="docs.code.members")
+    @sessioned
+    def docs_code_members(id: str) -> dict:
+        db, actor = dbc()
+        return {"items": code_svc.list_members(db, actor, uuid.UUID(id))}
+
+    @mcp.tool(name="docs.code.versions")
+    @sessioned
+    def docs_code_versions(id: str) -> dict:
+        db, actor = dbc()
+        return {"items": code_svc.list_versions(db, actor, uuid.UUID(id))}
+
+    @mcp.tool(name="docs.code.rollback")
+    @sessioned
+    def docs_code_rollback(id: str, revision: int, expected_revision: int) -> dict:
+        db, actor = dbc()
+        return code_svc._symbol_dict(code_svc.rollback_symbol(db, actor, uuid.UUID(id), revision, expected_revision))
+
+    @mcp.tool(name="docs.code.delete")
+    @sessioned
+    def docs_code_delete(id: str) -> dict:
+        db, actor = dbc()
+        code_svc.delete_symbol(db, actor, uuid.UUID(id))
+        return {"deleted": True, "id": id}
+
+    @mcp.tool(name="docs.code.restore")
+    @sessioned
+    def docs_code_restore(id: str) -> dict:
+        db, actor = dbc()
+        return code_svc._symbol_dict(code_svc.restore_symbol(db, actor, uuid.UUID(id)))
 
     # ---------- comment.* ----------
     @mcp.tool(name="comment.create")

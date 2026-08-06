@@ -1,6 +1,6 @@
 # 04 文档工作台：模块隔离、层级管理与 Markdown 编辑闭环
 
-Status: open
+Status: resolved
 Type: task
 Blocked by: 03, 08
 

@@ -75,9 +75,7 @@ def create_document(
     if body.doc_type != module:
         from ..errors import invalid_request
         raise invalid_request("文档类型必须与当前模块一致")
-    document = service.create_document(
-        db, user, project_id, body.title, module, body.content, body.metadata, body.parent_id, body.directory_id
-    )
+    document = service.create_document(db, user, project_id, body.title, module, body.content, body.metadata, body.parent_id, body.directory_id)
     return service._document_dict(db, document)
 
 

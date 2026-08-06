@@ -192,15 +192,15 @@ def test_agent_claim_to_requirement_done(mcp_server: dict):
     assert client.session_id is not None
 
     tools = client.list_tools()
-    assert len(tools) >= 70
-    for ns in ("requirements.", "tasks.", "docs.wiki.", "docs.glossary.", "docs.api.", "comment.", "ref.", "project.", "agent."):
+    assert len(tools) >= 60
+    for ns in ("requirements.", "tasks.", "docs.wiki.", "docs.glossary.", "docs.code.", "comment.", "ref.", "project.", "agent."):
         assert any(t.startswith(ns) for t in tools), f"缺少 {ns} 工具"
     assert "requirements.set_status" in tools and "requirements.complete" not in tools
     assert "tasks.set_status" in tools and "tasks.start" not in tools and "tasks.complete" not in tools
     for name in (
         "docs.wiki.children", "docs.wiki.ancestors", "docs.wiki.move",
         "docs.glossary.directory_create", "docs.glossary.directory_move",
-        "docs.api.directory_create", "docs.api.children",
+        "docs.code.library_create", "docs.code.create", "docs.code.get",
     ):
         assert name in tools
 
@@ -308,16 +308,14 @@ def test_document_hierarchy_over_mcp(mcp_server: dict):
     assert [node["id"] for node in path["items"]] == [root["id"], child["id"]]
     assert "invalid_request" in client.call("docs.wiki.move", id=root["id"], parent_id=child["id"])["error"]
 
-    directory = client.call("docs.api.directory_create", project_id=project_id, name="MCP 服务")
+    library = client.call("docs.code.library_create", project_id=project_id, name="MCP Runtime", language="csharp", package="Mcp.Runtime")
     definition = client.call(
-        "docs.api.create",
-        project_id=project_id,
-        title="MCP 接口",
-        directory_id=directory["id"],
-        metadata={"endpoint": {"method": "GET", "path": "/mcp"}, "schema": {"fields": []}},
+        "docs.code.create", library_id=library["id"], symbol={
+            "kind": "enum", "namespace": "Mcp.Runtime", "name": "Mode", "summary": "MCP 模式。",
+            "definition": {"is_flags": False, "members": [{"position": 0, "name": "Read", "assigned_value": "0"}]},
+        },
     )
-    api_children = client.call("docs.api.children", project_id=project_id, parent_id=directory["id"])
-    assert [node["id"] for node in api_children["items"]] == [definition["id"]]
+    assert client.call("docs.code.get", id=definition["id"])["definition"]["members"][0]["name"] == "Read"
 
 
 def test_cursor_pagination_over_mcp(mcp_server: dict):

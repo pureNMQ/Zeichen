@@ -1,26 +1,17 @@
-"""document / document_version:文档三子模块一表(§2.2)。
+"""Wiki and glossary documents.
 
-doc_type: wiki / glossary / api;差异进 metadata JSON。
-version 链只追加、不软删(全文版本链,回滚 = 重建 content + 新版本)。
+Code API reference has its own aggregate in ``code_reference.py`` and is not a
+document subtype.
 """
 
 import uuid
 
-from sqlalchemy import (
-    JSON,
-    CheckConstraint,
-    ForeignKey,
-    Integer,
-    String,
-    Text,
-    UniqueConstraint,
-    Uuid,
-)
+from sqlalchemy import JSON, CheckConstraint, ForeignKey, Integer, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, CreatedByMixin, IdMixin, ProjectScopeMixin, SoftDeleteMixin, TimestampMixin
 
-DOC_TYPE_VALUES = ("wiki", "glossary", "api")
+DOC_TYPE_VALUES = ("wiki", "glossary")
 
 
 class Document(IdMixin, TimestampMixin, SoftDeleteMixin, CreatedByMixin, ProjectScopeMixin, Base):
@@ -30,34 +21,21 @@ class Document(IdMixin, TimestampMixin, SoftDeleteMixin, CreatedByMixin, Project
     title: Mapped[str] = mapped_column(String(256), nullable=False)
     doc_type: Mapped[str] = mapped_column(String(16), nullable=False)
     content: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Wiki 的父子结构；词典/API 的组织位置使用 directory_id，二者由 service 层按模块隔离校验。
-    parent_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid, ForeignKey("document.id", ondelete="SET NULL"), nullable=True, index=True
-    )
-    directory_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid, ForeignKey("document_directory.id", ondelete="SET NULL"), nullable=True, index=True
-    )
-    # 列名 metadata(规格书 §2.2);metadata 为 Declarative 保留名,属性用 doc_metadata
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("document.id", ondelete="SET NULL"), nullable=True, index=True)
+    directory_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("document_directory.id", ondelete="SET NULL"), nullable=True, index=True)
     doc_metadata: Mapped[dict | None] = mapped_column("metadata", JSON, nullable=True)
-
-    versions: Mapped[list["DocumentVersion"]] = relationship(
-        back_populates="document", order_by="DocumentVersion.version_no"
-    )
+    versions: Mapped[list["DocumentVersion"]] = relationship(back_populates="document", order_by="DocumentVersion.version_no")
 
 
 class DocumentDirectory(IdMixin, TimestampMixin, SoftDeleteMixin, CreatedByMixin, ProjectScopeMixin, Base):
-    """词典/API 的持久化目录；它不是 Document，不能版本化或被引用。"""
+    """Persistent organization for glossary terms only."""
 
     __tablename__ = "document_directory"
-    __table_args__ = (
-        CheckConstraint("module_type IN ('glossary', 'api')", name="ck_document_directory_module_type"),
-    )
+    __table_args__ = (CheckConstraint("module_type IN ('glossary')", name="ck_document_directory_module_type"),)
 
     module_type: Mapped[str] = mapped_column(String(16), nullable=False)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
-    parent_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid, ForeignKey("document_directory.id", ondelete="SET NULL"), nullable=True, index=True
-    )
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("document_directory.id", ondelete="SET NULL"), nullable=True, index=True)
 
 
 class DocumentVersion(IdMixin, TimestampMixin, CreatedByMixin, Base):
@@ -67,12 +45,9 @@ class DocumentVersion(IdMixin, TimestampMixin, CreatedByMixin, Base):
         UniqueConstraint("document_id", "version_no", name="uq_document_version_doc_no"),
     )
 
-    document_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("document.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    document_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("document.id", ondelete="CASCADE"), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(256), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     doc_metadata: Mapped[dict | None] = mapped_column("metadata", JSON, nullable=True)
     version_no: Mapped[int] = mapped_column(Integer, nullable=False)
-
     document: Mapped[Document] = relationship(back_populates="versions")
