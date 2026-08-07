@@ -26,3 +26,9 @@ Thumbs.db
 
 # Runtime logs
 .scratch/*.log
+
+# Local Codex MCP credentials/configuration (project-scoped, never commit)
+/.codex/config.toml
+
+# Local OpenCode MCP credentials/configuration (project-scoped, never commit)
+/opencode.json

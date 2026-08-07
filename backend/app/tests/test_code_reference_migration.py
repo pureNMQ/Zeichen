@@ -57,6 +57,41 @@ def test_sqlite_code_library_timestamps_accept_inserts_after_upgrade(tmp_path, m
     connection.commit()
     connection.close()
 
+
+def test_sqlite_document_and_memory_timestamps_accept_inserts_after_full_upgrade(tmp_path, monkeypatch):
+    """Fresh SQLite installations must also repair defaults introduced by older revisions."""
+    database_path = tmp_path / "all-migrations.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{database_path.as_posix()}")
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+    config = Config(str(Path(__file__).parents[2] / "alembic.ini"))
+    command.upgrade(config, "head")
+
+    connection = sqlite3.connect(database_path)
+    expected_defaults = {
+        "document_directory": {"created_at": "CURRENT_TIMESTAMP", "updated_at": "CURRENT_TIMESTAMP"},
+        "memory_dataset": {"created_at": "CURRENT_TIMESTAMP"},
+    }
+    for table_name, expected in expected_defaults.items():
+        defaults = {
+            row[1]: row[4]
+            for row in connection.execute(f"PRAGMA table_info({table_name})")
+            if row[1] in expected
+        }
+        assert defaults == expected
+
+    connection.execute(
+        "INSERT INTO document_directory (module_type, name, id, project_id) VALUES (?, ?, ?, ?)",
+        ("glossary", "terms", "directory-1", "project-1"),
+    )
+    connection.execute(
+        "INSERT INTO memory_dataset (project_id, cognee_dataset_id, id) VALUES (?, ?, ?)",
+        ("project-1", "dataset-1", "memory-dataset-1"),
+    )
+    connection.commit()
+    connection.close()
+
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{database_path.as_posix()}")
     from app.config import get_settings
 

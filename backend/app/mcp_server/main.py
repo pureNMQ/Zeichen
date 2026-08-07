@@ -6,8 +6,13 @@
 
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
+
+from app.config import get_settings
 
 from .auth import ApiKeyTokenVerifier
+
+settings = get_settings()
 
 mcp = FastMCP(
     "zeichen",
@@ -21,6 +26,23 @@ mcp = FastMCP(
         resource_server_url="http://localhost/mcp",
     ),
     token_verifier=ApiKeyTokenVerifier(),
+    # Keep DNS-rebinding protection enabled by default. MCP_ALLOWED_HOSTS lets
+    # a reverse-proxied deployment explicitly allow its public Host header;
+    # MCP_ENABLE_DNS_REBINDING_PROTECTION=false is an intentional opt-out for
+    # deployments where an upstream proxy performs equivalent validation.
+    # Codex uses opaque origins for its local Streamable HTTP client, so retain
+    # its two known origins while every request still requires a Bearer API key.
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=settings.mcp_enable_dns_rebinding_protection,
+        allowed_hosts=settings.mcp_allowed_host_patterns,
+        allowed_origins=[
+            "http://127.0.0.1:*",
+            "http://localhost:*",
+            "http://[::1]:*",
+            "codex://desktop",
+            "null",
+        ],
+    ),
 )
 
 from . import tools  # noqa: E402

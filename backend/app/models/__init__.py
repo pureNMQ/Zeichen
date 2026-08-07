@@ -5,7 +5,8 @@ from .requirement import Requirement, Task
 from .document import Document, DocumentDirectory, DocumentVersion
 from .code_reference import CodeLibrary, CodeSymbol, CodeSymbolVersion, EnumMember
 from .polymorphic import Activity, Attachment, Comment, Reference
-from .memory import MemoryGrant
+from .memory_dataset import MemoryDataset
+from .memory_improve_job import MemoryImproveJob
 
 __all__ = [
     "Base",
@@ -29,5 +30,6 @@ __all__ = [
     "Activity",
     "Attachment",
     "Reference",
-    "MemoryGrant",
+    "MemoryDataset",
+    "MemoryImproveJob",
 ]

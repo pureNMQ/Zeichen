@@ -32,8 +32,13 @@ def upgrade() -> None:
             'ORDER BY created_at, id LIMIT 1)'
         )
     )
-    op.alter_column("user", "is_bootstrap", server_default=None)
+    # SQLite cannot alter a column default in place.  Batch mode recreates the
+    # table where required while retaining the same migration behaviour on
+    # databases that support ALTER COLUMN directly.
+    with op.batch_alter_table("user") as batch_op:
+        batch_op.alter_column("is_bootstrap", server_default=None)
 
 
 def downgrade() -> None:
-    op.drop_column("user", "is_bootstrap")
+    with op.batch_alter_table("user") as batch_op:
+        batch_op.drop_column("is_bootstrap")

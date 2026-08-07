@@ -27,6 +27,14 @@ MEMBER_KINDS = {"constructor", "method", "field", "property", "constant"}
 ACCESSIBILITIES = {"public", "protected", "internal", "private"}
 PASSING_KINDS = {"value", "ref", "out", "in"}
 PROPERTY_ACCESSORS = {"get", "set", "init"}
+CREATE_SYMBOL_FIELDS = {
+    "owner_symbol_id", "namespace", "kind", "name", "summary", "remarks",
+    "accessibility", "source_declaration", "since_version", "deprecated", "definition",
+}
+UPDATE_SYMBOL_FIELDS = {
+    "name", "summary", "remarks", "accessibility", "source_declaration",
+    "since_version", "deprecated", "definition",
+}
 
 
 def _now() -> datetime:
@@ -48,6 +56,12 @@ def _clean(value: object, field: str, max_length: int | None = None, *, required
     if max_length is not None and len(value) > max_length:
         raise invalid_request(f"{field} 过长")
     return value
+
+
+def _reject_unknown_fields(payload: dict, allowed: set[str]) -> None:
+    unknown = sorted(set(payload) - allowed)
+    if unknown:
+        raise invalid_request(f"不支持的字段: {', '.join(unknown)}")
 
 
 def _string_list(value: object, field: str) -> list[str]:
@@ -365,6 +379,7 @@ def _snapshot(db: Session, symbol: CodeSymbol, actor_id: uuid.UUID) -> None:
 
 
 def create_symbol(db: Session, actor: User, library_id: uuid.UUID, payload: dict) -> CodeSymbol:
+    _reject_unknown_fields(payload, CREATE_SYMBOL_FIELDS)
     library = _visible_library(db, actor, library_id, editable=True)
     kind = _clean(payload.get("kind"), "kind", 32, required=True)
     owner_raw = payload.get("owner_symbol_id")
@@ -400,6 +415,7 @@ def create_symbol(db: Session, actor: User, library_id: uuid.UUID, payload: dict
 
 
 def update_symbol(db: Session, actor: User, symbol_id: uuid.UUID, expected_revision: int, patch: dict) -> CodeSymbol:
+    _reject_unknown_fields(patch, UPDATE_SYMBOL_FIELDS)
     symbol = _visible_symbol(db, actor, symbol_id, editable=True)
     if expected_revision != symbol.revision:
         raise conflict("代码符号已被更新，请重新读取后再提交")

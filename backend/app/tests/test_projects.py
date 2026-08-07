@@ -1,6 +1,32 @@
 """项目:列表可见性(admin 全量/member 已加入)、建项目、成员管理、判权矩阵。"""
 
+import uuid
+
 from .conftest import login, make_user
+
+
+def test_create_project_provisions_memory_space(client, db, world, monkeypatch):
+    """A new project is immediately readable by the memory page."""
+    from app.models import MemoryDataset
+    from app.services import memory
+
+    created = []
+
+    class FakeCognee:
+        def create_dataset(self, name):
+            created.append(name)
+            return "dataset-created-with-project"
+
+    monkeypatch.setattr(memory, "CogneeClient", FakeCognee)
+    _admin_client(client)
+
+    response = client.post("/api/projects", json={"name": "with-memory", "members": []})
+
+    assert response.status_code == 201, response.text
+    project_id = uuid.UUID(response.json()["id"])
+    dataset = db.query(MemoryDataset).filter_by(project_id=project_id).one()
+    assert dataset.cognee_dataset_id == "dataset-created-with-project"
+    assert created == [f"zeichen:{project_id}"]
 
 
 def _admin_client(client):

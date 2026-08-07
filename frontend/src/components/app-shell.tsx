@@ -235,6 +235,7 @@ function ChangePasswordDialog({ open, onOpenChange }: { open: boolean; onOpenCha
 
 export function AppShell() {
   const { user, logout } = useAuth()
+  const { role } = useCurrentProject()
   const navigate = useNavigate()
   const [pwdOpen, setPwdOpen] = useState(false)
 
@@ -248,6 +249,9 @@ export function AppShell() {
           <NavGroup title="团队功能" items={TEAM_NAV} isAdmin={isAdmin} />
           <div className="mx-3 my-1 border-t" />
           <NavGroup title="工作区" items={WORKSPACE_NAV} isAdmin={isAdmin} />
+          {(role === 'editor' || role === 'owner') && (
+            <GuardedNavLink to="/memory">记忆</GuardedNavLink>
+          )}
           <DocumentNav />
         </nav>
         <ProjectSwitcher />

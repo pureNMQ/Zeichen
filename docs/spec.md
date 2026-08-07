@@ -30,7 +30,7 @@
 | MCP | Python 官方 SDK(MCP server,独立容器) |
 | 业务库 | PostgreSQL |
 | 记忆 | cognee(独立服务,HTTP 调用;100% 依赖,不自建记忆存储) |
-| LLM | DeepSeek(仅 cognee 蒸馏/抽取用;读写记忆不耗 token 的路径见 §6) |
+| LLM | DeepSeek(由 cognee 用于记忆抽取、图谱构建与会话 improve) |
 
 ### 1.3 边界
 
@@ -63,13 +63,12 @@
 | `comment` | target_type, target_id, author_id, body | 多态,check 约束 |
 | `activity` | target_type, target_id, actor_id, action, summary | 多态;actor 区分 human/agent |
 | `reference` | from_type, from_id, to_type, to_id, type | type: derives/documents/implements/mentions |
-| `memory_grant` | grantor_id, viewer_agent_id, target_agent_id | 记忆互通授权(只读) |
 
 ### 2.3 追溯链
 
 - 任务 → 需求:`task.requirement_id`(可空外键)
 - 任意实体互引:`reference` 表,type 有限枚举(derives/documents/implements/mentions);双向可查
-- 记忆锚点:记忆条目经 cognee `external_metadata`/`node_set` 携带 `project_id`/`entity_id`,回指业务实体
+- 记忆锚点:记忆条目经 cognee `external_metadata`/`node_set` 携带 `project_id`/`entity_id`,仅作回指与跳转;不复制业务实体的可变字段
 
 ## 3. 需求与任务
 
@@ -118,7 +117,7 @@
 | `comment.*` | create/list/delete(自己的或 owner/admin) |
 | `ref.*` | create/list(双向)/delete |
 | `activity.*` | list |
-| `memory.*` | recall / remember / forget(仅自己的)/ list |
+| `memory.*` | recall / remember / improve / forget / update / list;`remember` 必传业务 `session_id`,`improve` 显式处理一个会话 |
 | `search.*` | query(全局跨域,关键词+语义混合) |
 | `project.*` | list / get |
 | `agent.*` | whoami |
@@ -150,43 +149,62 @@
 ### 5.3 凭据
 
 - 人类:账号 + 密码,自建会话(JWT/Cookie);首用户引导注册为 admin;成员直接添加(账号+角色),首登设密码;无 SMTP
-- Agent:API key 仅 agent 签发;**多 key 并存、独立吊销**;明文哈希存储但可回看(管理员输入自己密码验证);删除 agent = 软删 + 全吊销 + 清授权
+- Agent:API key 仅 agent 签发;**多 key 并存、独立吊销**;明文哈希存储但可回看(管理员输入自己密码验证);删除 agent = 软删 + 全吊销
 - 人类不签发 key(保证 activity 中 actor 身份可分)
 
 ## 6. 记忆接入(cognee)
 
 ### 6.1 架构
 
-记忆能力 100% 依赖 cognee;Zeichen 的记忆层是 cognee REST API 的**薄转接层**。cognee 原生 MVP 接口逐一转接:remember / recall / improve / forget / update / datasets / sessions 等。
+记忆能力 100% 依赖 cognee;Zeichen 的记忆层是 cognee REST API 的**薄转接层**。首个支持版本固定为 `cognee/cognee:1.4.1`(部署时锁定镜像 digest);cognee 原生 MVP 接口逐一转接:remember / recall / improve / forget / update / datasets / sessions 等。
+
+Zeichen 后端以单一 cognee 服务身份访问该服务;项目角色与隔离由 Zeichen 转接层强制执行,不维护 agent 间 cognee ACL。
+
+#### 6.1.1 接口映射
+
+agent 只连接 Zeichen MCP,不直接连接 cognee MCP。Zeichen 的 `memory.*` 是面向项目权限、来源与业务锚点的接口;其与固定版本 cognee REST 的映射如下:
+
+| Zeichen MCP | cognee REST 操作 | 转接约束 |
+|---|---|---|
+| `memory.recall` | `POST /v1/recall` | 强制限制当前项目 Dataset;业务 `session_id` 先命名空间化 |
+| `memory.remember` | `POST /v1/remember` | 必传业务 `session_id`,写入会话缓存 |
+| `memory.improve` | `POST /v1/improve` | 显式处理一个会话,采用 cognee 原生增量水位线与并发锁 |
+| `memory.forget` | `POST /v1/forget` | 仅作用于当前项目 Dataset 内的指定条目 |
+| `memory.update` | `PATCH /v1/update` | 替换式更新,见 §6.4 |
+| `memory.list` | `GET /v1/datasets/{dataset_id}/data` | 仅列当前项目条目,返回来源、时间与业务锚点 |
+
+Dataset 创建、项目删除与会话查询是 Zeichen 后端内部调用,不向 agent 暴露。公开的旧 cognee MCP `Cognify_and_search` 会清空并重建自身数据,不具备项目隔离、共享来源或会话语义,不得复用。
 
 ### 6.2 写入管线(三层)
 
 | 层 | 内容 | 时机 | token |
 |---|---|---|---|
-| activity(业务库) | 所有业务变更轨迹 | 即时 | 0 |
-| 会话缓存(cognee 短期) | agent 问答/轨迹 + 业务变更一句摘要 | 会话进行中 | 0 |
-| 知识图谱(cognee 长期) | 蒸馏产物 + 显式长记忆 | 会话断开/空闲超时 | 耗 |
+| activity(业务库) | 所有业务变更轨迹 | 即时 | — |
+| 会话缓存(cognee 短期) | agent 经 `memory.remember` 显式写入的会话内容 | `session_id` 存续期间 | — |
+| 知识图谱(cognee 长期) | cognee `improve` 对会话内容的增量持久化、提炼与图谱丰富结果 | agent 或人类显式触发 | 耗 |
 
-- 蒸馏自动触发:MCP 会话断开即蒸馏;15 分钟空闲超时兜底;**条目阈值:少于 3 条不蒸馏**
-- Web 端保留手动"立即蒸馏"入口
+- **业务变更不写入记忆**:需求、任务、项目等事实只在 Zeichen 实体和 activity 中查询;记忆可保留回指锚点,但不得复制其可变状态。
+- `memory.remember` 必传 agent 自己稳定的业务 `session_id`;Zeichen 在调用 cognee 前以 `project_id + agent_id + session_id` 命名空间化,防止不同 agent 的同名会话串写。
+- 不以 MCP HTTP 连接/断开、空闲时间或条目数量自动触发;不提供 `memory.session.close`。同一 `session_id` 可持续写入并多次 improve,会话边界由 agent 改用新 ID 表达。
+- agent 显式调用 `memory.improve(session_id)`;人类 Web 端也可手动 improve,但必须先选择目标 agent 会话。两者均一对一映射 cognee `improve(session_ids)` 的原生增量、水位线与并发锁策略。
 
 ### 6.3 空间与隔离
 
-- **每 agent 一个 cognee Dataset**(物理隔离)+ NodeSet 承载 `project_id`
-- 项目记忆 = 跨 Dataset 聚合视图(按 project_id 过滤合并)
-- 人类(editor+)可见项目全部记忆;agent 默认仅自己的 + 项目记忆
-- **记忆互通(可选)**:admin 授权 agent A 只读 agent B 的 Dataset(ACL read),记入 `memory_grant` + activity;只读不写
+- **每项目一个 cognee Dataset**:项目成员共享该项目的全部记忆;不再按 agent 建 Dataset,也不再提供 `memory_grant`、agent 间 ACL 或互通授权界面。
+- 项目 `viewer` 仅可 recall/list;`editor`、`owner` 的人类和 agent 均可 remember、improve、删除与修正;非项目成员无任何访问权。
+- 每条记忆必须展示来源。来源为创建该条目的 agent/人类;经 cognee `update` 替换后,新条目的来源为执行修正者。记忆之间不支持引用或来源链。
+- 发生矛盾时保留各条记忆及其来源和时间,系统不得自动合并、覆盖或删除。
 
 ### 6.4 遗忘与修正
 
-- 遗忘三层:单条(透传 cognee)/ 按实体(NodeSet/锚点)/ 全清(仅人类 Web 端,二次确认);遗忘记 activity
-- 修正 = cognee 原生 `PATCH /api/v1/update`(删旧 + 重摄 + 重蒸馏,data_id 不变、锚点不断);修正记 activity
+- 遗忘三层:单条(透传 cognee,任一有项目写权限的 agent/人类均可删除任意来源条目)/ 按实体(NodeSet/锚点)/ 全清(仅人类 Web 端,二次确认);遗忘记 activity。
+- 修正 = cognee 原生 `PATCH /api/v1/update`:删除旧 data 后重新摄取并 cognify。`data_id` 会变化,旧条目链接不保证连续;修正和删除都必须写 activity。
+- 所有记忆操作(remember、improve、修正、删除、清空和 Web 手动触发)均写 activity,但 activity 不会反向写入记忆。
 
 ### 6.5 成本
 
-- 不设硬性预算上限(无自动暂停)
-- 可见性:记忆管理页展示每 agent token 消耗(近 7 天/30 天/累计,对接 cognee usage)
-- 阈值护栏(§6.2)+ 人类监控
+- 不设硬性预算上限(无自动暂停),也不在 Zeichen 展示或汇总 token 用量。
+- 项目删除时,立即永久删除该项目的 cognee Dataset 及其全部会话缓存;Web 删除确认必须提示该后果不可恢复。
 
 ## 7. Web 功能面
 
@@ -199,7 +217,7 @@
 - **需求**:列表默认,可切换;详情含关联任务、引用面板、评论流、活动流、改状态操作
 - **任务**:看板默认,可切换;自由拖拽改状态(拖到已完成直达),认领/删除按权限
 - **文档**:Wiki 阅读/编辑/版本历史;字典列表/词条;API 渲染页 + 编辑
-- **记忆管理页**(项目级,editor+,viewer 无入口):按 agent 过滤、条目列表(锚点跳转)、详情、删除/清空(二次确认)、修正(cognee update)、token 概览、记忆互通授权配置
+- **记忆管理页**(项目级,editor+,viewer 无入口):按来源过滤、条目列表(锚点跳转)、详情、删除/清空(二次确认)、修正(cognee update)、选择目标 agent 会话后手动 improve;不展示 token 概览或互通授权配置
 - **通知**:轻量站内通知(未读数、点击跳转,"我关注实体的变更";无偏好系统、无邮件/推送)
 - **全局搜索**:v1 进,工作区级常驻,与 MCP search.query 同一后端
 

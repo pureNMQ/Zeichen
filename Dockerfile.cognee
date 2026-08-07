@@ -1,0 +1,7 @@
+FROM cognee/cognee:1.4.1
+
+# The upstream image keeps embedding engines optional and its application venv
+# has no pip. Install FastEmbed into that venv through the image's global pip.
+RUN /usr/local/bin/pip install --no-cache-dir \
+    --target /app/.venv/lib/python3.12/site-packages \
+    fastembed

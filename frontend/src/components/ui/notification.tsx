@@ -1,19 +1,19 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
-import { CircleAlert, X } from 'lucide-react'
+import { CheckCircle2, CircleAlert, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 
-type Notice = { id: number; message: string }
+type Notice = { id: number; message: string; variant: 'error' | 'success' }
 
-const NotificationContext = createContext<(message: string) => void>(() => undefined)
+const NotificationContext = createContext<(message: string, variant?: Notice['variant']) => void>(() => undefined)
 
 export function NotificationProvider({ children }: { children: ReactNode }) {
   const [notices, setNotices] = useState<Notice[]>([])
 
-  const notify = useCallback((message: string) => {
+  const notify = useCallback((message: string, variant: Notice['variant'] = 'error') => {
     setNotices((current) => {
-      if (current.some((notice) => notice.message === message)) return current
-      return [...current, { id: Date.now(), message }]
+      if (current.some((notice) => notice.message === message && notice.variant === variant)) return current
+      return [...current, { id: Date.now(), message, variant }]
     })
   }, [])
 
@@ -25,9 +25,11 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
           <div
             key={notice.id}
             role="alert"
-            className="flex items-start gap-3 rounded-lg border border-destructive/30 bg-background p-4 text-sm shadow-lg"
+            className={`flex items-start gap-3 rounded-lg border bg-background p-4 text-sm shadow-lg ${notice.variant === 'success' ? 'border-emerald-500/30' : 'border-destructive/30'}`}
           >
-            <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+            {notice.variant === 'success'
+              ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+              : <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />}
             <p className="flex-1 text-foreground">{notice.message}</p>
             <Button
               type="button"

@@ -259,6 +259,61 @@ export interface DocumentVersionRow {
   created_at: string
 }
 
+export interface MemoryItem {
+  id: string
+  data?: string
+  content?: string
+  text?: string
+  created_at?: string
+  updated_at?: string
+  external_metadata?: {
+    source_id?: string
+    source_name?: string
+    source_kind?: string
+    entity_type?: string
+    entity_id?: string
+  }
+}
+
+export interface MemorySession {
+  id?: string
+  session_id?: string
+  business_session_id?: string
+  source_id?: string
+  source_name?: string
+  source_kind?: string
+  effective_status?: string
+  status?: string
+  last_activity_at?: string
+  started_at?: string
+  preview?: string
+}
+
+export interface MemorySessionDetail {
+  session_id: string
+  business_session_id: string
+  source_name?: string
+  status?: string
+  qas: Array<{ time?: string; question?: string; answer?: string }>
+  traces: Array<Record<string, unknown>>
+}
+
+export type MemoryImproveJobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'upstream_busy' | 'timed_out' | 'unknown'
+
+export interface MemoryImproveJob {
+  id: string
+  project_id: string
+  agent_id: string
+  session_id: string
+  status: MemoryImproveJobStatus
+  result?: Record<string, unknown> | unknown[] | null
+  error?: string | null
+  created_at: string
+  started_at?: string | null
+  heartbeat_at?: string | null
+  finished_at?: string | null
+}
+
 export const STATUS_LABEL: Record<WorkflowStatus, string> = {
   backlog: '待办',
   in_progress: '实现中',

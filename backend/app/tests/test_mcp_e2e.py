@@ -41,7 +41,13 @@ def _parse_sse(body: str) -> list[dict]:
 class RawMcpClient:
     """最小 MCP streamable-http 客户端(仅覆盖本测试所需)。"""
 
-    def __init__(self, url: str, token: str | None = None):
+    def __init__(
+        self,
+        url: str,
+        token: str | None = None,
+        origin: str | None = None,
+        host: str | None = None,
+    ):
         self.url = url
         self.session_id: str | None = None
         self._id = 0
@@ -51,6 +57,10 @@ class RawMcpClient:
         }
         if token:
             self._headers["Authorization"] = f"Bearer {token}"
+        if origin:
+            self._headers["Origin"] = origin
+        if host:
+            self._headers["Host"] = host
 
     def initialize(self) -> dict:
         result = self._post(
@@ -105,14 +115,14 @@ class RawMcpClient:
 
 
 @pytest.fixture(scope="module")
-def mcp_server(tmp_path_factory):
+def mcp_server(tmp_path_factory, request):
     db_file = tmp_path_factory.mktemp("mcp") / "e2e.db"
     db_url = f"sqlite:///{db_file.as_posix()}"
 
     from sqlalchemy import create_engine
     from sqlalchemy.orm import Session
 
-    from app.models import ApiKey, Base, Project, ProjectMember, Team, User, WorkspaceMember
+    from app.models import ApiKey, Base, MemoryDataset, Project, ProjectMember, Team, User, WorkspaceMember
     from app.security import generate_api_token, hash_password, token_digest
 
     engine = create_engine(db_url)
@@ -132,6 +142,7 @@ def mcp_server(tmp_path_factory):
         db.add(project)
         db.flush()
         db.add(ProjectMember(project_id=project.id, user_id=agent.id, role="editor"))
+        db.add(MemoryDataset(project_id=project.id, cognee_dataset_id="cognee-e2e-dataset"))
         token = generate_api_token()
         db.add(ApiKey(user_id=agent.id, token_hash=token_digest(token), token_encrypted="x", note="e2e"))
         db.commit()
@@ -142,6 +153,7 @@ def mcp_server(tmp_path_factory):
     env = dict(os.environ)
     env["DATABASE_URL"] = db_url
     env["SESSION_SECRET"] = "test-session-secret-0123456789abcdef"
+    env.update(getattr(request, "param", {}))
     log_file = db_file.parent / "server.log"
     with log_file.open("w") as log_fh:
         proc = subprocess.Popen(
@@ -197,6 +209,7 @@ def test_agent_claim_to_requirement_done(mcp_server: dict):
         assert any(t.startswith(ns) for t in tools), f"缺少 {ns} 工具"
     assert "requirements.set_status" in tools and "requirements.complete" not in tools
     assert "tasks.set_status" in tools and "tasks.start" not in tools and "tasks.complete" not in tools
+    assert "memory.improve" in tools and "memory.improve_status" in tools
     for name in (
         "docs.wiki.children", "docs.wiki.ancestors", "docs.wiki.move",
         "docs.glossary.directory_create", "docs.glossary.directory_move",
@@ -208,6 +221,17 @@ def test_agent_claim_to_requirement_done(mcp_server: dict):
     assert me["username"] == "agent-e2e"
     assert me["is_agent"] is True
     assert me["project_grants"][0]["role"] == "editor"
+
+    # MCP submission is durable and immediate: it never waits for Cognee.
+    improve_job = client.call("memory.improve", project_id=mcp_server["project_id"], session_id="mcp-queued")
+    assert improve_job["job"]["status"] == "queued"
+    status = client.call(
+        "memory.improve_status",
+        project_id=mcp_server["project_id"],
+        job_id=improve_job["job"]["id"],
+    )
+    assert status["job"]["id"] == improve_job["job"]["id"]
+    assert status["job"]["status"] == "queued"
 
     projects = client.call("project.list")
     assert projects[0]["id"] == mcp_server["project_id"], f"project.list 返回异常: {projects}"
@@ -280,6 +304,9 @@ def test_task_requirement_link_over_mcp(mcp_server: dict):
 
     updated = client.call("tasks.update", id=t["id"], requirement_id=r1["id"])
     assert updated["requirement_id"] == r1["id"]
+    retitled = client.call("tasks.update", id=t["id"], title="MCP 已改标题")
+    assert retitled["title"] == "MCP 已改标题"
+    assert retitled["requirement_id"] == r1["id"]
     changed = client.call("tasks.update", id=t["id"], requirement_id=r2["id"])
     assert changed["requirement_id"] == r2["id"]
     cleared = client.call("tasks.update", id=t["id"], requirement_id="")
@@ -307,6 +334,9 @@ def test_document_hierarchy_over_mcp(mcp_server: dict):
     path = client.call("docs.wiki.ancestors", project_id=project_id, id=child["id"])
     assert [node["id"] for node in path["items"]] == [root["id"], child["id"]]
     assert "invalid_request" in client.call("docs.wiki.move", id=root["id"], parent_id=child["id"])["error"]
+    directory = client.call("docs.glossary.directory_create", project_id=project_id, name="MCP 术语")
+    invalid_move = client.call("docs.glossary.directory_move", id=directory["id"], parent_id="null")
+    assert "invalid_request" in str(invalid_move), invalid_move
 
     library = client.call("docs.code.library_create", project_id=project_id, name="MCP Runtime", language="csharp", package="Mcp.Runtime")
     definition = client.call(
@@ -316,6 +346,21 @@ def test_document_hierarchy_over_mcp(mcp_server: dict):
         },
     )
     assert client.call("docs.code.get", id=definition["id"])["definition"]["members"][0]["name"] == "Read"
+    type_symbol = client.call(
+        "docs.code.create", library_id=library["id"], symbol={
+            "kind": "class", "namespace": "Mcp.Runtime", "name": "Container", "summary": "成员容器。",
+            "definition": {},
+        },
+    )
+    assert client.call("docs.code.members", symbol_id=type_symbol["id"])["items"] == []
+    signature_error = client.call(
+        "docs.code.create", library_id=library["id"], symbol={
+            "kind": "function", "namespace": "Mcp.Runtime", "name": "test_add", "summary": "测试相加。",
+            "signature": "def test_add(a: int, b: int) -> int",
+            "definition": {"returns": {"type": "int"}},
+        },
+    )
+    assert "invalid_request" in signature_error["error"]
 
 
 def test_cursor_pagination_over_mcp(mcp_server: dict):
@@ -347,3 +392,46 @@ def test_bad_key_rejected(mcp_server: dict):
     with pytest.raises(httpx.HTTPStatusError) as e:
         client.initialize()
     assert e.value.response.status_code == 401
+
+
+@pytest.mark.parametrize("origin", ["codex://desktop", "null"])
+def test_codex_origins_can_initialize_and_list_tools(mcp_server: dict, origin: str):
+    """Codex 的非 HTTP Origin 也必须能通过本地 MCP 的传输安全校验。"""
+    client = RawMcpClient(mcp_server["url"], mcp_server["token"], origin=origin)
+    init = client.initialize()
+    assert init["serverInfo"]["name"] == "zeichen"
+    assert "agent.whoami" in client.list_tools()
+
+
+@pytest.mark.parametrize(
+    "mcp_server",
+    [{"MCP_ALLOWED_HOSTS": "mcp.zeichen.test:*"}],
+    indirect=True,
+)
+def test_mcp_allowed_hosts_accepts_comma_separated_host_patterns(mcp_server: dict):
+    """部署域名可通过 MCP_ALLOWED_HOSTS 加入 DNS-rebinding Host 白名单。"""
+    port = mcp_server["url"].rsplit(":", 1)[1].removesuffix("/mcp")
+    client = RawMcpClient(
+        mcp_server["url"],
+        mcp_server["token"],
+        origin="codex://desktop",
+        host=f"mcp.zeichen.test:{port}",
+    )
+    assert client.initialize()["serverInfo"]["name"] == "zeichen"
+
+
+@pytest.mark.parametrize(
+    "mcp_server",
+    [{"MCP_ENABLE_DNS_REBINDING_PROTECTION": "false"}],
+    indirect=True,
+)
+def test_mcp_can_explicitly_disable_dns_rebinding_protection(mcp_server: dict):
+    """开关关闭后，Host/Origin 校验都不应再阻断客户端握手。"""
+    port = mcp_server["url"].rsplit(":", 1)[1].removesuffix("/mcp")
+    client = RawMcpClient(
+        mcp_server["url"],
+        mcp_server["token"],
+        origin="https://untrusted-client.example",
+        host=f"untrusted-client.example:{port}",
+    )
+    assert client.initialize()["serverInfo"]["name"] == "zeichen"

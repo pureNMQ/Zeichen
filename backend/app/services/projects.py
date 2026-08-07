@@ -46,7 +46,14 @@ def create_project(db: Session, actor: User, name: str, members: list[dict]) -> 
     db.add(ProjectMember(project_id=project.id, user_id=actor.id, role="owner", created_by=actor.id))
     for m in members:
         _add_member_row(db, project, m["user_id"], m["role"], actor)
-    db.commit()
+    from .memory import provision_project
+
+    try:
+        provision_project(db, project.id)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     return project
 
 
@@ -211,5 +218,10 @@ def transfer_project_owner(
 
 def soft_delete_project(db: Session, actor: User, project_id: uuid.UUID) -> None:
     project = get_accessible_project(db, actor.id, project_id, min_level="owner")
+    from .memory import purge_project
+
+    # cognee does not clear short-term session state as a side effect of every
+    # dataset deletion, so enumerate it before removing the dataset.
+    purge_project(db, project.id)
     project.deleted_at = datetime.now(timezone.utc)
     db.commit()

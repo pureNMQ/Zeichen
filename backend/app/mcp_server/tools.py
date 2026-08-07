@@ -21,9 +21,12 @@ from ..services import code_reference as code_svc
 from ..services import polymorphic as poly_svc
 from ..services import requirements as req_svc
 from ..services import tasks as task_svc
+from ..services import memory as memory_svc
+from ..services import memory_improve_jobs as improve_job_svc
 from . import auth
 
 _ctx = contextvars.ContextVar[tuple[object, User]]("zeichen_mcp_ctx", default=None)
+_UNSET = object()
 
 
 def sessioned(fn):
@@ -62,7 +65,60 @@ def _req_id(requirement_id: str | None) -> uuid.UUID | None:
     return uuid.UUID(requirement_id) if requirement_id else None
 
 
+def _optional_uuid(value: str | None, field_name: str) -> uuid.UUID | None:
+    """Parse an optional MCP UUID while preserving the established empty=root semantics."""
+    if value is None or value == "":
+        return None
+    try:
+        return uuid.UUID(value)
+    except (AttributeError, TypeError, ValueError):
+        raise ToolError(f"invalid_request: {field_name} 必须是合法 UUID") from None
+
+
 def _register_all(mcp) -> None:
+    # ---------- memory.* ----------
+    @mcp.tool(name="memory.remember")
+    @sessioned
+    def memory_remember(project_id: str, session_id: str, content: str, anchor: dict | None = None) -> dict:
+        """向当前项目共享记忆写入会话内容；session_id 为 agent 自己的业务会话 ID。"""
+        db, actor = dbc()
+        return {"result": memory_svc.remember(db, actor, uuid.UUID(project_id), session_id, content, anchor)}
+
+    @mcp.tool(name="memory.recall")
+    @sessioned
+    def memory_recall(project_id: str, query: str, session_id: str | None = None) -> dict:
+        """在当前项目 Dataset 内检索共享记忆。"""
+        db, actor = dbc()
+        return {"result": memory_svc.recall(db, actor, uuid.UUID(project_id), query, session_id)}
+
+    @mcp.tool(name="memory.improve")
+    @sessioned
+    def memory_improve(project_id: str, session_id: str) -> dict:
+        """提交当前 agent 会话的异步蒸馏，立即返回可轮询的 job；不等待 Cognee 完成。"""
+        db, actor = dbc()
+        return {"job": improve_job_svc.submit(db, actor, uuid.UUID(project_id), actor.id, session_id)}
+
+    @mcp.tool(name="memory.improve_status")
+    @sessioned
+    def memory_improve_status(project_id: str, job_id: str) -> dict:
+        """查询异步会话蒸馏任务；仅 status=completed 表示已成功写入长期记忆。"""
+        db, actor = dbc()
+        return {"job": improve_job_svc.get(db, actor, uuid.UUID(project_id), uuid.UUID(job_id))}
+
+    @mcp.tool(name="memory.forget")
+    @sessioned
+    def memory_forget(project_id: str, data_id: str) -> dict:
+        """删除当前项目 Dataset 内的一条记忆。"""
+        db, actor = dbc()
+        return {"result": memory_svc.forget(db, actor, uuid.UUID(project_id), data_id)}
+
+    @mcp.tool(name="memory.list")
+    @sessioned
+    def memory_list(project_id: str, source_id: str | None = None) -> dict:
+        """列出当前项目的共享记忆，可按创建来源过滤。"""
+        db, actor = dbc()
+        return memory_svc.list_memory(db, actor, uuid.UUID(project_id), uuid.UUID(source_id) if source_id else None)
+
     # ---------- requirements.* ----------
     @mcp.tool(name="requirements.create")
     @sessioned
@@ -181,13 +237,16 @@ def _register_all(mcp) -> None:
         id: str,
         title: str | None = None,
         description: str | None = None,
-        requirement_id: str | None = None,
+        requirement_id: str | None = _UNSET,
     ) -> dict:
-        """更新任务元数据(标题/描述/关联需求;requirement_id 传空=解除关联,须与任务同项目且未删除)。"""
+        """更新任务元数据；省略 requirement_id 保留关联，传 null 或空字符串解除关联。"""
         db, actor = dbc()
-        t = task_svc.update_task(
-            db, actor, uuid.UUID(id), title, description, _req_id(requirement_id)
-        )
+        if requirement_id is _UNSET:
+            t = task_svc.update_task(db, actor, uuid.UUID(id), title, description)
+        else:
+            t = task_svc.update_task(
+                db, actor, uuid.UUID(id), title, description, _req_id(requirement_id)
+            )
         return task_svc._task_dict(db, t)
 
     @mcp.tool(name="tasks.set_status")
@@ -246,7 +305,7 @@ def _register_all(mcp) -> None:
         db, actor = dbc()
         document = document_svc.create_document(
             db, actor, uuid.UUID(project_id), title, module, content, metadata,
-            uuid.UUID(parent_id) if parent_id else None, uuid.UUID(directory_id) if directory_id else None,
+            _optional_uuid(parent_id, "parent_id"), _optional_uuid(directory_id, "directory_id"),
         )
         return document_svc._document_dict(db, document)
 
@@ -257,7 +316,7 @@ def _register_all(mcp) -> None:
     def _doc_children(project_id: str, module: str, parent_id: str | None, cursor: str | None, limit: int | None) -> dict:
         db, actor = dbc()
         cursor, limit = _paged({"project_id": project_id, "module": module, "parent_id": parent_id}, cursor, limit)
-        return document_svc.list_module_children(db, actor, uuid.UUID(project_id), module, uuid.UUID(parent_id) if parent_id else None, cursor, limit)
+        return document_svc.list_module_children(db, actor, uuid.UUID(project_id), module, _optional_uuid(parent_id, "parent_id"), cursor, limit)
 
     def _doc_update(id: str, module: str, title: str | None, content: str | None, metadata: dict | None = None) -> dict:
         db, actor = dbc()
@@ -267,11 +326,11 @@ def _register_all(mcp) -> None:
         )
         return document_svc._document_dict(db, saved, warning)
 
-    def _doc_move(id: str, module: str, parent_id: str | None = None, directory_id: str | None = None) -> dict:
+    def _doc_move(id: str, module: str, parent_id: str = "", directory_id: str = "") -> dict:
         db, actor = dbc()
         document = document_svc.get_document(db, actor, uuid.UUID(id), module)
         moved = document_svc.move_document(
-            db, actor, document.id, uuid.UUID(parent_id) if parent_id else None, uuid.UUID(directory_id) if directory_id else None
+            db, actor, document.id, _optional_uuid(parent_id, "parent_id"), _optional_uuid(directory_id, "directory_id")
         )
         return document_svc._document_dict(db, moved)
 
@@ -333,7 +392,8 @@ def _register_all(mcp) -> None:
 
     @mcp.tool(name="docs.wiki.move")
     @sessioned
-    def docs_wiki_move(id: str, parent_id: str | None = None) -> dict:
+    def docs_wiki_move(id: str, parent_id: str = "") -> dict:
+        """移动 Wiki；省略 parent_id 或传空字符串移动到根节点。"""
         return _doc_move(id, "wiki", parent_id=parent_id)
 
     @mcp.tool(name="docs.wiki.versions")
@@ -363,15 +423,16 @@ def _register_all(mcp) -> None:
         @sessioned
         def directory_create(project_id: str, name: str, parent_id: str | None = None) -> dict:
             db, actor = dbc()
-            directory = document_svc.create_directory(db, actor, uuid.UUID(project_id), module, name, uuid.UUID(parent_id) if parent_id else None)
+            directory = document_svc.create_directory(db, actor, uuid.UUID(project_id), module, name, _optional_uuid(parent_id, "parent_id"))
             return document_svc._directory_dict(db, directory)
 
         @mcp.tool(name=f"docs.{module}.directory_move")
         @sessioned
-        def directory_move(id: str, parent_id: str | None = None) -> dict:
+        def directory_move(id: str, parent_id: str = "") -> dict:
+            """移动目录；省略 parent_id 或传空字符串移动到根节点。"""
             db, actor = dbc()
             directory = document_svc.get_directory(db, actor, uuid.UUID(id), module)
-            moved = document_svc.move_directory(db, actor, directory.id, uuid.UUID(parent_id) if parent_id else None)
+            moved = document_svc.move_directory(db, actor, directory.id, _optional_uuid(parent_id, "parent_id"))
             return document_svc._directory_dict(db, moved)
 
         @mcp.tool(name=f"docs.{module}.directory_rename")
@@ -436,7 +497,8 @@ def _register_all(mcp) -> None:
 
     @mcp.tool(name="docs.glossary.move")
     @sessioned
-    def docs_glossary_move(id: str, directory_id: str | None = None) -> dict:
+    def docs_glossary_move(id: str, directory_id: str = "") -> dict:
+        """移动术语；省略 directory_id 或传空字符串移动到根节点。"""
         return _doc_move(id, "glossary", directory_id=directory_id)
 
     @mcp.tool(name="docs.glossary.deleted")
@@ -495,9 +557,10 @@ def _register_all(mcp) -> None:
 
     @mcp.tool(name="docs.code.members")
     @sessioned
-    def docs_code_members(id: str) -> dict:
+    def docs_code_members(symbol_id: str) -> dict:
+        """列出一个类型符号的直接成员；symbol_id 不是 library_id。"""
         db, actor = dbc()
-        return {"items": code_svc.list_members(db, actor, uuid.UUID(id))}
+        return {"items": code_svc.list_members(db, actor, uuid.UUID(symbol_id))}
 
     @mcp.tool(name="docs.code.versions")
     @sessioned

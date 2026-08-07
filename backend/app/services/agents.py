@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..errors import conflict, invalid_request, not_found, permission_denied
-from ..models import ApiKey, MemoryGrant, Project, ProjectMember, User
+from ..models import ApiKey, Project, ProjectMember, User
 from ..security import (
     decrypt_secret,
     encrypt_secret,
@@ -96,11 +96,6 @@ def delete_agent(db: Session, actor: User, agent_id: uuid.UUID) -> None:
         {ApiKey.revoked_at: now}
     )
     db.query(ProjectMember).filter(ProjectMember.user_id == agent.id).delete()
-    db.query(MemoryGrant).filter(
-        (MemoryGrant.grantor_id == agent.id)
-        | (MemoryGrant.viewer_agent_id == agent.id)
-        | (MemoryGrant.target_agent_id == agent.id)
-    ).delete()
     db.commit()
 
 

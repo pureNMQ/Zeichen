@@ -19,6 +19,7 @@ import { SetPasswordPage } from '@/pages/set-password'
 import { TaskDetailPage } from '@/pages/task-detail'
 import { DocumentWorkbenchPage } from '@/pages/documents'
 import { CodeReferencePage } from '@/pages/code-reference'
+import { MemoryPage, MemorySessionsPage } from '@/pages/memory'
 
 function BootstrapGate() {
   const navigate = useNavigate()
@@ -115,6 +116,8 @@ export function App() {
         <Route path="documents/glossary/term/:id" element={<DocumentWorkbenchPage module="glossary" routeNodeKind="document" />} />
         <Route path="code-reference" element={<CodeReferencePage />} />
         <Route path="code-reference/:id" element={<CodeReferencePage />} />
+        <Route path="memory" element={<MemoryPage />} />
+        <Route path="memory/sessions" element={<MemorySessionsPage />} />
         <Route path="members" element={<MembersPage />} />
         <Route path="agents" element={<RequireAdmin />}>
           <Route index element={<AgentsPage />} />

@@ -81,6 +81,26 @@ class ProjectUpdate(BaseModel):
     name: str = Field(min_length=1, max_length=128)
 
 
+class ProjectDelete(BaseModel):
+    confirm_memory_cleanup: bool = False
+
+
+class MemoryRemember(BaseModel):
+    session_id: str = Field(min_length=1, max_length=256)
+    content: str = Field(min_length=1, max_length=20000)
+    anchor: dict | None = None
+
+
+class MemoryRecall(BaseModel):
+    query: str = Field(min_length=1, max_length=2000)
+    session_id: str | None = Field(default=None, max_length=256)
+
+
+class MemoryImprove(BaseModel):
+    agent_id: uuid.UUID
+    session_id: str = Field(min_length=1, max_length=256)
+
+
 class RequirementCreate(BaseModel):
     title: str = Field(min_length=1, max_length=256)
     description: str | None = None
