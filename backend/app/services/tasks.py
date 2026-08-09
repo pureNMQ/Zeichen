@@ -277,6 +277,9 @@ def delete_task(db: Session, actor: User, task_id: uuid.UUID) -> None:
     task = _get_editable(db, actor, task_id)
     _require_owner(db, actor, task)
     task.deleted_at = _now()
+    from .attachments import soft_delete_for_target
+
+    soft_delete_for_target(db, task.project_id, "task", task.id)
     record_activity(db, task.project_id, actor.id, "task", task.id, "delete", "删除任务")
     db.commit()
 

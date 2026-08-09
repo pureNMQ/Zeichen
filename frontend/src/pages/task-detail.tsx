@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { FolderOpen, UserPlus, UserX } from 'lucide-react'
 
 import { ActivityStream } from '@/components/activity-stream'
+import { AttachmentList } from '@/components/attachment-list'
 import { CommentStream } from '@/components/comment-stream'
 import { StatusBadge } from '@/components/status-badge'
 import { StatusSelect } from '@/components/status-select'
@@ -173,6 +174,7 @@ export function TaskDetailPage() {
           <CommentStream targetType="task" targetId={task.id} canEdit={pending} />
         </CardContent>
       </Card>
+      <AttachmentList targetType="task" targetId={task.id} />
       <Card>
         <CardContent className="p-4">
           <ActivityStream targetType="task" targetId={task.id} />

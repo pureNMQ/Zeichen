@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     mcp_enable_dns_rebinding_protection: bool = True
     mcp_allowed_hosts: str = DEFAULT_MCP_ALLOWED_HOSTS
 
+    # 附件存储(规格书 §8.2):单文件 20MB、单项目配额 2GB;本地目录按项目分桶
+    attachment_storage_dir: str = "storage/attachments"
+    attachment_max_file_bytes: int = 20 * 1024 * 1024
+    attachment_project_quota_bytes: int = 2 * 1024 * 1024 * 1024
+
     @property
     def mcp_allowed_host_patterns(self) -> list[str]:
         """Return the non-empty comma-separated MCP Host allowlist entries."""

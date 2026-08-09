@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { ChevronDown, LogOut, KeyRound, Settings } from 'lucide-react'
+import { ChevronDown, LogOut, KeyRound, Search, Settings } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { useCurrentProject } from '@/lib/current-project'
@@ -8,6 +8,7 @@ import { useDocumentNavigation } from '@/lib/document-navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { NotificationBell } from '@/components/notification-bell'
 import {
   Dialog,
   DialogContent,
@@ -233,6 +234,36 @@ function ChangePasswordDialog({ open, onOpenChange }: { open: boolean; onOpenCha
   )
 }
 
+function GlobalSearchBox() {
+  const [query, setQuery] = useState('')
+  const navigate = useNavigate()
+
+  function onSubmit(e: FormEvent) {
+    e.preventDefault()
+    const trimmed = query.trim()
+    if (!trimmed) return
+    navigate(`/search?q=${encodeURIComponent(trimmed)}`)
+  }
+
+  return (
+    <div className="border-b p-2">
+      <form onSubmit={onSubmit} role="search">
+        <div className="relative">
+          <Search className="pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="全局搜索…"
+            className="pl-8"
+            autoComplete="off"
+            aria-label="全局搜索"
+          />
+        </div>
+      </form>
+    </div>
+  )
+}
+
 export function AppShell() {
   const { user, logout } = useAuth()
   const { role } = useCurrentProject()
@@ -245,6 +276,7 @@ export function AppShell() {
     <div className="flex min-h-screen">
       <aside className="flex w-52 shrink-0 flex-col border-r bg-muted/30">
         <div className="px-4 py-4 text-base font-semibold">贼船 Zeichen</div>
+        <GlobalSearchBox />
         <nav className="flex-1 space-y-1 overflow-y-auto px-2">
           <NavGroup title="团队功能" items={TEAM_NAV} isAdmin={isAdmin} />
           <div className="mx-3 my-1 border-t" />
@@ -255,10 +287,10 @@ export function AppShell() {
           <DocumentNav />
         </nav>
         <ProjectSwitcher />
-        <div className="border-t p-2">
+        <div className="flex items-center gap-1 border-t p-2">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="w-full justify-start gap-2 font-normal">
+              <Button variant="ghost" className="flex-1 justify-start gap-2 font-normal">
                 <Settings className="h-4 w-4" />
                 <span className="truncate">{user?.username}</span>
               </Button>
@@ -286,6 +318,7 @@ export function AppShell() {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          <NotificationBell />
         </div>
       </aside>
       <main className="flex-1 overflow-auto p-6">

@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { FolderOpen, Link2, Plus } from 'lucide-react'
 
 import { ActivityStream } from '@/components/activity-stream'
+import { AttachmentList } from '@/components/attachment-list'
 import { CommentStream } from '@/components/comment-stream'
 import { CreateTaskDialog } from '@/components/create-task-dialog'
 import { StatusBadge } from '@/components/status-badge'
@@ -194,6 +195,7 @@ export function RequirementDetailPage() {
           <CommentStream targetType="requirement" targetId={req.id} canEdit={req.status !== 'cancelled'} />
         </CardContent>
       </Card>
+      <AttachmentList targetType="requirement" targetId={req.id} />
       <Card>
         <CardContent className="p-4">
           <ActivityStream targetType="requirement" targetId={req.id} />
