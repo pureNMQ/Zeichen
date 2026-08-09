@@ -435,3 +435,28 @@ def test_mcp_can_explicitly_disable_dns_rebinding_protection(mcp_server: dict):
         host=f"untrusted-client.example:{port}",
     )
     assert client.initialize()["serverInfo"]["name"] == "zeichen"
+
+
+@pytest.mark.parametrize(
+    "mcp_server",
+    [
+        {
+            "MCP_ISSUER_URL": "https://zeichen.example.com/zeichen",
+            "MCP_RESOURCE_SERVER_URL": "https://zeichen.example.com/mcp",
+        }
+    ],
+    indirect=True,
+)
+def test_mcp_oauth_urls_configurable_via_settings(mcp_server: dict):
+    """OAuth issuer / resource-server URL 必须可经 env 配置，元数据端点如实透出。
+
+    Bearer-key 模式下 SDK 只挂载 protected-resource 元数据端点(RFC 9728):
+    `resource` 反映 resource_server_url,`authorization_servers` 反映 issuer_url。
+    """
+    base = mcp_server["url"].rsplit("/mcp", 1)[0]
+    with httpx.Client(timeout=10, trust_env=False) as client:
+        resource = client.get(f"{base}/.well-known/oauth-protected-resource/mcp")
+        resource.raise_for_status()
+        body = resource.json()
+        assert body["resource"] == "https://zeichen.example.com/mcp"
+        assert body["authorization_servers"] == ["https://zeichen.example.com/zeichen"]

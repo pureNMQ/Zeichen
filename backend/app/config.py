@@ -47,6 +47,13 @@ class Settings(BaseSettings):
     # Host allowlist for an externally deployed MCP endpoint.
     mcp_enable_dns_rebinding_protection: bool = True
     mcp_allowed_hosts: str = DEFAULT_MCP_ALLOWED_HOSTS
+    # MCP OAuth metadata URLs (spec §4.1: bearer-key only, no interactive flow,
+    # but the protected-resource metadata endpoint advertises both).  A public
+    # deployment must point these at its external HTTPS base, e.g.
+    # MCP_ISSUER_URL=https://zeichen.example.com/zeichen and
+    # MCP_RESOURCE_SERVER_URL=https://zeichen.example.com/mcp.
+    mcp_issuer_url: str = "http://localhost/zeichen"
+    mcp_resource_server_url: str = "http://localhost/mcp"
 
     # 附件存储(规格书 §8.2):单文件 20MB、单项目配额 2GB;本地目录按项目分桶
     attachment_storage_dir: str = "storage/attachments"
