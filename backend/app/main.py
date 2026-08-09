@@ -1,3 +1,5 @@
+from importlib.metadata import PackageNotFoundError, version as pkg_version
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -6,6 +8,11 @@ from .config import get_settings
 from .errors import install_error_handler
 
 settings = get_settings()
+
+try:
+    APP_VERSION = pkg_version("zeichen-backend")
+except PackageNotFoundError:
+    APP_VERSION = "0.0.0"
 
 app = FastAPI(title=settings.app_name)
 install_error_handler(app)
@@ -23,4 +30,4 @@ app.include_router(api_router)
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok", "app": settings.app_name}
+    return {"status": "ok", "app": settings.app_name, "version": APP_VERSION}
