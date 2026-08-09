@@ -6,7 +6,9 @@ from .document import Document, DocumentDirectory, DocumentVersion
 from .code_reference import CodeLibrary, CodeSymbol, CodeSymbolVersion, EnumMember
 from .polymorphic import Activity, Attachment, Comment, Reference
 from .memory_dataset import MemoryDataset
+from .memory import MemoryGrant
 from .memory_improve_job import MemoryImproveJob
+from .notification import Notification
 
 __all__ = [
     "Base",
@@ -31,5 +33,7 @@ __all__ = [
     "Attachment",
     "Reference",
     "MemoryDataset",
+    "MemoryGrant",
     "MemoryImproveJob",
+    "Notification",
 ]

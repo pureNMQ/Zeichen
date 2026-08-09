@@ -248,4 +248,15 @@ Dataset 创建、项目删除与会话查询是 Zeichen 后端内部调用,不�
 
 - 本文档是实现的唯一依据;实现 effort 应新开地图/ticket,按 §1~§8 逐模块落地
 - 实现顺序建议:数据模型(§2)→ API 核心(§3,5)→ MCP server(§4)→ Web(§7)→ 记忆接入(§6)→ 部署(§8)
-- 实现时需再验证的事实:cognee 各端点在本版本的确切行为(尤其 update 对会话缓存条目的覆盖范围)、MCP SDK 的 TokenVerifier 用法、IR 编辑器的选型(Milkdown/Bisheng 等)
+
+### 9.1 已核验事实(实现期实测回填)
+
+- **MCP SDK**:锁定 1.29 线(2.0 重构 auth/FastMCP);`TokenVerifier` 经 `mcp.server.auth.provider.TokenVerifier` 挂 `FastMCP(auth=AuthSettings(...), token_verifier=...)` 实现,验证结果存 `auth_context_var`;自带 client 传输在本环境有 bug,端到端用最小 wire 协议客户端
+- **IR 编辑器**:Vditor(IR 模式)落地为文档编辑器(Milkdown/Bisheng 未采用)
+- **cognee 1.4.1 端点行为**(全链路实测):
+  - 认证:服务账号注册/登录(400→register→login)工作正常;Dataset 请求必须带 `X-Api-Key` 或 Bearer
+  - remember:会话记忆必须走 `POST /remember/entry`(typed entry;带 session_id 时 multipart /remember 会忽略上传文件)
+  - recall:`POST /recall` 返回**数组**(answers/chunks 列表),不是对象;图检索(GRAPH_COMPLETION)依赖 Kuzu/ladybug 的 `json` 扩展,首次使用须从 `extension.ladybugdb.com` 下载(被墙网络需预下载挂载到 `/root/.lbdb/extension`)
+  - sessions:路由**只有 GET**(list/stats/cost-by-model/{id});**无会话删除端点**(DELETE → 405),session 缓存随服务账号保留,dataset 删除不会清理会话(应用侧对 405 做容忍,业务清理以 dataset 删除为准)
+  - 模型缓存:fastembed 模型在 `/tmp/fastembed_cache`、HF hub 缓存 `/root/.cache/huggingface`,均不在 DATA_ROOT 内,容器重建会重下;compose 已持久化为命名卷
+  - improve:空对象 `{}` 表示该会话蒸馏锁已占用(冲突);`improve(session_ids)` 原生会话水位线

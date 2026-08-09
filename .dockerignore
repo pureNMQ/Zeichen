@@ -1,0 +1,10 @@
+.git
+.venv
+.scratch
+backend/dev.db
+backend/storage
+backend/.pytest_cache
+backend/zeichen_backend.egg-info
+frontend/node_modules
+frontend/dist
+research

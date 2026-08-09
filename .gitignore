@@ -6,6 +6,9 @@ venv/
 *.db
 *.sqlite3
 *.egg-info/
+.coverage
+backend/.coverage
+backend/storage/
 
 # Node
 node_modules/
@@ -19,6 +22,9 @@ dist/
 # Cognee
 .cognee_data/
 .cognee_system/
+
+# 被墙网络下的 cognee Kuzu json 扩展本地缓存(docker-compose 挂载用,勿提交)
+backend/.lbdb-extension/
 
 # OS
 Thumbs.db

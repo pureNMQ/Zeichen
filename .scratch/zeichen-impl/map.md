@@ -31,6 +31,8 @@
 - [16 普通成员只读查看成员](issues/16-member-read-access.md) — 已认证工作区成员可查看团队成员；有项目访问权的成员可查看项目成员与角色，所有管理接口及控件仍按 admin/Owner 严格限制。
 - [17 跨语言代码签名文本输入](issues/17-code-signature-text-input.md) — 后续增强：为 MCP 代码符号写入提供受限、可验证的 Python/C# 等声明文本解析；当前版本仅接受结构化 definition。
 - [04 文档闭环](issues/04-docs-slice.md) — Wiki/字典/API 共用版本化文档域；Milkdown 即时渲染编辑、MCP docs.* 工具、API schema 校验与引用预警已完成。
+- [06 通知+搜索+附件闭环](issues/06-notifications-search-attachments-slice.md) — activity 触发相关成员通知(owner/admin/创建者/被指派者/评论者)；search.query 关键词+记忆语义混合同后端；附件 bytes 参数 MCP + 本地卷配额 + 软删跟随父实体；Web 铃铛/搜索框结果页/附件组件全落地。
+- [07 测试+compose 收尾](issues/07-testing-compose.md) — 后端 154→319 测试、覆盖率 79%→91%；前端 88→100 测试；compose 六服务一键起(nginx 唯一入口,api/mcp/worker 容器化,实测修复 MCP 421、cognee 会话无删除端点 405 容忍、Kuzu 扩展与模型缓存持久化)；`scripts/demo-e2e.py` 11 步全链路实测通过；spec §9.1 事实清单回填。
 
 ## Not yet specified
 
@@ -40,6 +42,7 @@
   → ✅ 已验(01):`cognee/cognee:latest` 1.4.1 可拉取,compose 骨架就位;API 端口/健康端点待 05 票确认
 - **IR 编辑器选型落地**:Milkdown / Bisheng / 其他,哪个与 React+TS+Tailwind 兼容最好——等文档票推进时验
 - **cognee update 端点对会话缓存条目的覆盖范围**:规格书 §9 的待验证事实——等记忆票推进时验
+  → ✅ 已验(07):cognee 1.4.1 sessions 路由只有 GET,**无会话删除端点**(DELETE→405);会话缓存随服务账号保留,dataset 删除不清理;应用对 405 容忍,业务清理以 dataset 删除为准(§9.1 回填)
 - **mcp SDK 版本与客户端传输**:→ ✅ 已验(03):SDK 2.0 重构 auth/FastMCP,锁 1.29 线;1.28/1.29 自带 client 传输在本环境有 bug(响应不送达),E2E 用最小 wire 协议客户端
 
 ## Out of scope
