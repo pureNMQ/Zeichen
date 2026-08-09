@@ -46,12 +46,12 @@ services:
     volumes:
       - cognee_data:/app/data
       - cognee_system:/app/system
-      # fastembed/HF 模型缓存不落在 DATA_ROOT 内,容器重建会重下(且被墙网络下
+      # fastembed/HF 模型缓存不落在 DATA_ROOT 内,容器重建会重下(且受限网络下
       # 下载不稳定),持久化到命名卷:
       - cognee_hf_cache:/root/.cache/huggingface
       - cognee_fastembed_cache:/tmp/fastembed_cache
       # cognee 1.4.1 的 Kuzu/ladybug 图库首次 recall 需从 extension.ladybugdb.com
-      # 下载 json 扩展;被墙网络下把预下载的扩展挂载进去(本地工作区缓存,
+      # 下载 json 扩展;受限网络下把预下载的扩展挂载进去(本地工作区缓存,
       # 见 .gitignore 的 backend/.lbdb-extension;网络可达的环境可删掉本行)。
       - ./backend/.lbdb-extension:/root/.lbdb/extension
     ports:

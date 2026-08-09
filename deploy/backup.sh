@@ -7,8 +7,8 @@
 #   $BACKUP_ROOT/attachments/<日期>.tar.gz     附件卷
 #   $BACKUP_ROOT/backup.log                    运行日志(cron 重定向到终端即可)
 #
-# 异地:装了腾讯云 coscmd 且 ~/.cos.conf 存在时,自动上传当日三个文件到
-#   COS_BUCKET / COS_REGION 指向的桶;远端保留由 COS 生命周期规则管理
+# 异地:装了 coscmd 且 ~/.cos.conf 存在时,自动上传当日三个文件到
+#   COS_BUCKET / COS_REGION 指向的桶;远端保留由桶生命周期规则管理
 #   (建议:prefix 按 backup/ 分,保留 30 天,见 deploy/docs/ops.md §3)。
 #
 # 用法:deploy/backup.sh [保留本地天数]   (默认 14 天)

@@ -60,11 +60,11 @@ zc up -d --build
 ### 备份
 
 每日自动:postgres 逻辑备份(`pg_dump | gzip`)+ cognee 数据卷 tar(短暂停服几秒)+
-附件卷 tar → 本地 `/srv/zeichen/backups/` → coscmd 上传 COS 桶 `backup/<日期>/`。
+附件卷 tar → 本地 `/srv/zeichen/backups/` → 上传对象存储桶 `backup/<日期>/`。
 
-- 本地保留 14 天(backup.sh 第一个参数可调),远端保留由 COS 生命周期规则控制(建议 30 天)。
+- 本地保留 14 天(backup.sh 第一个参数可调),远端保留由桶生命周期规则控制(建议 30 天)。
 - 手动跑一次:`cd /srv/zeichen && . ./.env && deploy/backup.sh`
-- 检查:`ls -lh /srv/zeichen/backups/*/` 与 COS 控制台 `backup/` 前缀。
+- 检查:`ls -lh /srv/zeichen/backups/*/` 与对象存储控制台 `backup/` 前缀。
 
 ### 恢复(灾难恢复)
 
@@ -86,8 +86,8 @@ mkdir -p /tmp/zeichen-drill && cd /tmp/zeichen-drill
 git clone https://github.com/pureNMQ/Zeichen.git .
 cp deploy/.env.prod.example .env      # 填必填项(演练可用任意值)
 mkdir -p certs && cp /srv/zeichen/certs/* certs/
-# 用 COS 上最近的备份灌入(先下载三个文件到 drill/backups/ 对应子目录)
-coscmd download -r backup/<日期>/ ./backups/restore/    # 按脚本目录结构放好
+# 用对象存储上最近的备份灌入(先下载三个文件到 drill/backups/ 对应子目录)
+对象存储CLI download -r backup/<日期>/ ./backups/restore/    # 按脚本目录结构放好
 # 独立 compose project 名(避免与生产卷/容器冲突):
 docker compose -p zeichen-drill -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d --build
 BACKUP_ROOT=/tmp/zeichen-drill/backups \
@@ -104,7 +104,7 @@ BACKUP_ROOT=/tmp/zeichen-drill/backups deploy/restore.sh --yes <日期>
 
 | 方式 | 续期动作 | 频率 |
 |---|---|---|
-| 腾讯云免费证书 | 控制台 SSL 证书重新申请 → 下载 Nginx 格式 → 覆盖 `/srv/zeichen/certs/` 两个文件 → `docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml exec web nginx -s reload`(或 `zc restart web`) | 每年 |
+| 云厂商免费证书 | 控制台 SSL 证书重新申请 → 下载 Nginx 格式 → 覆盖 `/srv/zeichen/certs/` 两个文件 → `docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml exec web nginx -s reload`(或 `zc restart web`) | 每年 |
 | certbot | `sudo certbot renew`(standalone 方式需先 `zc stop web`;想免停机则改用 webroot 模式并把 `/.well-known/acme-challenge/` 挂载到 web 容器,见 deploy/nginx.conf 预留的 location) → 复制证书后 reload nginx | 每 60 天自动 |
 
 建议在日历上标注免费证书到期前 2 周(证书过期后 HTTPS 立即报错,跳转 301 会把用户困在错误页)。
@@ -114,7 +114,7 @@ BACKUP_ROOT=/tmp/zeichen-drill/backups deploy/restore.sh --yes <日期>
 | 命令 | 后果 |
 |---|---|
 | `zc down --volumes` | **删除全部数据卷**(pg/cognee/附件/模型缓存),不可恢复 |
-| `rm -rf /srv/zeichen/backups` | 清空本地备份(未同步 COS 的即丢失) |
+| `rm -rf /srv/zeichen/backups` | 清空本地备份(未同步到异地的即丢失) |
 | `zc stop cognee` 后忘记 start | cognee 停服期间记忆链路 502(backup.sh 已自动恢复) |
 | 覆盖 `certs/privkey.pem` 前未备份 | 证书不匹配,HTTPS 全挂 |
 | 在恢复演练环境执行 `zc up -d`(非 -p 独立项目名) | 误碰生产容器/卷 |
@@ -122,8 +122,7 @@ BACKUP_ROOT=/tmp/zeichen-drill/backups deploy/restore.sh --yes <日期>
 ## 6. 容量与日常注意
 
 - 磁盘:模型缓存(约 200MB)+ 备份(每日 ~百 MB 级,按数据量)+ 附件配额
-  (单项目 2GB)。`df -h` 定期看;备份轮转自动清,关注 COS 计费即可。
-- 内存:cognee 2G 上限是 ceiling;空闲实测量级约 700MB(cognee 685M / api 80M /
-  mcp 80M / pg 43M / web 19M),4G 余量充足;突发用量由 2G swap 兜底。
+  (单项目 2GB)。`df -h` 定期看;备份轮转自动清,关注对象存储计费即可。
+- 内存:cognee 2G 上限是 ceiling;实测空闲量级远低于预算,4G 余量充足;突发用量由 2G swap 兜底。
 - 软删物理清理:业务软删实体按规格书 §8.2 由定时任务清理(周期默认 90 天,
   该任务实现后挂 cron;当前版本为软删保留,可手动用 SQL 审计,勿手删)。

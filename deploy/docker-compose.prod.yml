@@ -9,7 +9,7 @@
 #   2. SESSION_SECRET / POSTGRES_PASSWORD / 域名类变量全部 ${VAR:?} 守卫,缺失即启动失败
 #   3. SESSION_COOKIE_SECURE=true、WEB_BASE_URL=https://<域名>、MCP 三个 URL/白名单变量
 #   4. cognee 生产安全变量(FASTAPI_USERS_JWT_SECRET 必改、HASH_API_KEY、收紧 CORS 等)
-#   5. 全服务 restart: unless-stopped + deploy.resources.limits(2C4G 预算:
+#   5. 全服务 restart: unless-stopped + deploy.resources.limits(按单机规格预算:
 #      cognee 2G、api/mcp/worker 各 512M、postgres 512M、nginx 128M;swap 2G 兜底见
 #      docs/first-deploy.md §1。cpus/memory 均为上限(ceiling),非预留)
 #
@@ -33,7 +33,7 @@ services:
   cognee:
     restart: unless-stopped
     ports: !override []
-    # 生产网络可达,去掉本地被墙环境的 Kuzu json 扩展挂载(backend/.lbdb-extension),
+    # 生产网络可达,去掉本地受限网络环境的 Kuzu json 扩展挂载(backend/.lbdb-extension),
     # 其余卷与基础 compose 保持一致。
     volumes: !override
       - cognee_data:/app/data

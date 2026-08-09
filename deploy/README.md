@@ -1,13 +1,13 @@
-# deploy/ — 腾讯云生产部署产物
+# deploy/ — 生产部署产物
 
-单机 Docker Compose 全栈部署(规格书 §8),目标:腾讯云轻量 2C4G / Ubuntu 22.04/24.04 LTS。
+单机 Docker Compose 全栈部署(规格书 §8),目标:单机服务器 / Ubuntu 22.04/24.04 LTS。
 
 | 文件 | 说明 |
 |---|---|
 | `docker-compose.prod.yml` | 生产 compose override(叠在根 `docker-compose.yml` 上):去宿主端口、密钥守卫、cognee 安全变量、资源上限 |
 | `nginx.conf` | 生产 TLS nginx(TLS 终止、/api /mcp 反代、SSE 关缓冲、附件 25m、80→443) |
 | `.env.prod.example` | 全变量清单(占位符;真实 `.env` 在服务器上填写,不入 git) |
-| `backup.sh` | 每日备份:pg_dump + cognee 卷 + 附件卷 → 本地 + COS 异地 |
+| `backup.sh` | 每日备份:pg_dump + cognee 卷 + 附件卷 → 本地 + 异地对象存储 |
 | `restore.sh` | 覆盖式恢复(灾难恢复 / 每月演练) |
 | `docs/first-deploy.md` | 首次部署步骤(装 Docker → 镜像加速 → 证书 → .env → up -d → 首用户) |
 | `docs/ops.md` | 日常运维:巡检、升级/回滚、备份恢复演练、证书续期、危险命令 |

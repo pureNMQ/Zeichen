@@ -1,7 +1,7 @@
-# 贼船 Zeichen — 首次部署(腾讯云轻量 2C4G / Ubuntu 22.04/24.04 LTS)
+# 贼船 Zeichen — 首次部署(单机 Docker Compose 全栈)
 
 目标:单机 Docker Compose 全栈(nginx → web/api/mcp/worker/cognee/postgres),
-唯一公网入口 80/443(TLS),数据全部在命名卷,每日备份到 COS。
+唯一公网入口 80/443(TLS),数据全部在命名卷,每日备份到异地对象存储。
 参考:docs/spec.md §8、research/deployment.md。
 
 > 时长参考:服务器准备 ~30 分钟 + 首次构建拉镜像/模型 10~30 分钟(网络而定)。
@@ -11,7 +11,7 @@
 
 ## 0. 云主机与网络准备
 
-1. 轻量应用服务器:2C4G、Ubuntu 24.04 LTS(22.04 亦可),地域就近。
+1. 单机服务器:≥2C4G、Ubuntu 24.04 LTS(22.04 亦可),地域就近。
 2. 安全组/防火墙:只放行 **22 / 80 / 443**(默认已含 22 与 80)。
 3. 建议固定公网 IP 或绑定弹性 IP;域名解析 A 记录指向公网 IP。
 
@@ -38,13 +38,13 @@ sudo usermod -aG docker $USER   # 重新登录后生效,或用 sudo 执行 docke
 docker compose version          # 必须 >= 2.24(本部署用到 !override 与资源上限;v2.39 已确认可用)
 ```
 
-## 3. 配置腾讯云内网镜像加速(可选但强烈推荐,Docker Hub 直连不稳定)
+## 3. 配置镜像加速(可选但强烈推荐,Docker Hub 直连不稳定)
 
 ```bash
 sudo mkdir -p /etc/docker
 sudo tee /etc/docker/daemon.json > /dev/null <<'EOF'
 {
-  "registry-mirrors": ["https://mirror.ccs.tencentyun.com"]
+  "registry-mirrors": ["https://<你的云厂商镜像加速地址>"]
 }
 EOF
 sudo systemctl restart docker
@@ -53,8 +53,8 @@ docker info | grep -A2 "Registry Mirrors"
 docker pull hello-world   # 应能成功拉取
 ```
 
-> 注:该地址为腾讯云内网 Docker 镜像加速(仅腾讯云 CVM/轻量内网可达)。
-> 若拉取仍失败,可直接换阿里云/网易公开加速地址(镜像地址以腾讯云当前文档为准,
+> 注:镜像加速地址为云厂商内网地址(仅其云主机内网可达)。
+> 若拉取仍失败,可直接换公共加速地址(以云厂商当前文档为准,
 > 控制台「容器镜像服务 → 镜像加速器」可查到最新地址)。
 
 ## 4. 部署代码
@@ -76,9 +76,9 @@ git clone https://github.com/pureNMQ/Zeichen.git .
 | `certs/fullchain.pem` | 证书链(含域名证书 + 中间证书) |
 | `certs/privkey.pem` | 私钥 |
 
-### 方式 A:腾讯云免费证书(推荐,备案通过后)
+### 方式 A:云厂商免费证书(推荐,备案通过后)
 
-1. 控制台 → SSL 证书 → 申请免费证书(TrustAsia DV,单域名,有效期 1 年)。
+1. 控制台 → SSL 证书 → 申请免费证书(DV 单域名,有效期 1 年)。
 2. 签发后下载 **Nginx** 格式,解压得到 `xxx_bundle.crt` 与 `xxx.key`:
 
 ```bash
@@ -153,15 +153,15 @@ echo | openssl s_client -connect <域名>:443 -servername <域名> 2>/dev/null |
    `Authorization: Bearer <agent key>`,应能 initialize 并列出工具。
 5. 上传一个 >1MB 的附件(验证 nginx `client_max_body_size`),再上传 20MB 边界值。
 
-## 9. 配置备份(异地 COS)
+## 9. 配置备份(异地对象存储)
 
-1. 腾讯云控制台开通 COS 存储桶(如 `zeichen-backup-125xxxxxx`,地域就近),
+1. 云厂商控制台开通对象存储桶(如 COS / S3 兼容,地域就近),
    建议开生命周期规则:prefix `backup/` 保留 30 天。
-2. 服务器上装 coscmd(官方 COS CLI):
+2. 服务器上装对象存储 CLI:
 
 ```bash
 pip3 install coscmd
-coscmd config -a <SecretId> -s <SecretKey> -b zeichen-backup-125xxxxxx -r ap-guangzhou
+coscmd config -a <SecretId> -s <SecretKey> -b <bucket> -r <region>
 # SecretId/SecretKey:访问管理 CAM → API 密钥(最小权限:只授权该桶)
 ```
 
@@ -176,7 +176,7 @@ sudo mkdir -p /srv/zeichen/backups
 
 > backup.sh 的 `. ./.env` 只为取 COS_BUCKET/COS_REGION,其余变量不读取。
 > 首次手动跑一次:`cd /srv/zeichen && . ./.env && deploy/backup.sh`,检查
-> `/srv/zeichen/backups/` 三个文件与 COS 桶内 `backup/<日期>/`。
+> `/srv/zeichen/backups/` 三个文件与对象存储桶内 `backup/<日期>/`。
 
 ## 10. 上线前 checklist(对照 research/deployment.md §2.2 / §3.3)
 
@@ -185,7 +185,7 @@ sudo mkdir -p /srv/zeichen/backups
 - [ ] `docker compose config` 无警告;`zc ps` 六服务 running/healthy
 - [ ] HTTPS 证书链正常、80 强制跳转 443
 - [ ] MCP 元数据端点返回域名地址;MCP 客户端带 Bearer 可连
-- [ ] 每日备份 cron 已跑通一次,coscmd 已上传,桶生命周期已配
+- [ ] 每日备份 cron 已跑通一次,对象存储 CLI 已上传,桶生命周期已配
 - [ ] 已做过一次恢复演练(见 docs/ops.md §3)
 
 之后的一切运维:deploy/docs/ops.md。

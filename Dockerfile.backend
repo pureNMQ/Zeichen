@@ -8,7 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /srv/zeichen
 
-# 构建参数:可指向内网 PyPI 镜像(腾讯云:--build-arg PIP_INDEX_URL=https://mirrors.tencentyun.com/pypi/simple)
+# 构建参数:可指向内网 PyPI 镜像(--build-arg PIP_INDEX_URL=https://<mirror>/simple)
 ARG PIP_INDEX_URL=https://pypi.org/simple
 
 COPY backend/pyproject.toml ./

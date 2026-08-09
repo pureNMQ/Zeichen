@@ -2,7 +2,7 @@ FROM cognee/cognee:1.4.1
 
 # The upstream image keeps embedding engines optional and its application venv
 # has no pip. Install FastEmbed into that venv through the image's global pip.
-# 构建参数:可指向内网 PyPI 镜像(腾讯云:--build-arg PIP_INDEX_URL=https://mirrors.tencentyun.com/pypi/simple)
+# 构建参数:可指向内网 PyPI 镜像(--build-arg PIP_INDEX_URL=https://<mirror>/simple)
 ARG PIP_INDEX_URL=https://pypi.org/simple
 RUN /usr/local/bin/pip install --no-cache-dir \
     --index-url "${PIP_INDEX_URL}" \
