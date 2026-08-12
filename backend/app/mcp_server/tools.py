@@ -123,7 +123,7 @@ def _register_all(mcp) -> None:
     @mcp.tool(name="requirements.create")
     @sessioned
     def requirements_create(project_id: str, title: str, description: str | None = None) -> dict:
-        """创建需求(状态=待办)。"""
+        """创建需求(状态=待确认)。"""
         db, actor = dbc()
         r = req_svc.create_requirement(db, actor, uuid.UUID(project_id), title, description)
         return req_svc._requirement_dict(db, r)
@@ -156,7 +156,7 @@ def _register_all(mcp) -> None:
     @mcp.tool(name="requirements.set_status")
     @sessioned
     def requirements_set_status(id: str, status: str) -> dict:
-        """改状态:任意目标态自由流转(backlog/in_progress/done/cancelled),无任何前置校验;状态全手动。"""
+        """改状态:任意目标态自由流转(pending/backlog/in_progress/done/cancelled),无任何前置校验;pending→backlog 即确认。"""
         db, actor = dbc()
         r = req_svc.set_requirement_status(db, actor, uuid.UUID(id), status)
         return req_svc._requirement_dict(db, r)

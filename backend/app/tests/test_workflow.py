@@ -1,6 +1,6 @@
-"""状态机全路径 + 所有权 + 并发(服务层,API 与 MCP 共用同一 seam,ticket 09)。
+"""状态机全路径 + 所有权 + 并发(服务层,API 与 MCP 共用同一 seam)。
 
-- 需求四态 / 任务五态,完全自由流转(任意互转,直达终态,**无任何前置校验**)
+- 需求五态 / 任务五态,完全自由流转(任意互转,直达终态,**无任何前置校验**)
 - 自动流转已删除:任务状态变化不影响需求状态,需求状态全手动
 - 取消便捷封装;已指派任务所有权;删除与恢复
 """
@@ -43,6 +43,10 @@ def make_task(
     requirement_id=None,
     assignee_id=None,
 ) -> dict:
+    if requirement_id is not None:
+        requirement = req_svc.get_requirement(db, actor, _as_uuid(requirement_id))
+        if requirement.status == "pending":
+            req_svc.set_requirement_status(db, actor, requirement.id, "backlog")
     t = task_svc.create_task(db, actor, project.id, title, None, requirement_id, assignee_id)
     return task_svc._task_dict(db, t)
 
@@ -60,9 +64,9 @@ def set_task(db, actor, tid, target):
 
 
 class TestRequirementLifecycle:
-    def test_create_backlog_with_activity(self, db: Session, world: dict, proj: dict):
+    def test_create_pending_with_activity(self, db: Session, world: dict, proj: dict):
         r = make_requirement(db, world["admin"], world["project"])
-        assert r["status"] == "backlog"
+        assert r["status"] == "pending"
         activity = db.scalar(select(Activity).where(Activity.action == "create"))
         assert activity is not None
         assert activity.target_type == "requirement"
@@ -85,12 +89,12 @@ class TestRequirementLifecycle:
         assert e.value.code == "not_found"
 
     def test_free_transitions_all_pairs(self, db: Session, world: dict, proj: dict):
-        """需求四态完全自由互转:每个源态可直达任意目标态(含终态,无前置校验)。"""
-        statuses = ["backlog", "in_progress", "done", "cancelled"]
+        """需求五态完全自由互转:每个源态可直达任意目标态(含终态,无前置校验)。"""
+        statuses = ["pending", "backlog", "in_progress", "done", "cancelled"]
         for current in statuses:
             r = make_requirement(db, world["admin"], world["project"], f"需求 {current}")
             rid = uuid.UUID(r["id"])
-            if current != "backlog":
+            if current != "pending":
                 set_req(db, world["admin"], rid, current)
             for target in statuses:
                 if target == current:
@@ -102,7 +106,7 @@ class TestRequirementLifecycle:
         r = make_requirement(db, world["admin"], world["project"])
         rid = uuid.UUID(r["id"])
         with pytest.raises(AppError) as e:
-            set_req(db, world["admin"], rid, "backlog")
+            set_req(db, world["admin"], rid, "pending")
         assert e.value.code == "conflict"
 
     def test_invalid_status_rejected(self, db: Session, world: dict, proj: dict):
@@ -110,6 +114,15 @@ class TestRequirementLifecycle:
         with pytest.raises(AppError) as e:
             set_req(db, world["admin"], uuid.UUID(r["id"]), "verifying")
         assert e.value.code == "invalid_request"
+
+    def test_pending_requirement_rejects_task_derivation(self, db: Session, world: dict, proj: dict):
+        r = make_requirement(db, world["admin"], world["project"])
+        with pytest.raises(AppError) as e:
+            task_svc.create_task(
+                db, world["admin"], world["project"].id, "过早拆解", None, uuid.UUID(r["id"])
+            )
+        assert e.value.code == "invalid_request"
+        assert "请先确认需求" in e.value.message
 
     def test_done_with_pending_tasks_no_validation(self, db: Session, world: dict, proj: dict):
         """需求带未决任务可直接置 done:无任何前置校验(方案 B 完全自由)。"""
@@ -172,7 +185,7 @@ class TestRequirementLifecycle:
         rid = uuid.UUID(r["id"])
         req_svc.delete_requirement(db, world["admin"], rid)
         restored = req_svc.restore_requirement(db, world["admin"], rid)
-        assert restored.status == "backlog"
+        assert restored.status == "pending"
         assert restored.deleted_at is None
 
 

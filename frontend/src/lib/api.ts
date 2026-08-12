@@ -78,12 +78,14 @@ export interface AgentKey {
   revoked_at: string | null
 }
 
-export type WorkflowStatus = 'backlog' | 'in_progress' | 'verifying' | 'done' | 'cancelled'
-// 需求四态(ticket 09:删验收中);任务保留五态
+export type WorkflowStatus = 'pending' | 'backlog' | 'in_progress' | 'verifying' | 'done' | 'cancelled'
+// 需求五态(含待确认,无验收中);任务保留原五态(无待确认)
 export type RequirementStatus = Exclude<WorkflowStatus, 'verifying'>
+export type TaskStatus = Exclude<WorkflowStatus, 'pending'>
 
-export const REQUIREMENT_STATUSES: RequirementStatus[] = ['backlog', 'in_progress', 'done', 'cancelled']
-export const TASK_STATUSES: WorkflowStatus[] = ['backlog', 'in_progress', 'verifying', 'done', 'cancelled']
+export const REQUIREMENT_STATUSES: RequirementStatus[] = ['pending', 'backlog', 'in_progress', 'done', 'cancelled']
+export const EXECUTION_REQUIREMENT_STATUSES: RequirementStatus[] = ['backlog', 'in_progress', 'done', 'cancelled']
+export const TASK_STATUSES: TaskStatus[] = ['backlog', 'in_progress', 'verifying', 'done', 'cancelled']
 
 export interface RequirementRow {
   id: string
@@ -101,7 +103,7 @@ export interface TaskRow {
   id: string
   title: string
   description: string | null
-  status: WorkflowStatus
+  status: TaskStatus
   project_id: string
   requirement_id: string | null
   assignee_id: string | null
@@ -315,6 +317,7 @@ export interface MemoryImproveJob {
 }
 
 export const STATUS_LABEL: Record<WorkflowStatus, string> = {
+  pending: '待确认',
   backlog: '待办',
   in_progress: '实现中',
   verifying: '验收中',

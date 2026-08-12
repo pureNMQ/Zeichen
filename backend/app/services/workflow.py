@@ -1,6 +1,6 @@
-"""状态机(ticket 09:需求四态、任务五态,完全自由流转)。
+"""状态机:需求五态、任务五态,完全自由流转。
 
-- 需求四态:backlog / in_progress / done / cancelled(删 verifying)
+- 需求五态:pending / backlog / in_progress / done / cancelled
 - 任务五态:backlog / in_progress / verifying / done / cancelled(verifying 为普通状态)
 - 完全自由流转:任意状态互转(含直达终态),**无任何前置校验**(需求带未决任务也可直达 done);
   唯一约束是同态再转 → conflict
@@ -11,7 +11,7 @@
 
 from ..errors import conflict, invalid_request
 
-REQUIREMENT_STATUSES = ("backlog", "in_progress", "done", "cancelled")
+REQUIREMENT_STATUSES = ("pending", "backlog", "in_progress", "done", "cancelled")
 TASK_STATUSES = ("backlog", "in_progress", "verifying", "done", "cancelled")
 TERMINAL = ("done", "cancelled")
 

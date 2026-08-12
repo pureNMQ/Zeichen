@@ -1,4 +1,4 @@
-"""需求服务:CRUD + 四态状态机操作(规格书 §3.1,ticket 09)。
+"""需求服务:CRUD + 五态状态机操作(规格书 §3.1)。
 
 - 通用改状态 set_requirement_status(任意目标态,无前置校验);cancel 为便捷封装
 - 状态完全手动:任务状态变化不影响需求状态(自动流转已删除),需求状态仅由操作者显式控制
@@ -112,7 +112,7 @@ def update_requirement(
 def set_requirement_status(
     db: Session, actor: User, requirement_id: uuid.UUID, target: str
 ) -> Requirement:
-    """通用改状态:任意目标态自由流转,无任何前置校验(含带未决任务直达 done)。"""
+    """通用改状态:任意目标态自由流转,无任何前置校验(含 pending 确认)。"""
     requirement = _get_editable(db, actor, requirement_id)
     assert_status_valid(requirement.status, target, "需求")
     old = requirement.status

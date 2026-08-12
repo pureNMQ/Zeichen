@@ -76,12 +76,13 @@ class TestActivity:
         rid = uuid.UUID(r["id"])
         from app.services import tasks as task_svc
 
+        req_svc.set_requirement_status(db, world["admin"], rid, "backlog")
         t = task_svc._task_dict(
             db, task_svc.create_task(db, world["admin"], world["project"].id, "任务", None, rid)
         )
         task_svc.set_task_status(db, world["agent"], uuid.UUID(t["id"]), "in_progress")
         page = svc.list_activity(db, world["member"], "requirement", rid, None, 50)
-        assert [a["action"] for a in page["items"]] == ["create"]
+        assert [a["action"] for a in page["items"]] == ["create", "status"]
         task_page = svc.list_activity(db, world["member"], "task", uuid.UUID(t["id"]), None, 50)
         actions = [(a["action"], a["actor"]) for a in task_page["items"]]
         assert ("create", "admin") in actions

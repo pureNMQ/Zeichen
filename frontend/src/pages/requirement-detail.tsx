@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { FolderOpen, Link2, Plus } from 'lucide-react'
+import { Check, FolderOpen, Link2, Plus } from 'lucide-react'
 
 import { ActivityStream } from '@/components/activity-stream'
 import { CommentStream } from '@/components/comment-stream'
@@ -86,6 +86,8 @@ export function RequirementDetailPage() {
     await act(`/requirements/${id}/status`, { status })
   }
 
+  const isPending = req?.status === 'pending'
+
   async function linkTask(task: TaskRow) {
     setLinkError(null)
     try {
@@ -130,6 +132,12 @@ export function RequirementDetailPage() {
           {req.description && <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{req.description}</p>}
         </div>
         <div className="flex shrink-0 gap-2">
+          {canEdit && isPending && (
+            <Button onClick={() => void setStatus('backlog')}>
+              <Check className="mr-2 h-4 w-4" />
+              确认需求
+            </Button>
+          )}
           <StatusSelect
             value={req.status}
             statuses={REQUIREMENT_STATUSES}
@@ -144,7 +152,7 @@ export function RequirementDetailPage() {
         <Card>
           <CardHeader className="flex-row items-center justify-between gap-2">
             <CardTitle className="text-sm">关联任务</CardTitle>
-            {canEdit && (
+            {canEdit && !isPending && (
               <div className="flex gap-2">
                 <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setLinkOpen(true)}>
                   <Link2 className="mr-1 h-3 w-3" />
@@ -158,6 +166,9 @@ export function RequirementDetailPage() {
             )}
           </CardHeader>
           <CardContent className="space-y-2">
+            {isPending && (
+              <p className="text-sm text-muted-foreground">需求确认后才能创建或关联任务。</p>
+            )}
             {(tasks?.items ?? []).length === 0 && <p className="text-sm text-muted-foreground">暂无任务</p>}
             {tasks?.items.map((t) => (
               <Link key={t.id} to={`/tasks/${t.id}`} className="flex items-center justify-between rounded-md border p-2.5 text-sm hover:bg-muted/40">

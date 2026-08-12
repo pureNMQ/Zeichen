@@ -18,6 +18,11 @@ from app.tests.conftest import login, make_user
 def _req(client: TestClient, pid: str, title: str) -> dict:
     resp = client.post(f"/api/projects/{pid}/requirements", json={"title": title})
     assert resp.status_code == 201, resp.text
+    requirement = resp.json()
+    resp = client.post(
+        f"/api/requirements/{requirement['id']}/status", json={"status": "backlog"}
+    )
+    assert resp.status_code == 200, resp.text
     return resp.json()
 
 

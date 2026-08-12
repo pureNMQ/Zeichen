@@ -1,6 +1,6 @@
-"""requirement / task:状态机(ticket 09 起需求四态、任务五态,完全自由流转)。
+"""requirement / task:状态机(需求五态、任务五态,完全自由流转)。
 
-需求四态:backlog / in_progress / done / cancelled(删 verifying);
+需求五态:pending / backlog / in_progress / done / cancelled;
 任务五态:backlog / in_progress / verifying / done / cancelled。
 check 约束保证状态值合法;流转规则在 service 层(workflow.py)。
 """
@@ -12,7 +12,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, CreatedByMixin, IdMixin, ProjectScopeMixin, SoftDeleteMixin, TimestampMixin
 
-REQUIREMENT_STATUS_VALUES = ("backlog", "in_progress", "done", "cancelled")
+REQUIREMENT_STATUS_VALUES = ("pending", "backlog", "in_progress", "done", "cancelled")
 TASK_STATUS_VALUES = ("backlog", "in_progress", "verifying", "done", "cancelled")
 
 
@@ -26,7 +26,7 @@ class Requirement(IdMixin, TimestampMixin, SoftDeleteMixin, CreatedByMixin, Proj
 
     title: Mapped[str] = mapped_column(String(256), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    status: Mapped[str] = mapped_column(String(16), nullable=False, default="backlog")
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
 
     tasks: Mapped[list["Task"]] = relationship(back_populates="requirement")
 

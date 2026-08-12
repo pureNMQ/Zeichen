@@ -3,6 +3,7 @@ import { STATUS_LABEL, type WorkflowStatus } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
 export const STATUS_COLORS: Record<WorkflowStatus, string> = {
+  pending: 'border-transparent bg-violet-500/10 text-violet-600 dark:bg-violet-500/15 dark:text-violet-400',
   backlog: 'border-transparent bg-muted text-muted-foreground',
   in_progress: 'border-transparent bg-blue-500/10 text-blue-600 dark:bg-blue-500/15 dark:text-blue-400',
   verifying: 'border-transparent bg-amber-500/10 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400',
@@ -11,6 +12,7 @@ export const STATUS_COLORS: Record<WorkflowStatus, string> = {
 }
 
 export const STATUS_DOT: Record<WorkflowStatus, string> = {
+  pending: 'bg-violet-500',
   backlog: 'bg-muted-foreground/60',
   in_progress: 'bg-blue-500',
   verifying: 'bg-amber-500',
