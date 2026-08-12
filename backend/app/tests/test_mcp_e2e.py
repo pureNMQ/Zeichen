@@ -238,7 +238,14 @@ def test_agent_claim_to_requirement_done(mcp_server: dict):
 
     req = client.call("requirements.create", project_id=mcp_server["project_id"], title="E2E 需求")
     rid = req["id"]
-    assert req["status"] == "backlog"
+    assert req["status"] == "pending"
+
+    # 待确认需求不可派生任务;确认后进入正常执行流。
+    blocked = client.call(
+        "tasks.create", project_id=mcp_server["project_id"], title="过早拆解", requirement_id=rid
+    )
+    assert "invalid_request" in blocked["error"]
+    assert client.call("requirements.set_status", id=rid, status="backlog")["status"] == "backlog"
 
     task = client.call(
         "tasks.create", project_id=mcp_server["project_id"], title="E2E 任务", requirement_id=rid
@@ -299,6 +306,8 @@ def test_task_requirement_link_over_mcp(mcp_server: dict):
 
     r1 = client.call("requirements.create", project_id=mcp_server["project_id"], title="MCP 需求一")
     r2 = client.call("requirements.create", project_id=mcp_server["project_id"], title="MCP 需求二")
+    client.call("requirements.set_status", id=r1["id"], status="backlog")
+    client.call("requirements.set_status", id=r2["id"], status="backlog")
     t = client.call("tasks.create", project_id=mcp_server["project_id"], title="MCP 独立任务")
     assert t["requirement_id"] is None
 
@@ -368,15 +377,15 @@ def test_cursor_pagination_over_mcp(mcp_server: dict):
     client.initialize()
     for i in range(25):
         client.call("requirements.create", project_id=mcp_server["project_id"], title=f"批量 {i}")
-    page1 = client.call("requirements.list", project_id=mcp_server["project_id"], status="backlog", limit=10)
+    page1 = client.call("requirements.list", project_id=mcp_server["project_id"], status="pending", limit=10)
     assert len(page1["items"]) == 10
     assert page1["next_cursor"] is not None
     page2 = client.call(
-        "requirements.list", project_id=mcp_server["project_id"], status="backlog", limit=10, cursor=page1["next_cursor"]
+        "requirements.list", project_id=mcp_server["project_id"], status="pending", limit=10, cursor=page1["next_cursor"]
     )
     assert len(page2["items"]) == 10
     page3 = client.call(
-        "requirements.list", project_id=mcp_server["project_id"], status="backlog", limit=10, cursor=page2["next_cursor"]
+        "requirements.list", project_id=mcp_server["project_id"], status="pending", limit=10, cursor=page2["next_cursor"]
     )
     assert len(page3["items"]) == 5
     assert page3["next_cursor"] is None

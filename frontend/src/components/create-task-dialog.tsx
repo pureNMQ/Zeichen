@@ -105,7 +105,7 @@ export function CreateTaskDialog({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">独立任务(不关联)</SelectItem>
-                {(requirements?.items ?? []).map((r) => (
+                {(requirements?.items ?? []).filter((r) => r.status !== 'pending').map((r) => (
                   <SelectItem key={r.id} value={r.id}>
                     {r.title}
                   </SelectItem>

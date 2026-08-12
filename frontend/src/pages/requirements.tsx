@@ -20,12 +20,13 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ErrorNotification } from '@/components/ui/notification'
 import { Textarea } from '@/components/ui/textarea'
-import { api, ApiError, REQUIREMENT_STATUSES, type RequirementRow, type RequirementStatus } from '@/lib/api'
+import { api, ApiError, EXECUTION_REQUIREMENT_STATUSES, REQUIREMENT_STATUSES, type RequirementRow, type RequirementStatus } from '@/lib/api'
 import { useCurrentProject, useProjectRole } from '@/lib/current-project'
 
 const FILTERS: (RequirementStatus | 'all')[] = ['all', ...REQUIREMENT_STATUSES]
 
 const STATUS_TEXT: Record<RequirementStatus, string> = {
+  pending: '待确认',
   backlog: '待办',
   in_progress: '实现中',
   done: '已完成',
@@ -100,6 +101,7 @@ export function RequirementsPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<RequirementRow | null>(null)
   const [confirmCount, setConfirmCount] = useState('')
+  const [actionError, setActionError] = useState<string | null>(null)
 
   const { data: page, isLoading, error } = useQuery({
     queryKey: ['requirements', projectId],
@@ -111,13 +113,15 @@ export function RequirementsPage() {
   })
 
   const items = (page?.items ?? []).filter((r) => filter === 'all' || r.status === filter)
+  const boardItems = items.filter((r) => r.status !== 'pending')
 
   async function doMove(id: string, to: RequirementStatus) {
+    setActionError(null)
     try {
       await moveRequirement(id, to)
       await qc.invalidateQueries({ queryKey: ['requirements', projectId] })
     } catch (err) {
-      alert(err instanceof ApiError ? err.message : '状态变更失败')
+      setActionError(err instanceof ApiError ? err.message : '状态变更失败')
       await qc.invalidateQueries({ queryKey: ['requirements', projectId] })
     }
   }
@@ -130,6 +134,7 @@ export function RequirementsPage() {
   async function doDelete() {
     if (!deleteTarget) return
     try {
+      setActionError(null)
       await api.post(`/requirements/${deleteTarget.id}/delete`, {
         confirm_task_count: Number(confirmCount),
       })
@@ -137,7 +142,7 @@ export function RequirementsPage() {
       setConfirmCount('')
       await qc.invalidateQueries({ queryKey: ['requirements', projectId] })
     } catch (err) {
-      alert(err instanceof ApiError ? err.message : '删除失败')
+      setActionError(err instanceof ApiError ? err.message : '删除失败')
     }
   }
 
@@ -186,6 +191,7 @@ export function RequirementsPage() {
 
       {isLoading && <p className="text-sm text-muted-foreground">加载中…</p>}
       <ErrorNotification message={error ? (error as Error).message : null} />
+      <ErrorNotification message={actionError} />
       {!isLoading && items.length === 0 && (
         <p className="py-10 text-center text-sm text-muted-foreground">暂无需求</p>
       )}
@@ -193,10 +199,10 @@ export function RequirementsPage() {
       {view === 'board' ? (
         <Kanban
           className="flex-1"
-          items={items}
+          items={boardItems}
           canDrag={canEdit}
           onMove={(id, to) => void doMove(id, to as RequirementStatus)}
-          columns={REQUIREMENT_STATUSES}
+          columns={EXECUTION_REQUIREMENT_STATUSES}
           renderCard={(r) => (
             <RequirementCard
               r={r}

@@ -80,7 +80,7 @@ def _check_assignee(db: Session, project_id: uuid.UUID, assignee_id: uuid.UUID) 
 
 
 def _check_requirement(db: Session, project_id: uuid.UUID, requirement_id: uuid.UUID) -> None:
-    """需求须存在、未删除、且与任务同项目(跨项目拒绝)。"""
+    """需求须存在、已确认、未删除、且与任务同项目(跨项目拒绝)。"""
     requirement = db.scalar(
         select(Requirement).where(
             Requirement.id == requirement_id, Requirement.deleted_at.is_(None)
@@ -90,6 +90,8 @@ def _check_requirement(db: Session, project_id: uuid.UUID, requirement_id: uuid.
         raise not_found("需求不存在")
     if requirement.project_id != project_id:
         raise invalid_request("任务所属项目与需求不一致")
+    if requirement.status == "pending":
+        raise invalid_request("待确认需求不能创建或关联任务,请先确认需求")
 
 
 def create_task(

@@ -13,6 +13,7 @@ def test_requirement_crud_and_status_loop(client: TestClient, world: dict):
 
     resp = client.post(f"/api/projects/{pid}/requirements", json={"title": "做登录"})
     assert resp.status_code == 201
+    assert resp.json()["status"] == "pending"
     rid = resp.json()["id"]
 
     resp = client.get(f"/api/projects/{pid}/requirements")
@@ -23,6 +24,15 @@ def test_requirement_crud_and_status_loop(client: TestClient, world: dict):
     resp = client.patch(f"/api/requirements/{rid}", json={"description": "加个说明"})
     assert resp.status_code == 200
     assert resp.json()["description"] == "加个说明"
+
+    # 待确认需求不进入执行流,不能派生任务;确认后才可拆解。
+    resp = client.post(
+        f"/api/projects/{pid}/tasks", json={"title": "过早拆解", "requirement_id": rid}
+    )
+    assert resp.status_code == 400
+    assert resp.json()["code"] == "invalid_request"
+    resp = client.post(f"/api/requirements/{rid}/status", json={"status": "backlog"})
+    assert resp.status_code == 200
 
     # 任务全链路:创建→认领→set_status 自由流转;任务状态不影响需求(自动流转已删除)
     resp = client.post(
@@ -68,7 +78,7 @@ def test_requirement_crud_and_status_loop(client: TestClient, world: dict):
     # 活动流记录整条链路(需求仅显式 set_status 记 activity)
     activity = client.get(f"/api/targets/requirement/{rid}/activity").json()["items"]
     actions = [a["action"] for a in activity]
-    assert actions == ["create", "update", "status"]
+    assert actions == ["create", "update", "status", "status"]
     task_activity = client.get(f"/api/targets/task/{tid}/activity").json()["items"]
     assert [a["action"] for a in task_activity] == [
         "create", "claim", "status", "status", "status",

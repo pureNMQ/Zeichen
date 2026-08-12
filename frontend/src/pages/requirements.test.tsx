@@ -20,13 +20,15 @@ vi.mock('@/lib/api', () => {
       delete: vi.fn(),
     },
     STATUS_LABEL: {
+      pending: '待确认',
       backlog: '待办',
       in_progress: '实现中',
       verifying: '验收中',
       done: '已完成',
       cancelled: '已取消',
     },
-    REQUIREMENT_STATUSES: ['backlog', 'in_progress', 'done', 'cancelled'],
+    REQUIREMENT_STATUSES: ['pending', 'backlog', 'in_progress', 'done', 'cancelled'],
+    EXECUTION_REQUIREMENT_STATUSES: ['backlog', 'in_progress', 'done', 'cancelled'],
   }
 })
 
@@ -42,6 +44,17 @@ const projects: ProjectRow[] = [
 ]
 
 const requirements: RequirementRow[] = [
+  {
+    id: 'r0',
+    title: '等待产品确认',
+    description: null,
+    status: 'pending',
+    project_id: 'p1',
+    created_by: 'u1',
+    created_at: '2026-08-01T00:00:00+00:00',
+    updated_at: '2026-08-01T00:00:00+00:00',
+    task_count: 0,
+  },
   {
     id: 'r1',
     title: '登录功能',
@@ -95,6 +108,7 @@ describe('需求列表页(当前项目)', () => {
   it('默认取第一个可见项目并渲染需求列表', async () => {
     renderRequirements()
     expect(await screen.findByText('登录功能')).toBeInTheDocument()
+    expect(screen.getByText('等待产品确认')).toBeInTheDocument()
     expect(screen.getByText('已验收需求')).toBeInTheDocument()
     expect(screen.getByText(/当前项目:demo/)).toBeInTheDocument()
     expect(screen.getAllByText('待办').length).toBeGreaterThan(0)
@@ -122,14 +136,14 @@ describe('需求列表页(当前项目)', () => {
   })
 })
 
-describe('需求看板(四列自由拖拽)', () => {
+describe('需求执行看板(四列自由拖拽)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     qc.clear()
     localStorage.clear()
   })
 
-  it('editor 看板渲染四列(无验收中)且状态过滤无验收中', async () => {
+  it('editor 看板渲染四个执行态并隐藏待确认需求', async () => {
     renderRequirements([projects[1]])
     const user = (await import('@testing-library/user-event')).default
     await user.click(await screen.findByRole('button', { name: '看板' }))
@@ -138,8 +152,9 @@ describe('需求看板(四列自由拖拽)', () => {
     expect(screen.getAllByText('已完成').length).toBeGreaterThan(0)
     expect(screen.getAllByText('已取消').length).toBeGreaterThan(0)
     expect(screen.queryByText('验收中')).not.toBeInTheDocument()
+    expect(screen.queryByText('等待产品确认')).not.toBeInTheDocument()
     const options = screen.getAllByRole('option').map((o) => o.textContent)
-    expect(options).toEqual(['全部状态', '待办', '实现中', '已完成', '已取消'])
+    expect(options).toEqual(['全部状态', '待确认', '待办', '实现中', '已完成', '已取消'])
   })
 
   it('viewer 看板不可拖拽(无 canDrag 卡片交互)仍可渲染', async () => {
@@ -166,22 +181,22 @@ describe('需求卡片状态下拉(ticket 10)', () => {
     localStorage.clear()
   })
 
-  it('编辑权卡片渲染状态下拉(四态),选择即调通用改状态端点', async () => {
+  it('编辑权卡片渲染状态下拉(五态),选择即调通用改状态端点', async () => {
     vi.mocked(api.post).mockResolvedValue({ ok: true })
     renderRequirements([projects[1]])
     const user = (await import('@testing-library/user-event')).default
     const combos = await screen.findAllByRole('combobox', { name: '状态' })
-    expect(combos.length).toBe(2)
+    expect(combos.length).toBe(3)
     await user.click(combos[0])
     await user.click(await screen.findByRole('option', { name: '已完成' }))
-    expect(api.post).toHaveBeenCalledWith('/requirements/r1/status', { status: 'done' })
+    expect(api.post).toHaveBeenCalledWith('/requirements/r0/status', { status: 'done' })
   })
 
   it('viewer 状态下拉禁用', async () => {
     renderRequirements()
     expect(await screen.findByText('登录功能')).toBeInTheDocument()
     const combos = screen.getAllByRole('combobox', { name: '状态' })
-    expect(combos.length).toBe(2)
+    expect(combos.length).toBe(3)
     for (const c of combos) expect(c).toBeDisabled()
   })
 })

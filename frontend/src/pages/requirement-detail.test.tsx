@@ -20,13 +20,14 @@ vi.mock('@/lib/api', () => {
       delete: vi.fn(),
     },
     STATUS_LABEL: {
+      pending: '待确认',
       backlog: '待办',
       in_progress: '实现中',
       verifying: '验收中',
       done: '已完成',
       cancelled: '已取消',
     },
-    REQUIREMENT_STATUSES: ['backlog', 'in_progress', 'done', 'cancelled'],
+    REQUIREMENT_STATUSES: ['pending', 'backlog', 'in_progress', 'done', 'cancelled'],
   }
 })
 
@@ -51,6 +52,12 @@ const requirement: RequirementRow = {
   created_at: '2026-08-01T00:00:00+00:00',
   updated_at: '2026-08-01T00:00:00+00:00',
   task_count: 0,
+}
+
+const pendingRequirement: RequirementRow = {
+  ...requirement,
+  title: '等待确认的需求',
+  status: 'pending',
 }
 
 function renderDetail(projectList: ProjectRow[] = projects, extraMock?: (path: string) => unknown | undefined) {
@@ -109,7 +116,7 @@ describe('需求详情操作(ticket 10 状态下拉)', () => {
     localStorage.clear()
   })
 
-  it('编辑权下详情页展示状态下拉(四态),选择走通用改状态端点', async () => {
+  it('编辑权下详情页展示状态下拉(五态),选择走通用改状态端点', async () => {
     vi.mocked(api.post).mockResolvedValue({ ok: true })
     renderDetail()
     const user = (await import('@testing-library/user-event')).default
@@ -119,9 +126,25 @@ describe('需求详情操作(ticket 10 状态下拉)', () => {
     await user.click(combo)
     await user.click(await screen.findByRole('option', { name: '已完成' }))
     expect(api.post).toHaveBeenCalledWith('/requirements/r1/status', { status: 'done' })
-    // 详情页无验收中(需求四态)
+    // 详情页无验收中(需求五态)
     await user.click(combo)
     expect(screen.queryByRole('option', { name: '验收中' })).not.toBeInTheDocument()
+  })
+
+  it('待确认需求提供确认操作且不允许进入任务拆解', async () => {
+    vi.mocked(api.post).mockResolvedValue({ ok: true })
+    renderDetail(projects, (path: string) => {
+      if (path === '/requirements/r1') return pendingRequirement
+      return undefined
+    })
+    const user = (await import('@testing-library/user-event')).default
+    await user.click(await screen.findByRole('button', { name: '切换到该项目' }))
+    expect(await screen.findByText('等待确认的需求')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '关联任务' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '新建任务' })).not.toBeInTheDocument()
+    expect(screen.getByText('需求确认后才能创建或关联任务。')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '确认需求' }))
+    expect(api.post).toHaveBeenCalledWith('/requirements/r1/status', { status: 'backlog' })
   })
 
   it('viewer 状态下拉禁用且无关联入口', async () => {
