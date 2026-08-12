@@ -56,4 +56,29 @@ describe('UserProfileDialog', () => {
     expect(screen.getByRole('button', { name: '关闭提示' })).toBeInTheDocument()
     expect(screen.queryByText('Not Found', { selector: 'form p' })).not.toBeInTheDocument()
   })
+
+  it('removes the uploaded avatar and restores the default avatar', async () => {
+    vi.mocked(api.delete).mockResolvedValueOnce(undefined)
+    const onOpenChange = vi.fn()
+    const onSaved = vi.fn()
+    const user = userEvent.setup()
+
+    render(
+      <NotificationProvider>
+        <UserProfileDialog
+          user={{ ...profile, avatar: '/api/users/u1/avatar?v=1' }}
+          self
+          open
+          onOpenChange={onOpenChange}
+          onSaved={onSaved}
+        />
+      </NotificationProvider>,
+    )
+
+    await user.click(screen.getByRole('button', { name: '恢复默认头像' }))
+
+    expect(api.delete).toHaveBeenCalledWith('/users/me/avatar')
+    expect(onSaved).toHaveBeenCalledOnce()
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
 })

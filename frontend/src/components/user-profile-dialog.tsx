@@ -77,7 +77,7 @@ export function UserProfileDialog({
     }
   }
 
-  async function removeAvatar() {
+  async function restoreDefaultAvatar() {
     setSubmitting(true)
     setError(null)
     try {
@@ -127,8 +127,8 @@ export function UserProfileDialog({
           </div>
           <ErrorNotification message={error} />
           <DialogFooter className="sm:justify-between">
-            <Button type="button" variant="outline" disabled={submitting || !user.avatar} onClick={() => void removeAvatar()}>
-              移除头像
+            <Button type="button" variant="outline" disabled={submitting || !user.avatar} onClick={() => void restoreDefaultAvatar()}>
+              恢复默认头像
             </Button>
             <Button type="submit" disabled={submitting}>
               {submitting ? '保存中…' : '保存资料'}
