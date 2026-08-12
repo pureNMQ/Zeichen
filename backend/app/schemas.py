@@ -26,6 +26,10 @@ class ChangePassword(BaseModel):
     new_password: str = PasswordField
 
 
+class UserProfileUpdate(BaseModel):
+    nickname: str | None = Field(max_length=64)
+
+
 class MemberCreate(BaseModel):
     username: str = Field(min_length=1, max_length=64)
     role: Literal["admin", "member"] = "member"

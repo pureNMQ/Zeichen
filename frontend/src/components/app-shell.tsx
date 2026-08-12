@@ -1,11 +1,14 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { ChevronDown, LogOut, KeyRound, Settings } from 'lucide-react'
+import { ChevronDown, LogOut, KeyRound, UserRound } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { useCurrentProject } from '@/lib/current-project'
 import { useDocumentNavigation } from '@/lib/document-navigation'
 import { Button } from '@/components/ui/button'
+import { UserAvatar } from '@/components/user-avatar'
+import { identityName } from '@/lib/user-identity'
+import { UserProfileDialog } from '@/components/user-profile-dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -234,10 +237,11 @@ function ChangePasswordDialog({ open, onOpenChange }: { open: boolean; onOpenCha
 }
 
 export function AppShell() {
-  const { user, logout } = useAuth()
+  const { user, logout, refresh } = useAuth()
   const { role } = useCurrentProject()
   const navigate = useNavigate()
   const [pwdOpen, setPwdOpen] = useState(false)
+  const [profileOpen, setProfileOpen] = useState(false)
 
   const isAdmin = user?.workspace_role === 'admin'
 
@@ -259,18 +263,22 @@ export function AppShell() {
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" className="w-full justify-start gap-2 font-normal">
-                <Settings className="h-4 w-4" />
-                <span className="truncate">{user?.username}</span>
+                {user && <UserAvatar user={user} className="h-6 w-6" />}
+                <span className="truncate">{user ? identityName(user) : ''}</span>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-48">
               <DropdownMenuLabel>
-                {user?.username}
+                {user ? identityName(user) : ''}
                 <span className="ml-1 text-xs text-muted-foreground">
                   {isAdmin ? '管理员' : '成员'}
                 </span>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => setProfileOpen(true)}>
+                <UserRound className="mr-2 h-4 w-4" />
+                个人资料
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setPwdOpen(true)}>
                 <KeyRound className="mr-2 h-4 w-4" />
                 修改密码
@@ -292,6 +300,15 @@ export function AppShell() {
         <Outlet />
       </main>
       <ChangePasswordDialog open={pwdOpen} onOpenChange={setPwdOpen} />
+      {user && (
+        <UserProfileDialog
+          user={user}
+          self
+          open={profileOpen}
+          onOpenChange={setProfileOpen}
+          onSaved={refresh}
+        />
+      )}
     </div>
   )
 }

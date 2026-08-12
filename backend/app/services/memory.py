@@ -12,6 +12,7 @@ from ..models import MemoryDataset, ProjectMember, User
 from .cognee import CogneeClient
 from .permissions import get_accessible_project, require_project_role
 from .polymorphic import record_activity
+from .user_profiles import display_name
 
 
 _SESSION_AGENT_ID = re.compile(r"(?:\(session |Session ID: )zeichen:[0-9a-f-]{36}:([0-9a-f-]{36}):")
@@ -42,7 +43,7 @@ def _session(project_id: uuid.UUID, agent_id: uuid.UUID, session_id: str) -> str
 
 
 def _metadata(actor: User, anchor: dict | None) -> dict:
-    result = {"source_id": str(actor.id), "source_name": actor.username, "source_kind": "agent" if actor.is_agent else "human"}
+    result = {"source_id": str(actor.id), "source_name": display_name(actor), "source_kind": "agent" if actor.is_agent else "human"}
     if anchor:
         entity_type, entity_id = anchor.get("entity_type"), anchor.get("entity_id")
         if not entity_type or not entity_id:
@@ -87,7 +88,7 @@ def _session_summary(db: Session, project_id: uuid.UUID, item: Any, client: Cogn
     result = dict(item) if isinstance(item, dict) else {"session_id": raw}
     result.update({"session_id": raw, "business_session_id": business_session_id, "source_id": str(agent_id)})
     if source:
-        result.update({"source_name": source.username, "source_kind": "agent" if source.is_agent else "human"})
+        result.update({"source_name": display_name(source), "source_kind": "agent" if source.is_agent else "human"})
     preview = _session_preview(client, raw)
     if preview:
         result["preview"] = preview
@@ -121,7 +122,7 @@ def _display_memory_item(db: Session, client: CogneeClient, dataset_id: str, ite
         if source:
             result["external_metadata"] = {
                 "source_id": str(source.id),
-                "source_name": source.username,
+                "source_name": display_name(source),
                 "source_kind": "agent" if source.is_agent else "human",
             }
     return result

@@ -16,6 +16,7 @@ from ..errors import conflict, invalid_request, not_found, permission_denied
 from ..models import Activity, CodeSymbol, Comment, Document, Project, Reference, Requirement, Task, User
 from .pagination import page_result
 from .permissions import get_accessible_project, get_project_role, is_admin, require_project_role
+from .user_profiles import avatar_url, display_name
 
 TARGET_TYPES = ("requirement", "task", "document", "code_symbol", "project")
 REFERENCE_TYPES = ("derives", "documents", "implements", "mentions")
@@ -75,7 +76,11 @@ def _user_name(db: Session, user_id: uuid.UUID | None) -> str:
     if user_id is None:
         return "系统"
     user = db.get(User, user_id)
-    return user.username if user else "已删除用户"
+    return display_name(user)
+
+
+def _user_avatar(db: Session, user_id: uuid.UUID | None) -> str | None:
+    return avatar_url(db.get(User, user_id)) if user_id else None
 
 
 def _comment_dict(db: Session, c: Comment) -> dict:
@@ -86,6 +91,7 @@ def _comment_dict(db: Session, c: Comment) -> dict:
         "body": c.body,
         "author_id": str(c.author_id),
         "author": _user_name(db, c.author_id),
+        "author_avatar": _user_avatar(db, c.author_id),
         "created_at": c.created_at.isoformat(),
     }
 
@@ -97,6 +103,7 @@ def _activity_dict(db: Session, a: Activity) -> dict:
         "target_id": str(a.target_id),
         "actor_id": str(a.actor_id) if a.actor_id else None,
         "actor": _user_name(db, a.actor_id),
+        "actor_avatar": _user_avatar(db, a.actor_id),
         "action": a.action,
         "summary": a.summary,
         "created_at": a.created_at.isoformat(),

@@ -6,6 +6,9 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ErrorNotification } from '@/components/ui/notification'
+import { UserIdentityLabel } from '@/components/user-avatar'
+import { identityName } from '@/lib/user-identity'
+import { UserProfileDialog } from '@/components/user-profile-dialog'
 import { Badge } from '@/components/ui/badge'
 import {
   Card,
@@ -195,7 +198,7 @@ function KeyDialog({
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>API Key 管理 · {agent.username}</DialogTitle>
+            <DialogTitle>API Key 管理 · {identityName(agent)}</DialogTitle>
             <DialogDescription>打开即加载全部有效 Key；回看明文需验证管理员密码。</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -307,9 +310,10 @@ export function AgentsPage() {
   })
   const qc = useQueryClient()
   const [removeError, setRemoveError] = useState<string | null>(null)
+  const [profileFor, setProfileFor] = useState<AgentRow | null>(null)
 
   async function remove(agent: AgentRow) {
-    if (!window.confirm(`删除 Agent ${agent.username}?其全部 key 将吊销、授权将清除`)) return
+    if (!window.confirm(`删除 Agent ${identityName(agent)}?其全部 key 将吊销、授权将清除`)) return
     setRemoveError(null)
     try {
       await api.delete(`/agents/${agent.id}`)
@@ -355,8 +359,7 @@ export function AgentsPage() {
               <Card key={a.id} data-testid="agent-card" className="h-64 overflow-hidden">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
-                    <Bot className="h-4 w-4 text-muted-foreground" />
-                    {a.username}
+                    <UserIdentityLabel user={a} showUsername />
                   </CardTitle>
                   <CardDescription>创建于 {new Date(a.created_at).toLocaleDateString()}</CardDescription>
                 </CardHeader>
@@ -382,6 +385,9 @@ export function AgentsPage() {
                     </Badge>
                   </div>
                   <div className="flex items-center gap-2 border-t pt-3">
+                    <Button variant="outline" size="sm" onClick={() => setProfileFor(a)}>
+                      编辑资料
+                    </Button>
                     <Button variant="outline" size="sm" className="flex-1" onClick={() => setKeysFor(a)}>
                       <KeyRound className="h-4 w-4" />
                       管理 Key
@@ -405,6 +411,14 @@ export function AgentsPage() {
 
       <CreateAgentDialog open={createOpen} onOpenChange={setCreateOpen} />
       {keysFor && <KeyDialog agent={keysFor} open={true} onOpenChange={() => setKeysFor(null)} />}
+      {profileFor && (
+        <UserProfileDialog
+          user={profileFor}
+          open
+          onOpenChange={(open) => { if (!open) setProfileFor(null) }}
+          onSaved={() => qc.invalidateQueries({ queryKey: ['agents'] })}
+        />
+      )}
     </div>
   )
 }

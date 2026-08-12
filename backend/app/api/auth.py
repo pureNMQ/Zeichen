@@ -11,6 +11,7 @@ from ..schemas import ChangePassword, SetPassword, SetPasswordWithToken, Usernam
 from ..security import PENDING_PASSWORD, SESSION, create_token
 from ..services import auth as auth_service
 from ..services.permissions import get_workspace_member
+from ..services.user_profiles import payload as profile_payload
 from .deps import current_user, pending_password_user
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -21,8 +22,7 @@ SET_PASSWORD_TTL = 3600  # 设密码短令牌 1 小时
 def _user_payload(user: User, db: Session) -> dict:
     wm = get_workspace_member(db, user.id)
     return {
-        "id": str(user.id),
-        "username": user.username,
+        **profile_payload(user),
         "is_agent": user.is_agent,
         "workspace_role": wm.role if wm else None,
     }

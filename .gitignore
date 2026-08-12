@@ -26,6 +26,7 @@ Thumbs.db
 
 # Runtime logs
 .scratch/*.log
+**/.scratch/attachments/
 
 # Local Codex MCP credentials/configuration (project-scoped, never commit)
 /.codex/config.toml

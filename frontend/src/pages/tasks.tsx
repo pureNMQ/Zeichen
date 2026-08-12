@@ -8,6 +8,7 @@ import { StatusSelect } from '@/components/status-select'
 import { CreateTaskDialog } from '@/components/create-task-dialog'
 import { ErrorNotification } from '@/components/ui/notification'
 import { Badge } from '@/components/ui/badge'
+import { UserAvatar } from '@/components/user-avatar'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import {
@@ -61,7 +62,12 @@ function TaskCard({
             onSelect={(s) => onStatus(t, s)}
             disabled={!canSetStatus}
           />
-          {t.assignee && <Badge variant="outline">{t.assignee}</Badge>}
+          {t.assignee && (
+            <Badge variant="outline" className="gap-1.5">
+              <UserAvatar user={{ username: t.assignee, avatar: t.assignee_avatar }} className="h-4 w-4 text-[9px]" />
+              {t.assignee}
+            </Badge>
+          )}
         </div>
         <div className="flex items-center gap-1">
           {canEdit && !t.assignee_id && t.status !== 'done' && t.status !== 'cancelled' && (

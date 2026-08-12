@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ErrorNotification } from '@/components/ui/notification'
+import { UserIdentityLabel } from '@/components/user-avatar'
+import { UserProfileDialog } from '@/components/user-profile-dialog'
 import {
   Card,
   CardContent,
@@ -179,6 +181,7 @@ export function MembersPage() {
   })
   const qc = useQueryClient()
   const [removeError, setRemoveError] = useState<string | null>(null)
+  const [profileFor, setProfileFor] = useState<MemberRow | null>(null)
 
   async function remove(id: string, username: string) {
     if (!window.confirm(`移除成员 ${username}?其项目权限将一并清除`)) return
@@ -245,8 +248,7 @@ export function MembersPage() {
                 <Card key={m.id} data-testid="member-card" className="h-52 overflow-hidden">
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
-                      <UserRound className="h-4 w-4 text-muted-foreground" />
-                      {m.username}
+                      <UserIdentityLabel user={m} showUsername />
                     </CardTitle>
                     <CardDescription>加入于 {new Date(m.created_at).toLocaleDateString()}</CardDescription>
                   </CardHeader>
@@ -257,6 +259,9 @@ export function MembersPage() {
                     </div>
                     {isAdmin && (
                       <div className="flex items-center gap-2 border-t pt-3">
+                        <Button variant="outline" size="sm" onClick={() => setProfileFor(m)}>
+                          编辑资料
+                        </Button>
                         {!m.has_password && !isLocked ? (
                           <Button
                             variant="outline"
@@ -297,6 +302,14 @@ export function MembersPage() {
           <AddMemberDialog open={addOpen} onOpenChange={setAddOpen} onCreated={setSetupUrl} />
           <PasswordSetupLinkDialog setupUrl={setupUrl} onOpenChange={(open) => { if (!open) setSetupUrl(null) }} />
         </>
+      )}
+      {profileFor && (
+        <UserProfileDialog
+          user={profileFor}
+          open
+          onOpenChange={(open) => { if (!open) setProfileFor(null) }}
+          onSaved={() => qc.invalidateQueries({ queryKey: ['members'] })}
+        />
       )}
     </div>
   )

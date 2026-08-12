@@ -10,6 +10,7 @@ from ..config import get_settings
 from ..models import User
 from ..schemas import MemberCreate, MemberUpdate
 from ..services import members as members_service
+from ..services.user_profiles import payload as profile_payload
 from .deps import current_admin, current_user
 
 router = APIRouter(prefix="/api/members", tags=["members"])
@@ -17,8 +18,7 @@ router = APIRouter(prefix="/api/members", tags=["members"])
 
 def _payload(user: User) -> dict:
     return {
-        "id": str(user.id),
-        "username": user.username,
+        **profile_payload(user),
         "created_at": user.created_at.isoformat(),
         "is_bootstrap": user.is_bootstrap,
         "has_password": bool(user.password_hash),

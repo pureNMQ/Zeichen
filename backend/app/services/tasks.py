@@ -17,6 +17,7 @@ from ..models import ProjectMember, Requirement, Task, User
 from .pagination import page_result
 from .permissions import get_accessible_project, get_project_role, is_admin, require_project_role
 from .polymorphic import record_activity
+from .user_profiles import avatar_url, display_name
 from .workflow import TERMINAL, assert_status_valid
 
 # update_task 的 requirement_id 哨兵:未传 = 不变;None = 显式解除
@@ -33,7 +34,9 @@ def _task_dict(db: Session, t: Task) -> dict:
         "project_id": str(t.project_id),
         "requirement_id": str(t.requirement_id) if t.requirement_id else None,
         "assignee_id": str(t.assignee_id) if t.assignee_id else None,
-        "assignee": assignee.username if assignee else None,
+        "assignee": display_name(assignee) if assignee else None,
+        "assignee_username": assignee.username if assignee else None,
+        "assignee_avatar": avatar_url(assignee),
         "created_by": str(t.created_by) if t.created_by else None,
         "created_at": t.created_at.isoformat(),
         "updated_at": t.updated_at.isoformat(),
@@ -230,7 +233,7 @@ def assign_task(db: Session, actor: User, task_id: uuid.UUID, assignee_id: uuid.
     assignee = _check_assignee(db, task.project_id, assignee_id)
     task.assignee_id = assignee_id
     record_activity(
-        db, task.project_id, actor.id, "task", task.id, "assign", f"指派给 {assignee.username}"
+        db, task.project_id, actor.id, "task", task.id, "assign", f"指派给 {display_name(assignee)}"
     )
     db.commit()
     return task
