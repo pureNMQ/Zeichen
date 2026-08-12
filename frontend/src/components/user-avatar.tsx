@@ -8,7 +8,7 @@ type Identity = Pick<UserIdentity, 'username' | 'nickname' | 'display_name' | 'a
   id?: string | null
 }
 
-const DEFAULT_AVATAR_COLORS = ['#1D4ED8', '#0F766E', '#F59E0B', '#DB2777', '#7C3AED']
+const DEFAULT_AVATAR_COLORS = ['#ffefd3', '#fffee4', '#d0ecea', '#9fd6d2', '#8b7a5e']
 
 export function UserAvatar({ user, className }: { user: Identity; className?: string }) {
   const name = identityName(user)
