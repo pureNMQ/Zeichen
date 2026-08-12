@@ -48,7 +48,7 @@ export function CommentStream({ targetType, targetId, canEdit }: { targetType: s
           <div key={c.id} className="rounded-md border p-2.5 text-sm">
             <div className="mb-1 flex items-center justify-between">
               <span className="inline-flex items-center gap-2 text-xs font-medium">
-                <UserAvatar user={{ username: c.author, avatar: c.author_avatar }} className="h-6 w-6" />
+                <UserAvatar user={{ id: c.author_id, username: c.author, avatar: c.author_avatar }} className="h-6 w-6" />
                 {c.author}
               </span>
               <span className="flex items-center gap-2">

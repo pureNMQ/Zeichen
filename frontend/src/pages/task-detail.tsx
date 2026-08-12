@@ -132,7 +132,7 @@ export function TaskDetailPage() {
         <div className="flex shrink-0 flex-wrap justify-end gap-2">
           {task.assignee && (
             <Badge variant="outline" className="gap-1.5">
-              <UserAvatar user={{ username: task.assignee, avatar: task.assignee_avatar }} className="h-4 w-4 text-[9px]" />
+              <UserAvatar user={{ id: task.assignee_id, username: task.assignee, avatar: task.assignee_avatar }} className="h-4 w-4 text-[9px]" />
               {task.assignee}
             </Badge>
           )}

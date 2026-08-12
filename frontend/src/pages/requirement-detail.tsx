@@ -175,7 +175,7 @@ export function RequirementDetailPage() {
               <Link key={t.id} to={`/tasks/${t.id}`} className="flex items-center justify-between rounded-md border p-2.5 text-sm hover:bg-muted/40">
                 <span>{t.title}</span>
                 <span className="flex items-center gap-2">
-                  {t.assignee && <Badge variant="outline" className="gap-1.5"><UserAvatar user={{ username: t.assignee, avatar: t.assignee_avatar }} className="h-4 w-4 text-[9px]" />{t.assignee}</Badge>}
+                  {t.assignee && <Badge variant="outline" className="gap-1.5"><UserAvatar user={{ id: t.assignee_id, username: t.assignee, avatar: t.assignee_avatar }} className="h-4 w-4 text-[9px]" />{t.assignee}</Badge>}
                   <StatusBadge status={t.status} />
                 </span>
               </Link>
@@ -233,7 +233,7 @@ export function RequirementDetailPage() {
                 >
                   <span>{t.title}</span>
                   <span className="flex items-center gap-2">
-                    {t.assignee && <Badge variant="outline" className="gap-1.5"><UserAvatar user={{ username: t.assignee, avatar: t.assignee_avatar }} className="h-4 w-4 text-[9px]" />{t.assignee}</Badge>}
+                    {t.assignee && <Badge variant="outline" className="gap-1.5"><UserAvatar user={{ id: t.assignee_id, username: t.assignee, avatar: t.assignee_avatar }} className="h-4 w-4 text-[9px]" />{t.assignee}</Badge>}
                     <StatusBadge status={t.status} />
                   </span>
                 </button>

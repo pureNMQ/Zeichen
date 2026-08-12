@@ -33,7 +33,7 @@ export function ActivityStream({ targetType, targetId }: { targetType: string; t
         {(data?.items ?? []).map((a) => (
           <div key={a.id} className="flex items-baseline gap-2 text-sm">
             <span className="inline-flex shrink-0 items-center gap-2 font-medium">
-              <UserAvatar user={{ username: a.actor, avatar: a.actor_avatar }} className="h-6 w-6" />
+              <UserAvatar user={{ id: a.actor_id, username: a.actor, avatar: a.actor_avatar }} className="h-6 w-6" />
               {a.actor}
             </span>
             <span className="shrink-0 text-xs text-muted-foreground">{ACTION_LABEL[a.action] ?? a.action}</span>

@@ -1,10 +1,14 @@
-import { UserRound } from 'lucide-react'
+import Avatar from 'boring-avatars'
 
 import { cn } from '@/lib/utils'
 import type { UserIdentity } from '@/lib/api'
 import { identityName } from '@/lib/user-identity'
 
-type Identity = Pick<UserIdentity, 'username' | 'nickname' | 'display_name' | 'avatar'>
+type Identity = Pick<UserIdentity, 'username' | 'nickname' | 'display_name' | 'avatar'> & {
+  id?: string | null
+}
+
+const DEFAULT_AVATAR_COLORS = ['#1D4ED8', '#0F766E', '#F59E0B', '#DB2777', '#7C3AED']
 
 export function UserAvatar({ user, className }: { user: Identity; className?: string }) {
   const name = identityName(user)
@@ -16,10 +20,15 @@ export function UserAvatar({ user, className }: { user: Identity; className?: st
     >
       {user.avatar ? (
         <img src={user.avatar} alt="" className="h-full w-full object-cover" />
-      ) : name ? (
-        name.slice(0, 1).toUpperCase()
       ) : (
-        <UserRound className="h-4 w-4" />
+        <Avatar
+          name={`zeichen:user:${user.id ?? user.username}`}
+          variant="beam"
+          colors={DEFAULT_AVATAR_COLORS}
+          size="100%"
+          aria-hidden="true"
+          focusable="false"
+        />
       )}
     </span>
   )

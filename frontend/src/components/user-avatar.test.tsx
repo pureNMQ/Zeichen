@@ -14,11 +14,12 @@ describe('user identity', () => {
     expect(container.querySelector('img')).toHaveAttribute('src', '/api/users/u1/avatar')
   })
 
-  it('falls back to username and a generated placeholder', () => {
-    const user = { username: 'bob', nickname: null, avatar: null }
+  it('falls back to a deterministic beam avatar generated from the user id', () => {
+    const user = { id: 'user-42', username: 'bob', nickname: null, avatar: null }
     expect(identityName(user)).toBe('bob')
-    render(<UserIdentityLabel user={user} />)
+    const { container } = render(<UserIdentityLabel user={user} />)
     expect(screen.getByText('bob')).toBeInTheDocument()
-    expect(screen.getByText('B')).toBeInTheDocument()
+    expect(container.querySelector('svg')).toBeInTheDocument()
+    expect(screen.queryByText('B')).not.toBeInTheDocument()
   })
 })

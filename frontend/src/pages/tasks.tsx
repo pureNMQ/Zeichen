@@ -64,7 +64,7 @@ function TaskCard({
           />
           {t.assignee && (
             <Badge variant="outline" className="gap-1.5">
-              <UserAvatar user={{ username: t.assignee, avatar: t.assignee_avatar }} className="h-4 w-4 text-[9px]" />
+              <UserAvatar user={{ id: t.assignee_id, username: t.assignee, avatar: t.assignee_avatar }} className="h-4 w-4 text-[9px]" />
               {t.assignee}
             </Badge>
           )}
