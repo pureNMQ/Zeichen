@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { api, ApiError, type CommentRow } from '@/lib/api'
 import { ErrorNotification } from '@/components/ui/notification'
+import { UserAvatar } from '@/components/user-avatar'
 
 export function CommentStream({ targetType, targetId, canEdit }: { targetType: string; targetId: string; canEdit: boolean }) {
   const qc = useQueryClient()
@@ -46,7 +47,10 @@ export function CommentStream({ targetType, targetId, canEdit }: { targetType: s
         {(data?.items ?? []).map((c) => (
           <div key={c.id} className="rounded-md border p-2.5 text-sm">
             <div className="mb-1 flex items-center justify-between">
-              <span className="text-xs font-medium">{c.author}</span>
+              <span className="inline-flex items-center gap-2 text-xs font-medium">
+                <UserAvatar user={{ id: c.author_id, username: c.author, avatar: c.author_avatar }} className="h-6 w-6" />
+                {c.author}
+              </span>
               <span className="flex items-center gap-2">
                 <span className="text-xs text-muted-foreground">{new Date(c.created_at).toLocaleString()}</span>
                 {canEdit && (

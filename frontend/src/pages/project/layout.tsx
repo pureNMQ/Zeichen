@@ -3,6 +3,8 @@ import { useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bot, Pencil, Plus, Trash2 } from 'lucide-react'
 import { api, ApiError, type ProjectMemberRow, type ProjectRole } from '@/lib/api'
+import { UserIdentityLabel } from '@/components/user-avatar'
+import { identityName } from '@/lib/user-identity'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -90,7 +92,7 @@ function AddMemberDialog({ projectId, open, onOpenChange }: { projectId: string;
                 <SelectContent>
                   {candidates.map((c) => (
                     <SelectItem key={c.id} value={c.id}>
-                      {c.username}
+                      {identityName(c)}
                       {c.is_agent && ' (Agent)'}
                     </SelectItem>
                   ))}
@@ -226,7 +228,7 @@ function TransferOwnerDialog({
                 <SelectContent>
                   {targets.map((target) => (
                     <SelectItem key={target.id} value={target.id}>
-                      {target.username}{target.is_agent && ' (Agent)'}
+                      {identityName(target)}{target.is_agent && ' (Agent)'}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -347,7 +349,7 @@ export function ProjectLayout() {
   })
 
   async function remove(member: ProjectMemberRow) {
-    if (!window.confirm(`将 ${member.username} 移出项目?其项目内授权将清除`)) return
+    if (!window.confirm(`将 ${identityName(member)} 移出项目?其项目内授权将清除`)) return
     setRemoveError(null)
     try {
       await api.delete(`/projects/${projectId}/members/${member.id}`)
@@ -400,7 +402,7 @@ export function ProjectLayout() {
                   {members.map((m) => (
                     <TableRow key={m.id}>
                       <TableCell className="font-medium">
-                        {m.username}
+                        <UserIdentityLabel user={m} showUsername />
                         {m.is_agent && (
                           <span className="ml-1 inline-flex align-text-bottom" title="Agent">
                             <Bot className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />

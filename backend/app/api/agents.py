@@ -10,6 +10,7 @@ from ..db import get_db
 from ..models import ApiKey, Project, ProjectMember, User
 from ..schemas import AgentCreate, AgentUpdate, KeyIssue, KeyReveal
 from ..services import agents as agents_service
+from ..services.user_profiles import payload as profile_payload
 from .deps import current_admin
 
 router = APIRouter(prefix="/api/agents", tags=["agents"])
@@ -29,8 +30,7 @@ def _agent_payload(db: Session, agent: User) -> dict:
     keys = db.scalars(select(ApiKey).where(ApiKey.user_id == agent.id)).all()
     active = sum(1 for k in keys if k.revoked_at is None)
     return {
-        "id": str(agent.id),
-        "username": agent.username,
+        **profile_payload(agent),
         "created_at": agent.created_at.isoformat(),
         "grants": _grant_payload(db, agent.id),
         "key_count": len(keys),

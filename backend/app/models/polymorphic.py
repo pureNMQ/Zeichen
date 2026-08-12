@@ -68,6 +68,12 @@ class Attachment(IdMixin, TimestampMixin, SoftDeleteMixin, CreatedByMixin, Proje
     size: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     storage_path: Mapped[str] = mapped_column(String(1024), nullable=False)
 
+    # Workspace-level user avatars have no project. Other attachment targets
+    # continue to require project_id in their service-level validation.
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("project.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+
 
 class Reference(IdMixin, TimestampMixin, SoftDeleteMixin, CreatedByMixin, ProjectScopeMixin, Base):
     __tablename__ = "reference"

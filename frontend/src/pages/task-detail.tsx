@@ -9,6 +9,8 @@ import { StatusBadge } from '@/components/status-badge'
 import { StatusSelect } from '@/components/status-select'
 import { Button } from '@/components/ui/button'
 import { ErrorNotification } from '@/components/ui/notification'
+import { UserAvatar } from '@/components/user-avatar'
+import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import {
   Select,
@@ -128,6 +130,12 @@ export function TaskDetailPage() {
           {task.description && <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{task.description}</p>}
         </div>
         <div className="flex shrink-0 flex-wrap justify-end gap-2">
+          {task.assignee && (
+            <Badge variant="outline" className="gap-1.5">
+              <UserAvatar user={{ id: task.assignee_id, username: task.assignee, avatar: task.assignee_avatar }} className="h-4 w-4 text-[9px]" />
+              {task.assignee}
+            </Badge>
+          )}
           {!task.assignee_id && pending && canEditTask && (
             <Button onClick={() => void act('/tasks/' + id + '/claim')}>
               <UserPlus className="mr-2 h-4 w-4" />

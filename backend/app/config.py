@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -22,6 +23,9 @@ class Settings(BaseSettings):
     session_cookie_name: str = "zeichen_session"
     session_ttl_seconds: int = 7 * 24 * 3600
     session_cookie_secure: bool = False
+
+    attachment_storage_dir: Path = Path(".scratch/attachments")
+    attachment_max_bytes: int = 20 * 1024 * 1024
 
     # The backend is normally run on the host by start-all.ps1, while Cognee is
     # published by Docker Compose on localhost:8000. A future in-compose backend

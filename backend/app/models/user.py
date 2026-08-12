@@ -20,6 +20,10 @@ class User(IdMixin, TimestampMixin, SoftDeleteMixin, CreatedByMixin, Base):
     __table_args__ = (CheckConstraint("username <> ''", name="ck_user_username_not_empty"),)
 
     username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    nickname: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Current avatar attachment id. The Attachment row remains the storage and
+    # lifecycle source of truth; keeping the id here makes replacement atomic.
+    avatar: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_agent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # The founding human account is permanently protected from workspace role

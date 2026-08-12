@@ -16,6 +16,7 @@ from ..schemas import (
     ProjectUpdate,
 )
 from ..services import projects as projects_service
+from ..services.user_profiles import payload as profile_payload
 from .deps import current_user
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -73,9 +74,7 @@ def list_project_members(
 ) -> list[dict]:
     return [
         {
-            "id": str(u.id),
-            "username": u.username,
-            "is_agent": u.is_agent,
+            **profile_payload(u),
             "role": role,
             "is_current_user": u.id == user.id,
         }
@@ -151,6 +150,6 @@ def list_member_candidates(
     db: Session = Depends(get_db),
 ) -> list[dict]:
     return [
-        {"id": str(u.id), "username": u.username, "is_agent": u.is_agent}
+        profile_payload(u)
         for u in projects_service.list_member_candidates(db, user, project_id)
     ]

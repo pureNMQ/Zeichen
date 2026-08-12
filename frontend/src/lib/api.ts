@@ -11,9 +11,15 @@ export class ApiError extends Error {
 export type Role = 'admin' | 'member'
 export type ProjectRole = 'owner' | 'editor' | 'viewer'
 
-export interface Me {
+export interface UserIdentity {
   id: string
   username: string
+  nickname?: string | null
+  display_name?: string
+  avatar?: string | null
+}
+
+export interface Me extends UserIdentity {
   is_agent: boolean
   workspace_role: Role | null
 }
@@ -23,9 +29,7 @@ export interface LoginResponse {
   user?: Me
 }
 
-export interface MemberRow {
-  id: string
-  username: string
+export interface MemberRow extends UserIdentity {
   role: Role
   created_at: string
   is_bootstrap: boolean
@@ -48,9 +52,7 @@ export interface ProjectRow {
   my_role: ProjectRole
 }
 
-export interface ProjectMemberRow {
-  id: string
-  username: string
+export interface ProjectMemberRow extends UserIdentity {
   is_agent: boolean
   role: ProjectRole
   is_current_user?: boolean
@@ -62,9 +64,7 @@ export interface ProjectGrant {
   role: ProjectRole
 }
 
-export interface AgentRow {
-  id: string
-  username: string
+export interface AgentRow extends UserIdentity {
   created_at: string
   grants: ProjectGrant[]
   key_count: number
@@ -108,6 +108,8 @@ export interface TaskRow {
   requirement_id: string | null
   assignee_id: string | null
   assignee: string | null
+  assignee_username?: string | null
+  assignee_avatar?: string | null
   created_by: string | null
   created_at: string
   updated_at: string
@@ -120,6 +122,7 @@ export interface CommentRow {
   body: string
   author_id: string
   author: string
+  author_avatar?: string | null
   created_at: string
 }
 
@@ -129,6 +132,7 @@ export interface ActivityRow {
   target_id: string
   actor_id: string | null
   actor: string
+  actor_avatar?: string | null
   action: string
   summary: string | null
   created_at: string
@@ -332,7 +336,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   try {
     resp = await fetch(`/api${path}`, {
       credentials: 'include',
-      headers: options.body ? { 'Content-Type': 'application/json' } : undefined,
+      headers: options.body && !(options.body instanceof FormData) ? { 'Content-Type': 'application/json' } : undefined,
       ...options,
       signal: options.signal ?? controller.signal,
     })
@@ -359,5 +363,6 @@ export const api = {
     request<T>(path, { method: 'POST', body: JSON.stringify(body ?? {}) }),
   patch: <T>(path: string, body: unknown) =>
     request<T>(path, { method: 'PATCH', body: JSON.stringify(body) }),
+  upload: <T>(path: string, body: FormData) => request<T>(path, { method: 'POST', body }),
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
 }
