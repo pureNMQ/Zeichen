@@ -3,6 +3,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { api, ApiError, type UserIdentity } from '@/lib/api'
 import { UserAvatar } from '@/components/user-avatar'
 import { identityName } from '@/lib/user-identity'
+import { ErrorNotification } from '@/components/ui/notification'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -30,6 +31,7 @@ export function UserProfileDialog({
 }) {
   const [nickname, setNickname] = useState(user.nickname ?? '')
   const [avatarFile, setAvatarFile] = useState<File | null>(null)
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const basePath = self ? '/users/me' : `/users/${user.id}`
@@ -38,9 +40,22 @@ export function UserProfileDialog({
     if (open) {
       setNickname(user.nickname ?? '')
       setAvatarFile(null)
+      setAvatarPreview(null)
       setError(null)
     }
   }, [open, user.nickname])
+
+  useEffect(() => () => {
+    if (avatarPreview) URL.revokeObjectURL(avatarPreview)
+  }, [avatarPreview])
+
+  function selectAvatar(file: File | null) {
+    setAvatarFile(file)
+    setAvatarPreview((current) => {
+      if (current) URL.revokeObjectURL(current)
+      return file ? URL.createObjectURL(file) : null
+    })
+  }
 
   async function save(e: FormEvent) {
     e.preventDefault()
@@ -67,7 +82,7 @@ export function UserProfileDialog({
     setError(null)
     try {
       await api.delete(`${basePath}/avatar`)
-      setAvatarFile(null)
+      selectAvatar(null)
       await onSaved()
       onOpenChange(false)
     } catch (err) {
@@ -86,7 +101,7 @@ export function UserProfileDialog({
         </DialogHeader>
         <form onSubmit={save} className="space-y-4">
           <div className="flex items-center gap-4">
-            <UserAvatar user={user} className="h-16 w-16 text-lg" />
+            <UserAvatar user={{ ...user, avatar: avatarPreview ?? user.avatar }} className="h-16 w-16 text-lg" />
             <div className="space-y-2">
               <Label htmlFor={`avatar-${user.id}`}>头像</Label>
               <Input
@@ -94,7 +109,7 @@ export function UserProfileDialog({
                 type="file"
                 accept="image/jpeg,image/png,image/gif,image/webp"
                 autoComplete="off"
-                onChange={(event) => setAvatarFile(event.target.files?.[0] ?? null)}
+                onChange={(event) => selectAvatar(event.target.files?.[0] ?? null)}
               />
               <p className="text-xs text-muted-foreground">JPEG、PNG、GIF 或 WebP，不超过 20MB</p>
             </div>
@@ -110,7 +125,7 @@ export function UserProfileDialog({
               placeholder={user.username}
             />
           </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          <ErrorNotification message={error} />
           <DialogFooter className="sm:justify-between">
             <Button type="button" variant="outline" disabled={submitting || !user.avatar} onClick={() => void removeAvatar()}>
               移除头像
