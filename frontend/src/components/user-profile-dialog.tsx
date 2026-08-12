@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 
 import { api, ApiError, type UserIdentity } from '@/lib/api'
 import { UserAvatar } from '@/components/user-avatar'
@@ -35,6 +35,7 @@ export function UserProfileDialog({
   const [restoreDefaultAvatar, setRestoreDefaultAvatar] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const avatarInputRef = useRef<HTMLInputElement>(null)
   const basePath = self ? '/users/me' : `/users/${user.id}`
 
   useEffect(() => {
@@ -98,15 +99,20 @@ export function UserProfileDialog({
           <div className="flex items-center gap-4">
             <UserAvatar user={{ ...user, avatar: restoreDefaultAvatar ? null : avatarPreview ?? user.avatar }} className="h-16 w-16 text-lg" />
             <div className="space-y-2">
-              <Label htmlFor={`avatar-${user.id}`}>头像</Label>
+              <Label>头像</Label>
               <div className="flex items-center gap-2">
                 <Input
                   id={`avatar-${user.id}`}
+                  ref={avatarInputRef}
                   type="file"
                   accept="image/jpeg,image/png,image/gif,image/webp"
                   autoComplete="off"
+                  className="sr-only"
                   onChange={(event) => selectAvatar(event.target.files?.[0] ?? null)}
                 />
+                <Button type="button" variant="outline" disabled={submitting} onClick={() => avatarInputRef.current?.click()}>
+                  选择文件
+                </Button>
                 <Button type="button" variant="outline" disabled={submitting || (!user.avatar && !avatarFile)} onClick={previewDefaultAvatar}>
                   恢复默认头像
                 </Button>

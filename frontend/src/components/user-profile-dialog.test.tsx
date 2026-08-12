@@ -39,10 +39,16 @@ describe('UserProfileDialog', () => {
     const user = userEvent.setup()
     renderDialog()
 
-    await user.upload(screen.getByLabelText('头像'), new File(['image'], 'avatar.png', { type: 'image/png' }))
+    await user.upload(document.querySelector('input[type="file"]')!, new File(['image'], 'avatar.png', { type: 'image/png' }))
 
     expect(createObjectURL).toHaveBeenCalled()
     expect(document.querySelector('img')).toHaveAttribute('src', 'blob:avatar-preview')
+  })
+
+  it('provides a button to choose an avatar file', () => {
+    renderDialog()
+
+    expect(screen.getByRole('button', { name: '选择文件' })).toBeInTheDocument()
   })
 
   it('uses a closable notification instead of inline error text when saving fails', async () => {
