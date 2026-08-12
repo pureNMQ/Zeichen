@@ -32,6 +32,7 @@ export function UserProfileDialog({
   const [nickname, setNickname] = useState(user.nickname ?? '')
   const [avatarFile, setAvatarFile] = useState<File | null>(null)
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null)
+  const [restoreDefaultAvatar, setRestoreDefaultAvatar] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const basePath = self ? '/users/me' : `/users/${user.id}`
@@ -41,6 +42,7 @@ export function UserProfileDialog({
       setNickname(user.nickname ?? '')
       setAvatarFile(null)
       setAvatarPreview(null)
+      setRestoreDefaultAvatar(false)
       setError(null)
     }
   }, [open, user.nickname])
@@ -51,6 +53,7 @@ export function UserProfileDialog({
 
   function selectAvatar(file: File | null) {
     setAvatarFile(file)
+    setRestoreDefaultAvatar(false)
     setAvatarPreview((current) => {
       if (current) URL.revokeObjectURL(current)
       return file ? URL.createObjectURL(file) : null
@@ -67,6 +70,8 @@ export function UserProfileDialog({
         const form = new FormData()
         form.append('file', avatarFile)
         await api.upload(`${basePath}/avatar`, form)
+      } else if (restoreDefaultAvatar) {
+        await api.delete(`${basePath}/avatar`)
       }
       await onSaved()
       onOpenChange(false)
@@ -77,19 +82,9 @@ export function UserProfileDialog({
     }
   }
 
-  async function restoreDefaultAvatar() {
-    setSubmitting(true)
-    setError(null)
-    try {
-      await api.delete(`${basePath}/avatar`)
-      selectAvatar(null)
-      await onSaved()
-      onOpenChange(false)
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : '移除头像失败')
-    } finally {
-      setSubmitting(false)
-    }
+  function previewDefaultAvatar() {
+    selectAvatar(null)
+    setRestoreDefaultAvatar(true)
   }
 
   return (
@@ -101,16 +96,21 @@ export function UserProfileDialog({
         </DialogHeader>
         <form onSubmit={save} className="space-y-4">
           <div className="flex items-center gap-4">
-            <UserAvatar user={{ ...user, avatar: avatarPreview ?? user.avatar }} className="h-16 w-16 text-lg" />
+            <UserAvatar user={{ ...user, avatar: restoreDefaultAvatar ? null : avatarPreview ?? user.avatar }} className="h-16 w-16 text-lg" />
             <div className="space-y-2">
               <Label htmlFor={`avatar-${user.id}`}>头像</Label>
-              <Input
-                id={`avatar-${user.id}`}
-                type="file"
-                accept="image/jpeg,image/png,image/gif,image/webp"
-                autoComplete="off"
-                onChange={(event) => selectAvatar(event.target.files?.[0] ?? null)}
-              />
+              <div className="flex items-center gap-2">
+                <Input
+                  id={`avatar-${user.id}`}
+                  type="file"
+                  accept="image/jpeg,image/png,image/gif,image/webp"
+                  autoComplete="off"
+                  onChange={(event) => selectAvatar(event.target.files?.[0] ?? null)}
+                />
+                <Button type="button" variant="outline" disabled={submitting || (!user.avatar && !avatarFile)} onClick={previewDefaultAvatar}>
+                  恢复默认头像
+                </Button>
+              </div>
               <p className="text-xs text-muted-foreground">JPEG、PNG、GIF 或 WebP，不超过 20MB</p>
             </div>
           </div>
@@ -126,10 +126,7 @@ export function UserProfileDialog({
             />
           </div>
           <ErrorNotification message={error} />
-          <DialogFooter className="sm:justify-between">
-            <Button type="button" variant="outline" disabled={submitting || !user.avatar} onClick={() => void restoreDefaultAvatar()}>
-              恢复默认头像
-            </Button>
+          <DialogFooter>
             <Button type="submit" disabled={submitting}>
               {submitting ? '保存中…' : '保存资料'}
             </Button>
