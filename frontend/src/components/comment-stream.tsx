@@ -31,11 +31,12 @@ export function CommentStream({ targetType, targetId, canEdit }: { targetType: s
   }
 
   async function remove(id: string) {
+    setError(null)
     try {
       await api.delete(`/comments/${id}`)
       await qc.invalidateQueries({ queryKey: key })
     } catch (err) {
-      alert(err instanceof ApiError ? err.message : '删除失败')
+      setError(err instanceof ApiError ? err.message : '删除失败')
     }
   }
 
@@ -54,7 +55,7 @@ export function CommentStream({ targetType, targetId, canEdit }: { targetType: s
               <span className="flex items-center gap-2">
                 <span className="text-xs text-muted-foreground">{new Date(c.created_at).toLocaleString()}</span>
                 {canEdit && (
-                  <button className="text-xs text-muted-foreground hover:text-destructive" onClick={() => void remove(c.id)}>
+                  <button type="button" aria-label="删除评论" className="text-xs text-muted-foreground hover:text-destructive" onClick={() => void remove(c.id)}>
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 )}

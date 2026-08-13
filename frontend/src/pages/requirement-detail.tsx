@@ -31,6 +31,15 @@ import {
 } from '@/lib/api'
 import { useCurrentProject, useProjectRole } from '@/lib/current-project'
 
+function referenceHref(type: string, id: string, module?: string | null) {
+  if (type === 'requirement') return `/requirements/${id}`
+  if (type === 'task') return `/tasks/${id}`
+  if (type === 'document' && module === 'wiki') return `/documents/wiki/${id}`
+  if (type === 'document' && module === 'glossary') return `/documents/glossary/term/${id}`
+  if (type === 'code_symbol') return `/code-reference/${id}`
+  return null
+}
+
 function Guide({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex flex-col items-center gap-3 py-16 text-muted-foreground">
@@ -193,7 +202,9 @@ export function RequirementDetailPage() {
               <div key={r.id} className="flex items-center gap-2 rounded-md border p-2.5 text-sm">
                 <Badge variant="outline">{r.type}</Badge>
                 <span className="text-xs text-muted-foreground">
-                  {r.from_type}:{r.from_id.slice(0, 8)} → {r.to_type}:{r.to_id.slice(0, 8)}
+                  {(() => { const href = referenceHref(r.from_type, r.from_id, r.from_module); return href ? <Link to={href} className="hover:text-primary hover:underline">{r.from_title ?? r.from_id.slice(0, 8)}</Link> : (r.from_title ?? r.from_id.slice(0, 8)) })()}
+                  {' → '}
+                  {(() => { const href = referenceHref(r.to_type, r.to_id, r.to_module); return href ? <Link to={href} className="hover:text-primary hover:underline">{r.to_title ?? r.to_id.slice(0, 8)}</Link> : (r.to_title ?? r.to_id.slice(0, 8)) })()}
                 </span>
               </div>
             ))}

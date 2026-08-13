@@ -13,7 +13,7 @@ from ..errors import conflict, invalid_request, not_found
 from ..models import Document, DocumentDirectory, DocumentVersion, Reference, User
 from .pagination import decode_cursor, page_result
 from .permissions import get_accessible_project, require_project_role
-from .polymorphic import record_activity
+from .polymorphic import _ref_dict, record_activity
 
 DOC_TYPES = ("wiki", "glossary")
 DIRECTORY_MODULES = ("glossary",)
@@ -742,17 +742,7 @@ def _reverse_references(db: Session, document: Document) -> dict:
             ),
         )
     ).all()
-    items = [
-        {
-            "id": str(ref.id),
-            "from_type": ref.from_type,
-            "from_id": str(ref.from_id),
-            "to_type": ref.to_type,
-            "to_id": str(ref.to_id),
-            "type": ref.type,
-        }
-        for ref in refs
-    ]
+    items = [_ref_dict(db, ref) for ref in refs]
     return {"count": len(items), "items": items}
 
 

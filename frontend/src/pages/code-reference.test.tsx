@@ -60,4 +60,11 @@ describe('代码 API 参考预览', () => {
 
     await waitFor(() => expect(screen.getByText('新摘要')).toBeInTheDocument())
   })
+
+  it('代码树侧栏受视口约束并独立滚动', async () => {
+    renderPage()
+    const sidebar = await screen.findByLabelText('代码 API 参考文件组织')
+    expect(sidebar).toHaveClass('h-full', 'min-h-0')
+    expect(sidebar.querySelector('.overflow-y-auto')).toHaveClass('min-h-0', 'flex-1')
+  })
 })

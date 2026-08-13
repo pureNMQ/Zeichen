@@ -248,8 +248,8 @@ export function AppShell() {
   const isAdmin = user?.workspace_role === 'admin'
 
   return (
-    <div className="flex min-h-screen">
-      <aside className="flex w-52 shrink-0 flex-col border-r bg-muted/30">
+    <div className="flex h-screen min-h-0 overflow-hidden">
+      <aside className="flex h-screen min-h-0 w-52 shrink-0 flex-col border-r bg-muted/30">
         <div className="px-4 py-4 text-base font-semibold">贼船 Zeichen</div>
         <nav className="flex-1 space-y-1 overflow-y-auto px-2">
           <NavGroup title="团队功能" items={TEAM_NAV} isAdmin={isAdmin} />
@@ -298,7 +298,7 @@ export function AppShell() {
           </DropdownMenu>
         </div>
       </aside>
-      <main className="flex-1 overflow-auto p-6">
+      <main className="min-h-0 flex-1 overflow-auto p-6">
         <Outlet />
       </main>
       <ChangePasswordDialog open={pwdOpen} onOpenChange={setPwdOpen} />

@@ -233,6 +233,23 @@ def create_reference(
 
 
 def _ref_dict(db: Session, r: Reference) -> dict:
+    def target_label(target_type: str, target_id: uuid.UUID) -> tuple[str, str | None]:
+        if target_type == "project":
+            target = db.get(Project, target_id)
+            return (target.name if target else "已删除", None)
+        model = _TARGET_MODELS.get(target_type)
+        target = db.get(model, target_id) if model else None
+        if target is None:
+            return ("已删除", None)
+        if target_type == "code_symbol":
+            return (target.name, None)
+        return (
+            getattr(target, "title", None) or getattr(target, "name", None) or "已删除",
+            getattr(target, "doc_type", None),
+        )
+
+    from_title, from_module = target_label(r.from_type, r.from_id)
+    to_title, to_module = target_label(r.to_type, r.to_id)
     return {
         "id": str(r.id),
         "from_type": r.from_type,
@@ -240,6 +257,10 @@ def _ref_dict(db: Session, r: Reference) -> dict:
         "to_type": r.to_type,
         "to_id": str(r.to_id),
         "type": r.type,
+        "from_title": from_title,
+        "to_title": to_title,
+        "from_module": from_module,
+        "to_module": to_module,
         "created_by": str(r.created_by) if r.created_by else None,
         "created_at": r.created_at.isoformat(),
     }

@@ -184,6 +184,10 @@ export interface ReferenceRow {
   to_type: string
   to_id: string
   type: string
+  from_title?: string
+  to_title?: string
+  from_module?: string | null
+  to_module?: string | null
   created_by: string | null
   created_at: string
 }

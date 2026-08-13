@@ -55,7 +55,15 @@ def test_list_visibility(client, db, world):
     assert resp.json() == []
 
 
-def test_create_project_admin_only(client, db, world):
+def test_create_project_admin_only(client, db, world, monkeypatch):
+    from app.services import memory
+
+    class FakeCognee:
+        def create_dataset(self, name):
+            return "dataset-created-for-permission-test"
+
+    monkeypatch.setattr(memory, "CogneeClient", FakeCognee)
+
     resp = client.post("/api/projects", json={"name": "x", "members": []})
     assert resp.status_code == 401
 

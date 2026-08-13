@@ -41,6 +41,7 @@ vi.mock('@/lib/auth', () => ({
 import { api, type ProjectRow, type TaskRow } from '@/lib/api'
 import { CurrentProjectProvider } from '@/lib/current-project'
 import { TasksPage } from '@/pages/tasks'
+import { NotificationProvider } from '@/components/ui/notification'
 
 const qc = new QueryClient({
   defaultOptions: { queries: { retry: false } },
@@ -80,23 +81,24 @@ const tasks: TaskRow[] = [
   },
 ]
 
-function renderTasks(projectList: ProjectRow[] = projects, taskList: TaskRow[] = tasks) {
+function renderTasks(projectList: ProjectRow[] = projects, taskList: TaskRow[] = tasks, withNotifications = false) {
   vi.mocked(api.get).mockImplementation((path: string) => {
     if (path === '/projects') return Promise.resolve(projectList)
     if (path.includes('/tasks')) return Promise.resolve({ items: taskList, next_cursor: null })
     return Promise.resolve({})
   })
-  return render(
-    <QueryClientProvider client={qc}>
-      <CurrentProjectProvider>
-        <MemoryRouter initialEntries={['/tasks']}>
-          <Routes>
-            <Route path="/tasks" element={<TasksPage />} />
-          </Routes>
-        </MemoryRouter>
-      </CurrentProjectProvider>
-    </QueryClientProvider>,
+  const page = (
+      <QueryClientProvider client={qc}>
+        <CurrentProjectProvider>
+          <MemoryRouter initialEntries={['/tasks']}>
+            <Routes>
+              <Route path="/tasks" element={<TasksPage />} />
+            </Routes>
+          </MemoryRouter>
+        </CurrentProjectProvider>
+      </QueryClientProvider>
   )
+  return render(withNotifications ? <NotificationProvider>{page}</NotificationProvider> : page)
 }
 
 describe('任务看板(当前项目)', () => {
@@ -131,6 +133,16 @@ describe('任务看板(当前项目)', () => {
     const user = (await import('@testing-library/user-event')).default
     await user.click(await screen.findByRole('button', { name: '认领' }))
     expect(api.post).toHaveBeenCalledWith('/tasks/t1/claim')
+  })
+
+  it('认领失败显示可关闭的应用内通知', async () => {
+    vi.mocked(api.post).mockRejectedValue(new Error('认领失败'))
+    renderTasks(projects, tasks, true)
+    const user = (await import('@testing-library/user-event')).default
+    await user.click(await screen.findByRole('button', { name: '认领' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('认领失败')
+    await user.click(screen.getByRole('button', { name: '关闭提示' }))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
   it('无当前项目时展示空态引导', async () => {

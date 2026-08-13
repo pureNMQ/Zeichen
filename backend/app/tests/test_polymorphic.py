@@ -112,6 +112,8 @@ class TestReference:
         assert len(from_side["items"]) == 1
         assert len(to_side["items"]) == 1
         assert to_side["items"][0]["from_id"] == str(i1)
+        assert to_side["items"][0]["from_title"] == r1["title"]
+        assert to_side["items"][0]["to_title"] == r2["title"]
 
     def test_cross_project_and_self_rejected(self, db: Session, world: dict, proj: dict):
         r1 = make_requirement(db, world)

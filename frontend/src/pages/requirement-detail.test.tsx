@@ -163,6 +163,17 @@ describe('需求详情操作(ticket 10 状态下拉)', () => {
     expect(screen.queryByRole('button', { name: '关联任务' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '新建任务' })).not.toBeInTheDocument()
   })
+
+  it('引用显示标题并跳转到引用实体', async () => {
+    renderDetail(projects, (path: string) => {
+      if (path === '/targets/requirement/r1/references?limit=50') return { items: [{ id: 'ref1', type: 'implements', from_type: 'requirement', from_id: 'r1', from_title: '其他项目的需求', to_type: 'task', to_id: 't1', to_title: '实现任务' }] }
+      return undefined
+    })
+    const user = (await import('@testing-library/user-event')).default
+    await user.click(await screen.findByRole('button', { name: '切换到该项目' }))
+    const target = await screen.findByRole('link', { name: '实现任务' })
+    expect(target).toHaveAttribute('href', '/tasks/t1')
+  })
 })
 
 describe('需求详情↔任务关联(ticket 10)', () => {

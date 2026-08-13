@@ -124,6 +124,7 @@ export function TasksPage() {
   const [view, setView] = useState<'board' | 'list'>('board')
   const [createOpen, setCreateOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<TaskRow | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
 
   const { data: page, isLoading, error } = useQuery({
     queryKey: ['tasks', projectId],
@@ -134,12 +135,13 @@ export function TasksPage() {
   const tasks = page?.items ?? []
 
   async function doMove(id: string, to: WorkflowStatus) {
+    setActionError(null)
     try {
       await moveTask(id, to)
       await qc.invalidateQueries({ queryKey: ['tasks', projectId] })
       await qc.invalidateQueries({ queryKey: ['requirements', projectId] })
     } catch (err) {
-      alert(err instanceof ApiError ? err.message : '状态变更失败')
+      setActionError(err instanceof ApiError ? err.message : '状态变更失败')
       await qc.invalidateQueries({ queryKey: ['tasks', projectId] })
     }
   }
@@ -150,23 +152,25 @@ export function TasksPage() {
   }
 
   async function claim(task: TaskRow) {
+    setActionError(null)
     try {
       await api.post(`/tasks/${task.id}/claim`)
       await qc.invalidateQueries({ queryKey: ['tasks', projectId] })
     } catch (err) {
-      alert(err instanceof ApiError ? err.message : '认领失败')
+      setActionError(err instanceof ApiError ? err.message : '认领失败')
     }
   }
 
   async function doDelete() {
     if (!deleteTarget) return
+    setActionError(null)
     try {
       await deleteTask(deleteTarget.id)
       setDeleteTarget(null)
       await qc.invalidateQueries({ queryKey: ['tasks', projectId] })
       await qc.invalidateQueries({ queryKey: ['requirements', projectId] })
     } catch (err) {
-      alert(err instanceof ApiError ? err.message : '删除失败')
+      setActionError(err instanceof ApiError ? err.message : '删除失败')
     }
   }
 
@@ -204,6 +208,7 @@ export function TasksPage() {
 
       {isLoading && <p className="text-sm text-muted-foreground">加载中…</p>}
       <ErrorNotification message={error ? (error as Error).message : null} />
+      <ErrorNotification message={actionError} />
       {!isLoading && view === 'list' && tasks.length === 0 && (
         <p className="py-10 text-center text-sm text-muted-foreground">暂无任务</p>
       )}
