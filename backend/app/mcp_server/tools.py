@@ -18,6 +18,7 @@ from ..models import ProjectMember, User
 from ..services import projects as project_svc
 from ..services import documents as document_svc
 from ..services import code_reference as code_svc
+from ..services import repositories as repository_svc
 from ..services import polymorphic as poly_svc
 from ..services import requirements as req_svc
 from ..services import tasks as task_svc
@@ -76,6 +77,88 @@ def _optional_uuid(value: str | None, field_name: str) -> uuid.UUID | None:
 
 
 def _register_all(mcp) -> None:
+    # ---------- repositories.* ----------
+    @mcp.tool(name="repositories.list")
+    @sessioned
+    def repositories_list(project_id: str) -> dict:
+        """列出项目中未删除的代码仓库记录。"""
+        db, actor = dbc()
+        return {"items": repository_svc.list_repositories(db, actor, uuid.UUID(project_id))}
+
+    @mcp.tool(name="repositories.deleted")
+    @sessioned
+    def repositories_deleted(project_id: str) -> dict:
+        """列出项目中已软删除的代码仓库记录（editor+）。"""
+        db, actor = dbc()
+        return {"items": repository_svc.list_repositories(db, actor, uuid.UUID(project_id), deleted=True)}
+
+    @mcp.tool(name="repositories.get")
+    @sessioned
+    def repositories_get(id: str) -> dict:
+        """获取代码仓库记录。"""
+        db, actor = dbc()
+        return repository_svc.get_repository(db, actor, uuid.UUID(id))
+
+    @mcp.tool(name="repositories.create")
+    @sessioned
+    def repositories_create(
+        project_id: str,
+        name: str,
+        vcs_type: str,
+        url: str,
+        other_vcs_type: str | None = None,
+        description: str | None = None,
+        default_branch: str | None = None,
+    ) -> dict:
+        """创建项目代码仓库记录；不保存凭据，也不会连接或同步远端。"""
+        db, actor = dbc()
+        repository = repository_svc.create_repository(
+            db, actor, uuid.UUID(project_id),
+            {
+                "name": name, "vcs_type": vcs_type, "url": url,
+                "other_vcs_type": other_vcs_type, "description": description,
+                "default_branch": default_branch,
+            },
+        )
+        return repository_svc._repository_dict(repository)
+
+    @mcp.tool(name="repositories.update")
+    @sessioned
+    def repositories_update(
+        id: str,
+        name: str | None = None,
+        vcs_type: str | None = None,
+        url: str | None = None,
+        other_vcs_type: str | None = _UNSET,
+        description: str | None = _UNSET,
+        default_branch: str | None = _UNSET,
+    ) -> dict:
+        """更新代码仓库记录；省略可选字段时保留原值，传 null 时清空。"""
+        db, actor = dbc()
+        patch = {key: value for key, value in {
+            "name": name, "vcs_type": vcs_type, "url": url,
+            "other_vcs_type": other_vcs_type, "description": description,
+            "default_branch": default_branch,
+        }.items() if value is not _UNSET and (value is not None or key in {"other_vcs_type", "description", "default_branch"})}
+        repository = repository_svc.update_repository(db, actor, uuid.UUID(id), patch)
+        return repository_svc._repository_dict(repository)
+
+    @mcp.tool(name="repositories.delete")
+    @sessioned
+    def repositories_delete(id: str) -> dict:
+        """软删除代码仓库记录；不影响实际仓库或已导入的 API 参考。"""
+        db, actor = dbc()
+        repository_svc.delete_repository(db, actor, uuid.UUID(id))
+        return {"deleted": True, "id": id}
+
+    @mcp.tool(name="repositories.restore")
+    @sessioned
+    def repositories_restore(id: str) -> dict:
+        """恢复已软删除的代码仓库记录。"""
+        db, actor = dbc()
+        repository = repository_svc.restore_repository(db, actor, uuid.UUID(id))
+        return repository_svc._repository_dict(repository)
+
     # ---------- memory.* ----------
     @mcp.tool(name="memory.remember")
     @sessioned

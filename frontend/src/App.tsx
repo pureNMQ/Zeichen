@@ -21,6 +21,7 @@ import { DocumentWorkbenchPage } from '@/pages/documents'
 import { CodeReferencePage } from '@/pages/code-reference'
 import { MemoryPage, MemorySessionsPage } from '@/pages/memory'
 import { CogneePage } from '@/pages/cognee'
+import { RepositoriesPage } from '@/pages/repositories'
 
 function BootstrapGate() {
   const navigate = useNavigate()
@@ -117,6 +118,7 @@ export function App() {
         <Route path="documents/glossary/term/:id" element={<DocumentWorkbenchPage module="glossary" routeNodeKind="document" />} />
         <Route path="code-reference" element={<CodeReferencePage />} />
         <Route path="code-reference/:id" element={<CodeReferencePage />} />
+        <Route path="repositories" element={<RepositoriesPage />} />
         <Route path="memory" element={<MemoryPage />} />
         <Route path="memory/sessions" element={<MemorySessionsPage />} />
         <Route path="members" element={<MembersPage />} />

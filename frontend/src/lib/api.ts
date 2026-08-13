@@ -209,6 +209,23 @@ export interface CodeLibrary {
   deleted_at: string | null
 }
 
+export type RepositoryVcsType = 'git' | 'svn' | 'other'
+
+export interface RepositoryRow {
+  id: string
+  project_id: string
+  name: string
+  vcs_type: RepositoryVcsType
+  other_vcs_type: string | null
+  url: string
+  description: string | null
+  default_branch: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+  deleted_at: string | null
+}
+
 export interface CodeEnumMember {
   position: number
   name: string

@@ -13,12 +13,12 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from ..errors import conflict, invalid_request, not_found, permission_denied
-from ..models import Activity, CodeSymbol, Comment, Document, Project, Reference, Requirement, Task, User
+from ..models import Activity, CodeSymbol, Comment, Document, Project, Reference, Repository, Requirement, Task, User
 from .pagination import page_result
 from .permissions import get_accessible_project, get_project_role, is_admin, require_project_role
 from .user_profiles import avatar_url, display_name
 
-TARGET_TYPES = ("requirement", "task", "document", "code_symbol", "project")
+TARGET_TYPES = ("requirement", "task", "document", "code_symbol", "repository", "project")
 REFERENCE_TYPES = ("derives", "documents", "implements", "mentions")
 
 _TARGET_MODELS = {
@@ -26,6 +26,7 @@ _TARGET_MODELS = {
     "task": Task,
     "document": Document,
     "code_symbol": CodeSymbol,
+    "repository": Repository,
 }
 
 

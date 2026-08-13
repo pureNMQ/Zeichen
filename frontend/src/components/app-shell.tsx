@@ -45,6 +45,7 @@ const TEAM_NAV = [
 const WORKSPACE_NAV = [
   { to: '/requirements', label: '需求' },
   { to: '/tasks', label: '任务' },
+  { to: '/repositories', label: '代码仓库' },
 ]
 
 const DOCUMENT_NAV = [

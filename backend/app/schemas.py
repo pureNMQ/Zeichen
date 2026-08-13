@@ -208,6 +208,24 @@ class CodeSymbolRollback(BaseModel):
     expected_revision: int = Field(ge=1)
 
 
+class RepositoryCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    vcs_type: Literal["git", "svn", "other"]
+    other_vcs_type: str | None = Field(default=None, max_length=64)
+    url: str = Field(min_length=1, max_length=2048)
+    description: str | None = Field(default=None, max_length=1000)
+    default_branch: str | None = Field(default=None, max_length=256)
+
+
+class RepositoryUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    vcs_type: Literal["git", "svn", "other"] | None = None
+    other_vcs_type: str | None = Field(default=None, max_length=64)
+    url: str | None = Field(default=None, min_length=1, max_length=2048)
+    description: str | None = Field(default=None, max_length=1000)
+    default_branch: str | None = Field(default=None, max_length=256)
+
+
 class DocumentMove(BaseModel):
     parent_id: uuid.UUID | None = None
     directory_id: uuid.UUID | None = None
@@ -235,8 +253,8 @@ class CommentCreate(BaseModel):
 
 
 class ReferenceCreate(BaseModel):
-    from_type: Literal["requirement", "task", "document", "code_symbol", "project"]
+    from_type: Literal["requirement", "task", "document", "code_symbol", "repository", "project"]
     from_id: uuid.UUID
-    to_type: Literal["requirement", "task", "document", "code_symbol", "project"]
+    to_type: Literal["requirement", "task", "document", "code_symbol", "repository", "project"]
     to_id: uuid.UUID
     type: Literal["derives", "documents", "implements", "mentions"]

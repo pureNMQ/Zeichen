@@ -205,7 +205,7 @@ def test_agent_claim_to_requirement_done(mcp_server: dict):
 
     tools = client.list_tools()
     assert len(tools) >= 60
-    for ns in ("requirements.", "tasks.", "docs.wiki.", "docs.glossary.", "docs.code.", "comment.", "ref.", "project.", "agent."):
+    for ns in ("requirements.", "tasks.", "repositories.", "docs.wiki.", "docs.glossary.", "docs.code.", "comment.", "ref.", "project.", "agent."):
         assert any(t.startswith(ns) for t in tools), f"缺少 {ns} 工具"
     assert "requirements.set_status" in tools and "requirements.complete" not in tools
     assert "tasks.set_status" in tools and "tasks.start" not in tools and "tasks.complete" not in tools
@@ -214,6 +214,7 @@ def test_agent_claim_to_requirement_done(mcp_server: dict):
         "docs.wiki.children", "docs.wiki.ancestors", "docs.wiki.move",
         "docs.glossary.directory_create", "docs.glossary.directory_move",
         "docs.code.library_create", "docs.code.create", "docs.code.get",
+        "repositories.list", "repositories.create", "repositories.update", "repositories.delete", "repositories.restore",
     ):
         assert name in tools
 
@@ -235,6 +236,17 @@ def test_agent_claim_to_requirement_done(mcp_server: dict):
 
     projects = client.call("project.list")
     assert projects[0]["id"] == mcp_server["project_id"], f"project.list 返回异常: {projects}"
+
+    repository = client.call(
+        "repositories.create", project_id=mcp_server["project_id"], name="MCP Repository",
+        vcs_type="git", url="https://example.com/mcp-repository.git", default_branch="main",
+    )
+    assert repository["vcs_type"] == "git"
+    assert client.call("repositories.list", project_id=mcp_server["project_id"])["items"][0]["id"] == repository["id"]
+    assert client.call("repositories.update", id=repository["id"], description="MCP registered")["description"] == "MCP registered"
+    assert client.call("repositories.delete", id=repository["id"])["deleted"] is True
+    assert client.call("repositories.deleted", project_id=mcp_server["project_id"])["items"][0]["id"] == repository["id"]
+    assert client.call("repositories.restore", id=repository["id"])["deleted_at"] is None
 
     req = client.call("requirements.create", project_id=mcp_server["project_id"], title="E2E 需求")
     rid = req["id"]

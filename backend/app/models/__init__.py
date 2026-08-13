@@ -4,6 +4,7 @@ from .team_project import Project, ProjectMember, Team, WorkspaceMember
 from .requirement import Requirement, Task
 from .document import Document, DocumentDirectory, DocumentVersion
 from .code_reference import CodeLibrary, CodeSymbol, CodeSymbolVersion, EnumMember
+from .repository import Repository
 from .polymorphic import Activity, Attachment, Comment, Reference
 from .memory_dataset import MemoryDataset
 from .memory_improve_job import MemoryImproveJob
@@ -28,6 +29,7 @@ __all__ = [
     "CodeSymbol",
     "CodeSymbolVersion",
     "EnumMember",
+    "Repository",
     "Comment",
     "Activity",
     "Attachment",
