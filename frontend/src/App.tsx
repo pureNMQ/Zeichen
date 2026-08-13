@@ -20,6 +20,7 @@ import { TaskDetailPage } from '@/pages/task-detail'
 import { DocumentWorkbenchPage } from '@/pages/documents'
 import { CodeReferencePage } from '@/pages/code-reference'
 import { MemoryPage, MemorySessionsPage } from '@/pages/memory'
+import { CogneePage } from '@/pages/cognee'
 
 function BootstrapGate() {
   const navigate = useNavigate()
@@ -121,6 +122,9 @@ export function App() {
         <Route path="members" element={<MembersPage />} />
         <Route path="agents" element={<RequireAdmin />}>
           <Route index element={<AgentsPage />} />
+        </Route>
+        <Route path="cognee" element={<RequireAdmin />}>
+          <Route index element={<CogneePage />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

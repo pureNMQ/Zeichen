@@ -105,6 +105,21 @@ class MemoryImprove(BaseModel):
     session_id: str = Field(min_length=1, max_length=256)
 
 
+class CogneeConfigurationUpdate(BaseModel):
+    llm_provider: str = Field(min_length=1, max_length=64)
+    llm_model: str = Field(min_length=1, max_length=256)
+    llm_endpoint: str | None = Field(default=None, max_length=2048)
+    # Omit the key to retain the stored value; an empty value explicitly clears it.
+    llm_api_key: str | None = Field(default=None, max_length=4096)
+    embedding_provider: str = Field(min_length=1, max_length=64)
+    embedding_model: str = Field(min_length=1, max_length=256)
+    embedding_dimensions: int | None = Field(default=None, ge=1, le=65536)
+
+
+class CogneeRestartRequest(BaseModel):
+    confirmed: bool = False
+
+
 class RequirementCreate(BaseModel):
     title: str = Field(min_length=1, max_length=256)
     description: str | None = None

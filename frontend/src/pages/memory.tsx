@@ -195,7 +195,7 @@ function LongTermMemories({ projectId }: { projectId: string }) {
 
 function CachedSessions({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient()
-  const notify = useNotification()
+  const { notify } = useNotification()
   const [agent, setAgent] = useState('all')
   const [status, setStatus] = useState('all')
   const [selectedId, setSelectedId] = useState<string | null>(null)

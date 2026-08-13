@@ -7,6 +7,8 @@ from .code_reference import CodeLibrary, CodeSymbol, CodeSymbolVersion, EnumMemb
 from .polymorphic import Activity, Attachment, Comment, Reference
 from .memory_dataset import MemoryDataset
 from .memory_improve_job import MemoryImproveJob
+from .cognee_configuration import CogneeConfiguration
+from .cognee_restart_job import CogneeRestartJob
 
 __all__ = [
     "Base",
@@ -32,4 +34,6 @@ __all__ = [
     "Reference",
     "MemoryDataset",
     "MemoryImproveJob",
+    "CogneeConfiguration",
+    "CogneeRestartJob",
 ]

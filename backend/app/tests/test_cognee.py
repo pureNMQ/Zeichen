@@ -12,7 +12,11 @@ from app.services.cognee import CogneeClient
 def test_compose_qualifies_the_deepseek_model_for_litellm():
     compose = Path(__file__).resolve().parents[3] / "docker-compose.yml"
 
-    assert "LLM_MODEL: deepseek/deepseek-v4-flash" in compose.read_text(encoding="utf-8")
+    content = compose.read_text(encoding="utf-8")
+    # The default remains provider-qualified while Zeichen may override it via
+    # the runtime env file during an administrator-requested recreate.
+    assert "LLM_MODEL-deepseek/deepseek-v4-flash" in content
+    assert ".scratch/cognee-runtime.env" in content
 
 
 def test_cognee_image_build_installs_fastembed_for_the_configured_provider():

@@ -69,6 +69,15 @@ function Start-ServiceProcess {
     }
 }
 
+function Test-WorkerProcess {
+    param([string]$Module)
+
+    return @(
+        Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" -ErrorAction SilentlyContinue |
+            Where-Object { $_.CommandLine -match [regex]::Escape("-m $Module") }
+    ).Count -gt 0
+}
+
 function Wait-ForDocker {
     $deadline = (Get-Date).AddSeconds($DockerTimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
@@ -137,6 +146,10 @@ Start-ServiceProcess -Name 'mcp' -Port $McpPort -Executable $python -Arguments @
 # Cognee improve can exceed an MCP request timeout. Keep it in a durable worker
 # process; the MCP tool only submits/polls jobs.
 Start-ServiceProcess -Name 'memory-improve-worker' -Port 0 -Executable $python -Arguments @('-m', 'app.workers.memory_improve') -WorkingDirectory $backendRoot
+Start-ServiceProcess -Name 'cognee-restart-worker' -Port 0 -Executable $python -Arguments @('-m', 'app.workers.cognee_restart') -WorkingDirectory $backendRoot
+if (-not (Test-WorkerProcess -Module 'app.workers.cognee_restart')) {
+    throw 'Cognee restart worker did not remain running. Check .scratch\cognee-restart-worker.stderr.log.'
+}
 Start-ServiceProcess -Name 'frontend' -Port $FrontendPort -Executable 'npm.cmd' -Arguments @('run', 'dev', '--', '--host', '127.0.0.1', '--port', "$FrontendPort") -WorkingDirectory $frontendRoot
 
 Write-Host ''

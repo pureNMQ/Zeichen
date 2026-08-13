@@ -46,6 +46,24 @@ class Settings(BaseSettings):
     cognee_service_email: str = "zeichen-service@example.com"
     cognee_service_password: str = "zeichen-local-cognee-service-password"
 
+    # Defaults used to bootstrap the workspace-managed Cognee configuration.
+    # They deliberately do not expose the existing compose secret to API clients.
+    cognee_llm_provider: str = "custom"
+    cognee_llm_model: str = "deepseek/deepseek-v4-flash"
+    cognee_llm_endpoint: str | None = "https://api.deepseek.com"
+    cognee_embedding_provider: str = "fastembed"
+    cognee_embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    cognee_embedding_dimensions: int | None = 384
+    # These paths and executable are deployment-owned settings.  The restart
+    # API never accepts command, service, or path input from a client.
+    cognee_compose_project_dir: Path = Path("..")
+    cognee_runtime_env_file: Path = Path("../.scratch/cognee-runtime.env")
+    cognee_compose_executable: str = "docker"
+    cognee_restart_timeout_seconds: float = 180.0
+    # The Compose deployment's existing provider key is read only to produce a
+    # masked administrator-facing status.  Plaintext is never returned by API.
+    cognee_deployment_env_file: Path = Path("../.env")
+
     # Streamable HTTP MCP: DNS-rebinding protection remains enabled by default.
     # Use a comma-separated string so a normal .env file can safely extend the
     # Host allowlist for an externally deployed MCP endpoint.

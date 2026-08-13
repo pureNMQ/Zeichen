@@ -78,6 +78,45 @@ export interface AgentKey {
   revoked_at: string | null
 }
 
+export interface CogneeConfiguration {
+  llm_provider: string
+  llm_model: string
+  llm_endpoint: string | null
+  llm_api_key_configured: boolean
+  llm_api_key_display: string | null
+  llm_api_key_source: 'managed' | 'deployment' | 'unconfigured'
+  embedding_provider: string
+  embedding_model: string
+  embedding_dimensions: number | null
+  pending_restart: boolean
+  updated_at: string
+}
+
+export interface CogneeRestartJob {
+  id: string
+  status: 'queued' | 'running' | 'completed' | 'failed'
+  status_label?: string
+  error: string | null
+  created_at: string
+  started_at: string | null
+  finished_at: string | null
+}
+
+export interface CogneeRuntimeStatus {
+  runtime: {
+    availability: 'reachable' | 'unreachable'
+    detail: string | null
+    checked_at: string
+  }
+  latest_restart: {
+    status: CogneeRestartJob['status']
+    status_label: string
+    error: string | null
+    requested_at: string
+    finished_at: string | null
+  } | null
+}
+
 export type WorkflowStatus = 'pending' | 'backlog' | 'in_progress' | 'verifying' | 'done' | 'cancelled'
 // 需求五态(含待确认,无验收中);任务保留原五态(无待确认)
 export type RequirementStatus = Exclude<WorkflowStatus, 'verifying'>
@@ -363,6 +402,8 @@ export const api = {
     request<T>(path, { method: 'POST', body: JSON.stringify(body ?? {}) }),
   patch: <T>(path: string, body: unknown) =>
     request<T>(path, { method: 'PATCH', body: JSON.stringify(body) }),
+  put: <T>(path: string, body: unknown) =>
+    request<T>(path, { method: 'PUT', body: JSON.stringify(body) }),
   upload: <T>(path: string, body: FormData) => request<T>(path, { method: 'POST', body }),
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
 }
