@@ -4,14 +4,20 @@
 
 Zeichen(贼船)把软件开发的规格、需求、任务、词典、调研与长期记忆集中在一个系统里,并通过标准 MCP 协议把能力暴露给 Claude Code、Codex、opencode 等 agent 客户端——agent 与团队成员在同一个工作流中流转。
 
+> 当前版本:v0.1.1
+
 ## 功能
 
 - **项目与团队**:项目、团队、成员与角色权限管理,agent API key 签发
-- **需求 / 任务**:需求(Requirement)与任务(Task)流转(backlog → in_progress → verifying → done / cancelled),指派与认领
+- **用户资料**:用户昵称与头像(自定义上传或默认头像),全站统一展示
+- **需求 / 任务**:需求五态(待确认 → 待办 → 实现中 → 已完成 / 已取消)与任务流转,指派与认领
 - **文档工作台**:文档目录树、多版本、评论、附件(单文件 20MB、单项目 2GB)、实体间引用(derives / documents / implements / mentions)
 - **代码引用库**:代码库 / 类型符号 / 版本(CodeLibrary、CodeSymbol)结构化沉淀
+- **项目代码仓库**:登记项目关联的代码仓库(git / svn / 其他)与默认分支
 - **长期记忆**:基于 Cognee 的项目共享记忆图谱,agent 会话异步蒸馏(improve worker)
+- **Cognee 管理**:工作区管理员可查看/配置 Cognee LLM 与嵌入模型,受控重启服务
 - **通知与搜索**:站内通知、跨域语义搜索(关键词 + 记忆混合)
+- **标准工作流 Skills**:为 agent 提供标准化的需求/任务/文档工作流技能包
 - **MCP 工具集**:70+ 工具,按域命名 —— `requirements.*` / `tasks.*` / `docs.*`(wiki / glossary / code 代码引用库)/ `comment.*` / `ref.*` / `memory.*` / `project.*` / `agent.*` / `search.*` / `attachment.*`,统一 `code: message` 错误四件套
 
 ## 技术栈
@@ -102,8 +108,25 @@ npm test           # vitest
 | `SESSION_SECRET` | dev 占位 | 生产必须覆盖,JWT 会话签名密钥 |
 | `SESSION_COOKIE_SECURE` | `false` | 生产(HTTPS)设为 `true` |
 | `COGNEE_BASE_URL` | `http://localhost:8000/api/v1` | Cognee 服务地址 |
+| `LLM_PROVIDER` / `LLM_MODEL` / `LLM_ENDPOINT` / `LLM_API_KEY` | deepseek 系默认 | Cognee LLM 可覆盖(可用 `LLM_API_KEY` 别名 `DEEPSEEK_API_KEY`) |
+| `EMBEDDING_PROVIDER` / `EMBEDDING_MODEL` / `EMBEDDING_DIMENSIONS` | fastembed / all-MiniLM-L6-v2 / 384 | Cognee 嵌入配置 |
 | `MCP_ISSUER_URL` / `MCP_RESOURCE_SERVER_URL` | `http://localhost/...` | MCP OAuth 元数据地址,公网部署须指向外部 HTTPS |
 | `MCP_ALLOWED_HOSTS` | `127.0.0.1:*,localhost:*,[::1]:*` | MCP Host 白名单(DNS-rebinding 保护) |
+
+## 发布历史
+
+### v0.1.1(2026-08-14)
+
+- 新增:需求「待确认(pending)」状态(新需求默认待确认,确认后才可建任务)
+- 新增:用户昵称与头像(自定义上传 / 恢复默认 / 保存前预览)
+- 新增:Cognee 管理与受控重启(管理员在 Web 端配置 LLM / 嵌入模型并安全重启)
+- 新增:项目代码仓库管理(登记 git / svn 仓库与默认分支)
+- 新增:标准 Zeichen 工作流 Skills(agent 侧需求/任务/文档流转技能)
+- 修复:构建镜像时支持受限网络(HTTP pip 镜像 trusted-host、fastembed 离线缓存)
+
+### v0.1.0
+
+- 首个完整版本:项目/团队/成员/Agent 管理,需求任务流转,文档工作台,代码引用库,长期记忆,通知搜索,70+ MCP 工具
 
 ## MCP 客户端接入
 
