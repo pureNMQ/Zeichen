@@ -49,6 +49,9 @@ services:
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER-fastembed}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL-sentence-transformers/all-MiniLM-L6-v2}
       EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS-384}
+      # 受限网络下禁止向 huggingface.co 在线检查/下载(模型已在 cognee_fastembed_cache 卷)
+      HF_HUB_OFFLINE: "1"
+      FASTEMBED_CACHE_PATH: /tmp/fastembed_cache
     volumes:
       - cognee_data:/app/data
       - cognee_system:/app/system
