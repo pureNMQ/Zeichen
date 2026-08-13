@@ -1,0 +1,7 @@
+interface:
+  display_name: "使用 Zeichen"
+  short_description: "为当前协作请求选择合适的 Zeichen 工作流程技能入口"
+  default_prompt: "Use $use-zeichen to choose the right Zeichen workflow for my request."
+
+policy:
+  allow_implicit_invocation: false

@@ -1,0 +1,7 @@
+interface:
+  display_name: "Zeichen 需求规格"
+  short_description: "将已确认共识整理为可验收需求和按需需求说明的标准工作流技能"
+  default_prompt: "Use $zeichen-to-spec to draft a Zeichen requirement."
+
+policy:
+  allow_implicit_invocation: false

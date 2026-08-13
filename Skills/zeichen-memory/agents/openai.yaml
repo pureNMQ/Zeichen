@@ -1,0 +1,4 @@
+interface:
+  display_name: "Zeichen 记忆"
+  short_description: "安全检索、记录并蒸馏项目共享记忆的标准流程"
+  default_prompt: "Use $zeichen-memory to recall or record project memory safely."

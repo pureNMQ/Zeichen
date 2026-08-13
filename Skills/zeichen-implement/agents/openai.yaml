@@ -1,0 +1,7 @@
+interface:
+  display_name: "Zeichen 实施交付"
+  short_description: "按任务实施代码变更、执行验证并回写交付证据的标准工作流技能"
+  default_prompt: "Use $zeichen-implement to deliver a Zeichen task."
+
+policy:
+  allow_implicit_invocation: false

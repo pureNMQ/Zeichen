@@ -1,0 +1,4 @@
+interface:
+  display_name: "Zeichen 研究"
+  short_description: "研究事实缺口并沉淀带来源的可追溯项目结论的标准工作流技能"
+  default_prompt: "Use $zeichen-research to investigate a workflow question."

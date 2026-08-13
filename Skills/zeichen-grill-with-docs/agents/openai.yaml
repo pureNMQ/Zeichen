@@ -1,0 +1,7 @@
+interface:
+  display_name: "Zeichen 需求澄清"
+  short_description: "逐题澄清需求并沉淀术语、取舍与项目决策记录的标准工作流技能"
+  default_prompt: "Use $zeichen-grill-with-docs to clarify a Zeichen workflow decision."
+
+policy:
+  allow_implicit_invocation: false
