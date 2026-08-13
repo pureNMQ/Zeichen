@@ -16,9 +16,9 @@ from app.tests.conftest import make_user
 
 def make_requirement(db: Session, world: dict, title: str = "需求") -> dict:
     """由 agent(editor)创建需求,使 admin(owner) 成为通知接收者。"""
-    return req_svc._requirement_dict(
-        db, req_svc.create_requirement(db, world["agent"], world["project"].id, title)
-    )
+    req = req_svc.create_requirement(db, world["agent"], world["project"].id, title)
+    req_svc.set_requirement_status(db, world["agent"], req.id, "backlog")
+    return req_svc._requirement_dict(db, req)
 
 
 class TestNotificationRelevantMembers:

@@ -52,6 +52,7 @@ class TestUpdateEdges:
 class TestListFilters:
     def test_filter_by_status_and_assignee_and_pagination(self, db: Session, world: dict):
         req = req_svc.create_requirement(db, world["admin"], world["project"].id, "需求")
+        req_svc.set_requirement_status(db, world["admin"], req.id, "backlog")
         make_task(db, world, "任务一", requirement_id=req.id, assignee_id=world["agent"].id)
         svc.set_task_status(db, world["agent"], make_task(db, world, "任务二")["id"], "in_progress")
         make_task(db, world, "任务三")

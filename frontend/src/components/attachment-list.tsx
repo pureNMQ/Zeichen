@@ -16,7 +16,7 @@ function formatSize(bytes: number): string {
 export function AttachmentList({ targetType, targetId }: { targetType: string; targetId: string }) {
   const queryClient = useQueryClient()
   const role = useProjectRole()
-  const notify = useNotification()
+  const { notify } = useNotification()
   const inputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
