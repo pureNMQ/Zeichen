@@ -22,8 +22,8 @@ mcp = FastMCP(
         "以 `code: message` 前缀出现在工具错误中。"
     ),
     auth=AuthSettings(
-        issuer_url="http://localhost/zeichen",
-        resource_server_url="http://localhost/mcp",
+        issuer_url=settings.mcp_issuer_url,
+        resource_server_url=settings.mcp_resource_server_url,
     ),
     token_verifier=ApiKeyTokenVerifier(),
     # Keep DNS-rebinding protection enabled by default. MCP_ALLOWED_HOSTS lets

@@ -242,3 +242,142 @@ def test_project_purge_deletes_sessions_before_dataset(db, world):
     memory.purge_project(db, world["project"].id, client)
     names = [name for name, _ in client.calls]
     assert names.index("delete_session") < names.index("delete_dataset")
+
+
+def test_purge_without_dataset_is_a_noop(db, world):
+    client = FakeCognee()
+    assert memory.purge_project(db, world["project"].id, client) is None
+    assert client.calls == []
+
+
+def test_remember_requires_session_and_content(db, world):
+    client = FakeCognee()
+    with pytest.raises(AppError) as e:
+        memory.remember(db, world["agent"], world["project"].id, "  ", "note", client=client)
+    assert e.value.code == "invalid_request"
+    assert not any(name == "remember" for name, _ in client.calls)
+    client.calls.clear()
+    with pytest.raises(AppError) as e:
+        memory.remember(db, world["agent"], world["project"].id, "s", "  ", client=client)
+    assert e.value.code == "invalid_request"
+    assert not client.calls
+
+
+def test_remember_rejects_incomplete_anchor(db, world):
+    client = FakeCognee()
+    with pytest.raises(AppError) as e:
+        memory.remember(db, world["agent"], world["project"].id, "s", "note", {"entity_type": "task"}, client)
+    assert e.value.code == "invalid_request"
+    assert "锚点" in e.value.message
+
+
+def test_foreign_sessions_are_filtered_out_of_listings(db, world):
+    client = FakeCognee()
+    memory.remember(db, world["agent"], world["project"].id, "mine", "note", client=client)
+    client.sessions = [
+        {"id": f"zeichen:{world['project'].id}:{world['agent'].id}:mine", "qas": []},
+        {"id": "foreign:session", "qas": []},
+        "unparsable-string",
+    ]
+
+    result = memory.list_sessions(db, world["admin"], world["project"].id, client)
+
+    assert [item["session_id"] for item in result] == [f"zeichen:{world['project'].id}:{world['agent'].id}:mine"]
+
+
+def test_session_preview_survives_partial_qas_and_empty_client_payload(db, world):
+    client = FakeCognee()
+    memory.remember(db, world["agent"], world["project"].id, "s", "note", client=client)
+    client.sessions = [{"id": f"zeichen:{world['project'].id}:{world['agent'].id}:s"}]
+    client.get_session = lambda session_id: {}
+
+    result = memory.list_sessions(db, world["admin"], world["project"].id, client)
+    assert result[0]["session_id"].endswith(":s")
+    assert "preview" not in result[0]
+
+    client.get_session = lambda session_id: {"qas": [{"question": "只有问题"}]}
+    result = memory.list_sessions(db, world["admin"], world["project"].id, client)
+    assert result[0]["preview"] == "只有问题"
+
+    client.get_session = lambda session_id: {"qas": [{"answer": "只有答案"}]}
+    result = memory.list_sessions(db, world["admin"], world["project"].id, client)
+    assert result[0]["preview"] == "只有答案"
+
+
+def test_display_memory_item_tolerates_unparsable_source_id(db, world):
+    client = FakeCognee()
+    memory.remember(db, world["agent"], world["project"].id, "s", "note", client=client)
+    client.list_data = lambda dataset_id: [{"id": "data-1"}]
+    client.get_data_raw = lambda dataset_id, data_id: (
+        f"(session zeichen:{world['project'].id}:not-a-uuid:release)\n\n"
+        "内容不受来源影响。"
+    )
+
+    result = memory.list_memory(db, world["admin"], world["project"].id, client=client)
+    assert "内容不受来源影响" in result["items"][0]["content"]
+    assert "external_metadata" not in result["items"][0]
+
+
+def test_list_memory_filters_by_source_id(db, world):
+    client = FakeCognee()
+    memory.remember(db, world["agent"], world["project"].id, "s", "note", client=client)
+    client.list_data = lambda dataset_id: [
+        {"id": "data-a"},
+        {"id": "data-b"},
+    ]
+    client.get_data_raw = lambda dataset_id, data_id: (
+        f"Session ID: zeichen:{world['project'].id}:{world['agent'].id}:s\n\n"
+        "Answer: 内容\n" if data_id == "data-a" else "no source marker"
+    )
+
+    result = memory.list_memory(db, world["admin"], world["project"].id, source_id=str(world["agent"].id), client=client)
+    assert [item["id"] for item in result["items"]] == ["data-a"]
+    empty = memory.list_memory(db, world["admin"], world["project"].id, source_id=str(world["member"].id), client=client)
+    assert empty["items"] == []
+
+
+def test_forget_requires_editor_and_records_activity(db, world):
+    client = FakeCognee()
+    memory.remember(db, world["agent"], world["project"].id, "s", "note", client=client)
+
+    with pytest.raises(AppError) as e:
+        memory.forget(db, world["member"], world["project"].id, "data-1", client)
+    assert e.value.code == "permission_denied"
+
+    assert memory.forget(db, world["admin"], world["project"].id, "data-1", client)["ok"]
+    assert any(name == "forget" for name, _ in client.calls)
+    assert db.query(Activity).filter(Activity.action == "memory_forget").count() == 1
+
+
+def test_session_detail_rejects_foreign_session(db, world):
+    client = FakeCognee()
+    with pytest.raises(AppError) as e:
+        memory.get_session_detail(db, world["admin"], world["project"].id, "foreign:session", client)
+    assert e.value.code == "not_found"
+
+
+def test_clear_rejects_agents_and_unconfirmed_requests(db, world):
+    client = FakeCognee()
+    with pytest.raises(AppError) as e:
+        memory.clear(db, world["agent"], world["project"].id, True, client)
+    assert e.value.code == "permission_denied"
+    assert "人类" in e.value.message
+    with pytest.raises(AppError) as e:
+        memory.clear(db, world["admin"], world["project"].id, False, client)
+    assert e.value.code == "invalid_request"
+    assert not client.calls
+
+
+def test_clear_wipes_sessions_and_dataset(db, world):
+    client = FakeCognee()
+    memory.remember(db, world["agent"], world["project"].id, "s", "note", client=client)
+
+    memory.clear(db, world["admin"], world["project"].id, True, client)
+
+    names = [name for name, _ in client.calls]
+    assert "delete_session" in names
+    assert "delete_dataset" in names
+    assert db.query(Activity).filter(Activity.action == "memory_clear").count() == 1
+    from app.models import MemoryDataset
+
+    assert db.query(MemoryDataset).filter(MemoryDataset.project_id == world["project"].id).count() == 0

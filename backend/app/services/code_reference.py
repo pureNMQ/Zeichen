@@ -493,6 +493,10 @@ def delete_symbol(db: Session, actor: User, symbol_id: uuid.UUID) -> None:
     rows = db.scalars(select(CodeSymbol).where(CodeSymbol.id.in_(_subtree_ids(db, symbol.id)), CodeSymbol.deleted_at.is_(None))).all()
     for row in rows:
         row.deleted_at = _now()
+    from .attachments import soft_delete_for_target
+
+    for row in rows:
+        soft_delete_for_target(db, symbol.library.project_id, "code_symbol", row.id)
     record_activity(db, symbol.library.project_id, actor.id, "code_symbol", symbol.id, "delete", f"删除代码符号 {symbol.name}")
     db.commit()
 

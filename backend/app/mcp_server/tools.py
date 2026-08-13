@@ -24,6 +24,8 @@ from ..services import requirements as req_svc
 from ..services import tasks as task_svc
 from ..services import memory as memory_svc
 from ..services import memory_improve_jobs as improve_job_svc
+from ..services import search as search_svc
+from ..services import attachments as attachment_svc
 from . import auth
 
 _ctx = contextvars.ContextVar[tuple[object, User]]("zeichen_mcp_ctx", default=None)
@@ -760,3 +762,39 @@ def _register_all(mcp) -> None:
             "is_agent": actor.is_agent,
             "project_grants": [{"project_id": str(p), "role": r} for r, p in grants],
         }
+
+    # ---------- search.* ----------
+    @mcp.tool(name="search.query")
+    @sessioned
+    def search_query(query: str, domains: list[str] | None = None) -> dict:
+        """跨我有权限的项目搜索(query 关键词+记忆语义混合)。
+        结果按域分组:requirement/task/document/code_symbol/memory。"""
+        db, actor = dbc()
+        return search_svc.search(db, actor, query, domains)
+
+    # ---------- attachment.* ----------
+    @mcp.tool(name="attachment.upload")
+    @sessioned
+    def attachment_upload(project_id: str, target_type: str, target_id: str, file_name: str, data: str) -> dict:
+        """上传附件挂到实体(data 为文件内容的 base64 字符串);单文件 20MB、项目配额 2GB。"""
+        import base64
+
+        db, actor = dbc()
+        try:
+            payload = base64.b64decode(data, validate=True)
+        except (ValueError, TypeError) as exc:
+            raise ToolError("invalid_request: data 必须是合法 base64") from exc
+        a = attachment_svc.upload(
+            db, actor, uuid.UUID(project_id), target_type, uuid.UUID(target_id), file_name, payload
+        )
+        return attachment_svc._attachment_dict(db, a)
+
+    @mcp.tool(name="attachment.download")
+    @sessioned
+    def attachment_download(attachment_id: str) -> dict:
+        """下载附件,返回 base64 内容与文件名。"""
+        db, actor = dbc()
+        file_name, data, _ = attachment_svc.download(db, actor, uuid.UUID(attachment_id))
+        import base64
+
+        return {"file_name": file_name, "content": base64.b64encode(data).decode(), "size": len(data)}

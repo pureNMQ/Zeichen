@@ -6,6 +6,9 @@ venv/
 *.db
 *.sqlite3
 *.egg-info/
+.coverage
+backend/.coverage
+backend/storage/
 
 # Node
 node_modules/
@@ -15,10 +18,14 @@ dist/
 .env
 .env.*
 !.env.example
+!deploy/.env.prod.example
 
 # Cognee
 .cognee_data/
 .cognee_system/
+
+# 被墙网络下的 cognee Kuzu json 扩展本地缓存(docker-compose 挂载用,勿提交)
+backend/.lbdb-extension/
 
 # OS
 Thumbs.db
@@ -33,3 +40,7 @@ Thumbs.db
 
 # Local OpenCode MCP credentials/configuration (project-scoped, never commit)
 /opencode.json
+
+# 生产 TLS 证书(部署机上传,勿提交)
+certs/
+

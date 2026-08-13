@@ -1,6 +1,6 @@
-# 贼船 Zeichen — 本地开发编排骨架(规格书 §1.1 / §8)
-# 本文件是骨架:目前 postgres + cognee 可直接起;api / mcp / web 容器在后续票落地。
-# 生产布局(nginx 唯一入口)见规格书 §8.1,在部署票中完善。
+# 贼船 Zeichen — 本地全链路编排(规格书 §1.1 / §8)。
+# `docker compose up -d` 一键可起:nginx 唯一入口,api/mcp/worker 不发布宿主端口。
+# 宿主直连的旧开发模式(start-all.ps1)仍依赖 postgres:5432 与 cognee:8000 的宿主发布。
 name: zeichen
 
 services:
@@ -11,7 +11,7 @@ services:
       POSTGRES_PASSWORD: zeichen
       POSTGRES_DB: zeichen
     ports:
-      # 仅开发期暴露给宿主(backend 本地进程连接);生产不发布宿主端口(§8.1)
+      # 仅开发期暴露给宿主(start-all.ps1 直连);生产不发布宿主端口(§8.1)
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -52,21 +52,101 @@ services:
     volumes:
       - cognee_data:/app/data
       - cognee_system:/app/system
+      # fastembed/HF 模型缓存不落在 DATA_ROOT 内,容器重建会重下(且受限网络下
+      # 下载不稳定),持久化到命名卷:
+      - cognee_hf_cache:/root/.cache/huggingface
+      - cognee_fastembed_cache:/tmp/fastembed_cache
+      # cognee 1.4.1 的 Kuzu/ladybug 图库首次 recall 需从 extension.ladybugdb.com
+      # 下载 json 扩展;受限网络下把预下载的扩展挂载进去(本地工作区缓存,
+      # 见 .gitignore 的 backend/.lbdb-extension;网络可达的环境可删掉本行)。
+      - ./backend/.lbdb-extension:/root/.lbdb/extension
     ports:
+      # 仅开发期暴露给宿主(start-all.ps1 直连);全容器模式下 api/mcp 走内部网络
       - "8000:8000"
 
-  # --- 以下容器在后续票落地(骨架占位,勿启用) ---
-  # api:
-  #   build: ./backend
-  #   depends_on: [postgres]
-  # mcp:
-  #   build: ./backend
-  #   environment:
-  #     TRANSPORT_MODE: http
-  # web:
-  #   build: ./frontend
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    restart: unless-stopped
+    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://zeichen:zeichen@postgres:5432/zeichen
+      SESSION_SECRET: ${SESSION_SECRET:-dev-only-session-secret-change-me-0123456789abcdef}
+      SESSION_COOKIE_SECURE: "false"
+      WEB_BASE_URL: http://localhost
+      COGNEE_BASE_URL: http://cognee:8000/api/v1
+      COGNEE_SERVICE_EMAIL: ${COGNEE_SERVICE_EMAIL:-zeichen-service@example.com}
+      COGNEE_SERVICE_PASSWORD: ${COGNEE_SERVICE_PASSWORD:-zeichen-local-cognee-service-password}
+      ATTACHMENT_STORAGE_DIR: storage/attachments
+    volumes:
+      - attachments:/srv/zeichen/storage/attachments
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      cognee:
+        condition: service_started
+    # 不发布宿主端口(§8.1);调试可临时取消注释:ports: ["8001:8000"]
+
+  mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    restart: unless-stopped
+    command: ["uvicorn", "app.mcp_server.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://zeichen:zeichen@postgres:5432/zeichen
+      SESSION_SECRET: ${SESSION_SECRET:-dev-only-session-secret-change-me-0123456789abcdef}
+      COGNEE_BASE_URL: http://cognee:8000/api/v1
+      COGNEE_SERVICE_EMAIL: ${COGNEE_SERVICE_EMAIL:-zeichen-service@example.com}
+      COGNEE_SERVICE_PASSWORD: ${COGNEE_SERVICE_PASSWORD:-zeichen-local-cognee-service-password}
+      ATTACHMENT_STORAGE_DIR: storage/attachments
+    volumes:
+      - attachments:/srv/zeichen/storage/attachments
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # 不发布宿主端口(§8.1);MCP 经 nginx /mcp 访问
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    restart: unless-stopped
+    command: ["python", "-m", "app.workers.memory_improve"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://zeichen:zeichen@postgres:5432/zeichen
+      SESSION_SECRET: ${SESSION_SECRET:-dev-only-session-secret-change-me-0123456789abcdef}
+      COGNEE_BASE_URL: http://cognee:8000/api/v1
+      COGNEE_SERVICE_EMAIL: ${COGNEE_SERVICE_EMAIL:-zeichen-service@example.com}
+      COGNEE_SERVICE_PASSWORD: ${COGNEE_SERVICE_PASSWORD:-zeichen-local-cognee-service-password}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+      - mcp
 
 volumes:
   pgdata:
   cognee_data:
   cognee_system:
+  cognee_hf_cache:
+  cognee_fastembed_cache:
+  attachments:

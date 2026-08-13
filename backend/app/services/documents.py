@@ -481,6 +481,10 @@ def delete_document(db: Session, actor: User, document_id: uuid.UUID) -> None:
     timestamp = _now()
     for row in rows:
         row.deleted_at = timestamp
+    from .attachments import soft_delete_for_target
+
+    for row in rows:
+        soft_delete_for_target(db, row.project_id, "document", row.id)
     record_activity(db, document.project_id, actor.id, "document", document.id, "delete", f"递归删除 {len(rows)} 篇文档")
     db.commit()
 

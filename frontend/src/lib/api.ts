@@ -389,6 +389,42 @@ export const STATUS_LABEL: Record<WorkflowStatus, string> = {
   cancelled: '已取消',
 }
 
+export interface NotificationRow {
+  id: string
+  target_type: string
+  target_id: string
+  action: string
+  summary: string | null
+  actor_id: string | null
+  read: boolean
+  created_at: string
+}
+
+export type SearchDomain = 'requirement' | 'task' | 'document' | 'code_symbol' | 'memory'
+
+export interface SearchItem {
+  domain: SearchDomain
+  id: string
+  project_id: string
+  project_name: string
+  title: string
+  summary: string
+  status?: string
+  doc_type?: string
+  kind?: string
+}
+
+export interface AttachmentRow {
+  id: string
+  target_type: string
+  target_id: string
+  file_name: string
+  size: number
+  created_by: string | null
+  created_at: string
+  deleted_at: string | null
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const controller = new AbortController()
   const timeout = window.setTimeout(() => controller.abort(), 8000)
@@ -425,6 +461,9 @@ export const api = {
     request<T>(path, { method: 'PATCH', body: JSON.stringify(body) }),
   put: <T>(path: string, body: unknown) =>
     request<T>(path, { method: 'PUT', body: JSON.stringify(body) }),
-  upload: <T>(path: string, body: FormData) => request<T>(path, { method: 'POST', body }),
+  upload: <T>(path: string, body: FormData | File) => {
+    const form = body instanceof FormData ? body : (() => { const f = new FormData(); f.append('file', body); return f })()
+    return request<T>(path, { method: 'POST', body: form })
+  },
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
 }

@@ -60,7 +60,7 @@ def record_activity(
     action: str,
     summary: str | None = None,
 ) -> Activity:
-    """业务变更审计:所有变更即时记 activity(§3.3 / §6.2 写入管线第一层)。"""
+    """业务变更审计:所有变更即时记 activity(§3.3 / §6.2 写入管线第一层),并生成站内通知。"""
     activity = Activity(
         project_id=project_id,
         actor_id=actor_id,
@@ -70,6 +70,9 @@ def record_activity(
         summary=summary,
     )
     db.add(activity)
+    from .notifications import notify_activity
+
+    notify_activity(db, activity)
     return activity
 
 

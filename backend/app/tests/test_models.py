@@ -159,3 +159,39 @@ def test_reference_enum_check(session: Session, world: tuple[User, Team, Project
     session.add(ref)
     with pytest.raises(IntegrityError):
         session.commit()
+
+
+def test_memory_grant_roundtrip_and_unique(session: Session, world: tuple[User, Team, Project]) -> None:
+    from app.models import MemoryGrant
+
+    alice, _, _ = world
+    bob = User(username="bob", password_hash="x", is_agent=True)
+    carol = User(username="carol", password_hash="x", is_agent=True)
+    session.add_all([bob, carol])
+    session.commit()
+
+    session.add(
+        MemoryGrant(grantor_id=alice.id, viewer_agent_id=bob.id, target_agent_id=carol.id)
+    )
+    session.commit()
+    assert session.query(MemoryGrant).count() == 1
+
+    session.add(
+        MemoryGrant(grantor_id=alice.id, viewer_agent_id=bob.id, target_agent_id=carol.id)
+    )
+    with pytest.raises(IntegrityError):
+        session.commit()
+    session.rollback()
+
+
+def test_memory_grant_rejects_self_viewer_target(session: Session, world: tuple[User, Team, Project]) -> None:
+    from app.models import MemoryGrant
+
+    alice, _, _ = world
+    bob = User(username="bob", password_hash="x", is_agent=True)
+    session.add(bob)
+    session.commit()
+
+    session.add(MemoryGrant(grantor_id=alice.id, viewer_agent_id=bob.id, target_agent_id=bob.id))
+    with pytest.raises(IntegrityError):
+        session.commit()

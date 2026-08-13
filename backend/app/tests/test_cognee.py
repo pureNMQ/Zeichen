@@ -44,6 +44,20 @@ class Response:
         return False
 
 
+class BytesResponse:
+    def __init__(self, payload: bytes):
+        self.payload = payload
+
+    def read(self):
+        return self.payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+
 def test_client_bootstraps_service_identity_and_sends_bearer(monkeypatch):
     calls = []
 
@@ -119,3 +133,192 @@ def test_client_exposes_network_timeout_to_the_durable_worker(monkeypatch):
 
     with pytest.raises(TimeoutError, match='cognee 请求超时'):
         client.improve(dataset_id='dataset-1', session_id='session-1')
+
+
+class TestCogneeErrorPaths:
+    def test_login_failure_other_than_400_is_conflict(self, monkeypatch):
+        def fake_urlopen(request, timeout):
+            raise HTTPError(request.full_url, 500, 'boom', {}, io.BytesIO(b'{"detail":"down"}'))
+
+        monkeypatch.setattr('app.services.cognee.urlopen', fake_urlopen)
+        client = CogneeClient(base_url='http://cognee/api/v1')
+
+        with pytest.raises(Exception) as e:
+            client.create_dataset('zeichen:p1')
+        assert 'cognee 服务身份认证失败(500)' in str(e.value)
+
+    def test_register_failure_other_than_400_409_is_conflict(self, monkeypatch):
+        calls = []
+
+        def fake_urlopen(request, timeout):
+            calls.append(request)
+            if request.full_url.endswith('/auth/login') and len(calls) == 1:
+                raise HTTPError(request.full_url, 400, 'bad', {}, io.BytesIO(b'{"detail":"no user"}'))
+            if request.full_url.endswith('/auth/register'):
+                raise HTTPError(request.full_url, 502, 'gateway', {}, io.BytesIO(b'{}'))
+            raise AssertionError('should not reach login')
+
+        monkeypatch.setattr('app.services.cognee.urlopen', fake_urlopen)
+        client = CogneeClient(base_url='http://cognee/api/v1')
+
+        with pytest.raises(Exception) as e:
+            client.create_dataset('zeichen:p1')
+        assert 'cognee 服务身份注册失败(502)' in str(e.value)
+
+    def test_register_conflict_retries_login(self, monkeypatch):
+        calls = []
+
+        def fake_urlopen(request, timeout):
+            calls.append(request)
+            if request.full_url.endswith('/auth/login') and len(calls) == 1:
+                raise HTTPError(request.full_url, 400, 'bad', {}, io.BytesIO(b'{}'))
+            if request.full_url.endswith('/auth/register'):
+                raise HTTPError(request.full_url, 409, 'exists', {}, io.BytesIO(b'{}'))
+            if request.full_url.endswith('/auth/login'):
+                return Response({"access_token": "token-2"})
+            return Response({"id": "dataset-x"})
+
+        monkeypatch.setattr('app.services.cognee.urlopen', fake_urlopen)
+        client = CogneeClient(base_url='http://cognee/api/v1')
+
+        assert client.create_dataset('zeichen:p1') == 'dataset-x'
+        assert [request.full_url for request in calls] == [
+            'http://cognee/api/v1/auth/login',
+            'http://cognee/api/v1/auth/register',
+            'http://cognee/api/v1/auth/login',
+            'http://cognee/api/v1/datasets',
+        ]
+
+    def test_missing_access_token_is_conflict(self, monkeypatch):
+        def fake_urlopen(request, timeout):
+            return Response({"id": "no-token"})
+
+        monkeypatch.setattr('app.services.cognee.urlopen', fake_urlopen)
+        client = CogneeClient(base_url='http://cognee/api/v1')
+
+        with pytest.raises(Exception) as e:
+            client.create_dataset('zeichen:p1')
+        assert '缺少 access_token' in str(e.value)
+
+    def test_authenticated_request_http_error_is_conflict(self, monkeypatch):
+        def fake_urlopen(request, timeout):
+            raise HTTPError(request.full_url, 404, 'missing', {}, io.BytesIO(b'{"detail":"nope"}'))
+
+        monkeypatch.setattr('app.services.cognee.urlopen', fake_urlopen)
+        client = CogneeClient(base_url='http://cognee/api/v1')
+        client.api_key = 'service-key'
+
+        with pytest.raises(Exception) as e:
+            client.recall(dataset_id='d', query='q')
+        assert 'cognee 请求失败(404)' in str(e.value)
+
+    def test_urlerror_is_conflict_unless_timeout(self, monkeypatch):
+        from urllib.error import URLError
+
+        def fake_urlopen(request, timeout):
+            raise URLError("connection refused")
+
+        monkeypatch.setattr('app.services.cognee.urlopen', fake_urlopen)
+        client = CogneeClient(base_url='http://cognee/api/v1')
+        client.api_key = 'service-key'
+
+        with pytest.raises(Exception) as e:
+            client.list_sessions('d')
+        assert 'cognee 服务不可用' in str(e.value)
+
+    def test_urlerror_wrapping_timeout_reports_timeout(self, monkeypatch):
+        from urllib.error import URLError
+
+        def fake_urlopen(request, timeout):
+            raise URLError(socket.timeout("slow"))
+
+        monkeypatch.setattr('app.services.cognee.urlopen', fake_urlopen)
+        client = CogneeClient(base_url='http://cognee/api/v1')
+        client.api_key = 'service-key'
+
+        with pytest.raises(TimeoutError, match='cognee 请求超时'):
+            client.list_sessions('d')
+
+    def test_raw_bytes_requests_and_their_errors(self, monkeypatch):
+        from urllib.error import URLError
+
+        state = {"mode": "ok"}
+
+        def fake_urlopen(request, timeout):
+            if state["mode"] == "ok":
+                return BytesResponse(b"raw \xe4\xb8\xad\xe6\x96\x87 body")
+            if state["mode"] == "http":
+                raise HTTPError(request.full_url, 500, 'x', {}, io.BytesIO(b'{}'))
+            raise URLError("refused")
+
+        monkeypatch.setattr('app.services.cognee.urlopen', fake_urlopen)
+        client = CogneeClient(base_url='http://cognee/api/v1')
+        client.api_key = 'service-key'
+
+        assert client.get_data_raw('d', 'data-1') == 'raw 中文 body'
+
+        state["mode"] = "http"
+        with pytest.raises(Exception) as e:
+            client.get_data_raw('d', 'data-1')
+        assert 'cognee 请求失败(500)' in str(e.value)
+
+        state["mode"] = "url"
+        with pytest.raises(Exception) as e:
+            client.get_data_raw('d', 'data-1')
+        assert 'cognee 服务不可用' in str(e.value)
+
+    def test_delete_and_read_endpoints(self, monkeypatch):
+        calls = []
+
+        def fake_urlopen(request, timeout):
+            calls.append(request)
+            if request.full_url.endswith('/sessions/session-1'):
+                return Response({"session_id": "session-1", "qas": []})
+            if request.full_url.endswith('/data-1/raw'):
+                return BytesResponse(b"raw")
+            return Response({"id": "x"})
+
+        monkeypatch.setattr('app.services.cognee.urlopen', fake_urlopen)
+        client = CogneeClient(base_url='http://cognee/api/v1')
+        client.api_key = 'service-key'
+
+        assert client.delete_dataset('d') is None
+        assert client.list_data('d') == {"id": "x"}
+        assert client.get_data_raw('d', 'data-1') == "raw"
+        assert client.get_session('session-1')["session_id"] == "session-1"
+        assert client.delete_session('session-1') is None
+        assert [request.full_url for request in calls] == [
+            'http://cognee/api/v1/datasets/d',
+            'http://cognee/api/v1/datasets/d/data',
+            'http://cognee/api/v1/datasets/d/data/data-1/raw',
+            'http://cognee/api/v1/sessions/session-1',
+            'http://cognee/api/v1/sessions/session-1',
+        ]
+
+    def test_id_required_in_create_dataset_response(self, monkeypatch):
+        def fake_urlopen(request, timeout):
+            return Response({})
+
+        monkeypatch.setattr('app.services.cognee.urlopen', fake_urlopen)
+        client = CogneeClient(base_url='http://cognee/api/v1')
+        client.api_key = 'service-key'
+
+        with pytest.raises(Exception) as e:
+            client.create_dataset('zeichen:p1')
+        assert '缺少标识' in str(e.value)
+
+    def test_cached_authorization_skips_second_login(self, monkeypatch):
+        calls = []
+
+        def fake_urlopen(request, timeout):
+            calls.append(request)
+            if request.full_url.endswith('/auth/login'):
+                return Response({"access_token": "t"})
+            return Response({"id": f"ds-{len(calls)}"})
+
+        monkeypatch.setattr('app.services.cognee.urlopen', fake_urlopen)
+        client = CogneeClient(base_url='http://cognee/api/v1')
+
+        client.create_dataset('p1')
+        client.create_dataset('p2')
+        assert len([c for c in calls if c.full_url.endswith('/auth/login')]) == 1

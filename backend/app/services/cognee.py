@@ -13,7 +13,7 @@ from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 from ..config import get_settings
-from ..errors import conflict
+from ..errors import AppError, conflict
 
 
 class CogneeClient:
@@ -207,4 +207,11 @@ class CogneeClient:
         return self._request("GET", f"/sessions/{quote(session_id, safe='')}")
 
     def delete_session(self, session_id: str) -> None:
-        self._request("DELETE", f"/sessions/{session_id}")
+        try:
+            self._request("DELETE", f"/sessions/{session_id}")
+        except AppError as exc:
+            # cognee 1.4.1 的 sessions 路由只有 GET(§9 事实回填:无会话删除端点)。
+            # 405 时会话条目随服务账号保留,dataset 删除即完成业务侧清理;
+            # 其他错误照常上抛。
+            if exc.code != "conflict" or "405" not in exc.message:
+                raise

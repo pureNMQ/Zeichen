@@ -148,6 +148,9 @@ def delete_requirement(
     if task_count > 0 and confirm_task_count != task_count:
         raise conflict(f"需求下有 {task_count} 个任务,请确认任务数后删除")
     requirement.deleted_at = _now()
+    from .attachments import soft_delete_for_target
+
+    soft_delete_for_target(db, requirement.project_id, "requirement", requirement.id)
     record_activity(db, requirement.project_id, actor.id, "requirement", requirement.id, "delete", "删除需求")
     db.commit()
 

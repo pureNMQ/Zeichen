@@ -104,6 +104,26 @@ function Test-DockerReady {
     }
 }
 
+function Invoke-NativeCommand {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FilePath,
+        [Parameter(ValueFromRemainingArguments = $true)]
+        [string[]]$ArgumentList
+    )
+
+    # Windows PowerShell 5.1 treats native stderr output as a terminating
+    # error when $ErrorActionPreference='Stop', even for successful commands.
+    # Wrapping through cmd.exe lets stderr flow into the pipeline as plain
+    # output while $LASTEXITCODE keeps carrying the real exit code.
+    $exitCode = 0
+    & cmd.exe /d /c "`"$FilePath`" $($ArgumentList -join ' ') 2>&1" | ForEach-Object {
+        Write-Host $_
+    }
+    $exitCode = $LASTEXITCODE
+    return $exitCode
+}
+
 if (-not (Test-DockerReady)) {
     $dockerDesktop = Join-Path $env:ProgramFiles 'Docker\Docker\Docker Desktop.exe'
     if (-not (Test-Path -LiteralPath $dockerDesktop)) {
@@ -116,9 +136,9 @@ if (-not (Test-DockerReady)) {
 }
 
 Write-Host 'Starting PostgreSQL and Cognee...'
-& docker compose up -d postgres cognee
-if ($LASTEXITCODE -ne 0) {
-    throw 'Could not start the Docker Compose services.'
+$composeExitCode = Invoke-NativeCommand 'docker' 'compose' 'up' '-d' 'postgres' 'cognee'
+if ($composeExitCode -ne 0) {
+    throw "Could not start the Docker Compose services (exit $composeExitCode)."
 }
 
 $env:DATABASE_URL = $databaseUrl
@@ -132,9 +152,9 @@ if (-not (Test-Path -LiteralPath $python)) {
 Write-Host 'Applying database migrations...'
 Push-Location $backendRoot
 try {
-    & $python -m alembic upgrade head
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Database migration failed.'
+    $migrationExitCode = Invoke-NativeCommand $python '-m' 'alembic' 'upgrade' 'head'
+    if ($migrationExitCode -ne 0) {
+        throw "Database migration failed (exit $migrationExitCode)."
     }
 }
 finally {

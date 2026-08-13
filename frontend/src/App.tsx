@@ -22,6 +22,7 @@ import { CodeReferencePage } from '@/pages/code-reference'
 import { MemoryPage, MemorySessionsPage } from '@/pages/memory'
 import { CogneePage } from '@/pages/cognee'
 import { RepositoriesPage } from '@/pages/repositories'
+import { SearchPage } from '@/pages/search'
 
 function BootstrapGate() {
   const navigate = useNavigate()
@@ -121,6 +122,7 @@ export function App() {
         <Route path="repositories" element={<RepositoriesPage />} />
         <Route path="memory" element={<MemoryPage />} />
         <Route path="memory/sessions" element={<MemorySessionsPage />} />
+        <Route path="search" element={<SearchPage />} />
         <Route path="members" element={<MembersPage />} />
         <Route path="agents" element={<RequireAdmin />}>
           <Route index element={<AgentsPage />} />

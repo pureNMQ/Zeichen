@@ -1,5 +1,7 @@
 # 开发约定
 
+> 文档与开发管理入口:本仓库的规格、需求、任务、词典与调研已迁移至 **Zeichen**(贼船)统一管理。领域词汇见 Zeichen 项目词典;设计规格书 v1.0、前端功能需求 v1.0、ADR 与有效调研见 Zeichen 项目 Wiki。仓库内仅保留本文件与代码。开发工作经 Zeichen 的 requirement/task 流转,agent 经 MCP 访问。
+
 ## 表单输入
 
 - 禁止提交未显式声明 `autoComplete` 的裸 `<Input>`、`<Textarea>` 或原生 `<input>`/`<textarea>`。
