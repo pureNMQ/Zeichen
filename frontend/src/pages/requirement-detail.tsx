@@ -140,7 +140,7 @@ export function RequirementDetailPage() {
             <h1 className="text-xl font-semibold">{req.title}</h1>
             <StatusBadge status={req.status} />
           </div>
-          {req.description && <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{req.description}</p>}
+          {req.description && <p className="mt-2 text-sm text-muted-foreground">{req.description}</p>}
         </div>
         <div className="flex shrink-0 gap-2">
           {canEdit && isPending && (

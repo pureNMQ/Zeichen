@@ -17,6 +17,7 @@ from ..models import ProjectMember, Requirement, Task, User
 from .pagination import page_result
 from .permissions import get_accessible_project, get_project_role, is_admin, require_project_role
 from .polymorphic import record_activity
+from .short_text import normalize_short_description
 from .user_profiles import avatar_url, display_name
 from .workflow import TERMINAL, assert_status_valid
 
@@ -110,6 +111,7 @@ def create_task(
     if not title:
         raise invalid_request("标题不能为空")
     require_project_role(db, actor.id, project_id, min_level="editor")
+    description = normalize_short_description(description)
     requirement = None
     if requirement_id is not None:
         _check_requirement(db, project_id, requirement_id)
@@ -186,7 +188,7 @@ def update_task(
             raise invalid_request("标题不能为空")
         task.title = title
     if description is not None:
-        task.description = description
+        task.description = normalize_short_description(description)
     summary = "更新任务"
     if requirement_id is not _UNSET:
         _require_owner(db, actor, task)

@@ -95,7 +95,7 @@ export function CreateTaskDialog({
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="task-desc">描述</Label>
-            <Input id="task-desc" value={description} onChange={(e) => setDescription(e.target.value)} autoComplete="off" />
+            <Input id="task-desc" value={description} onChange={(e) => setDescription(e.target.value)} autoComplete="off" maxLength={512} />
           </div>
           <div className="space-y-1.5">
             <Label>关联需求</Label>

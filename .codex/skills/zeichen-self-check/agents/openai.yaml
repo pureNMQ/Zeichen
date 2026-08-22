@@ -1,0 +1,4 @@
+interface:
+  display_name: "Zeichen 自检与提需"
+  short_description: "检查 Zeichen 产品缺陷并发布可追踪的开发需求"
+  default_prompt: "Use $zeichen-self-check to inspect Zeichen for defects and submit verified requirements."

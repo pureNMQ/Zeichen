@@ -291,4 +291,11 @@ describe('新建任务对话框关联需求(ticket 10)', () => {
       requirement_id: null,
     })
   })
+
+  it('新建任务描述最多 512 字符', async () => {
+    renderWithRequirements()
+    const user = (await import('@testing-library/user-event')).default
+    await user.click(await screen.findByRole('button', { name: /新建任务/ }))
+    expect(screen.getByLabelText('描述')).toHaveAttribute('maxlength', '512')
+  })
 })

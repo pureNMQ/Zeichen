@@ -105,6 +105,15 @@ describe('需求列表页(当前项目)', () => {
     localStorage.clear()
   })
 
+  it('新建需求描述为单行且最多 512 字符', async () => {
+    renderRequirements([projects[1]])
+    const user = (await import('@testing-library/user-event')).default
+    await user.click(await screen.findByRole('button', { name: /新建需求/ }))
+    const description = screen.getByLabelText('描述')
+    expect(description.tagName).toBe('INPUT')
+    expect(description).toHaveAttribute('maxlength', '512')
+  })
+
   it('默认取第一个可见项目并渲染需求列表', async () => {
     renderRequirements()
     expect(await screen.findByText('登录功能')).toBeInTheDocument()

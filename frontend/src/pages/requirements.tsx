@@ -19,7 +19,6 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ErrorNotification } from '@/components/ui/notification'
-import { Textarea } from '@/components/ui/textarea'
 import { api, ApiError, EXECUTION_REQUIREMENT_STATUSES, REQUIREMENT_STATUSES, type RequirementRow, type RequirementStatus } from '@/lib/api'
 import { useCurrentProject, useProjectRole } from '@/lib/current-project'
 
@@ -299,7 +298,7 @@ function CreateRequirementDialog({ open, onOpenChange }: { open: boolean; onOpen
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="req-desc">描述</Label>
-            <Textarea id="req-desc" value={description} onChange={(e) => setDescription(e.target.value)} autoComplete="off" />
+            <Input id="req-desc" value={description} onChange={(e) => setDescription(e.target.value)} autoComplete="off" maxLength={512} />
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
           <DialogFooter>

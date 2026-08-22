@@ -114,6 +114,35 @@ def test_requirement_crud_and_status_loop(client: TestClient, world: dict):
     assert client.post(f"/api/requirements/{rid}/restore").status_code == 200
 
 
+def test_requirement_and_task_descriptions_are_short_single_line(client: TestClient, world: dict):
+    login(client, "admin", "admin-pass-1")
+    pid = str(world["project"].id)
+    valid = "a" * 512
+    response = client.post(
+        f"/api/projects/{pid}/requirements", json={"title": "边界需求", "description": valid}
+    )
+    assert response.status_code == 201
+    assert response.json()["description"] == valid
+    for description in ("b" * 513, "第一行\n第二行"):
+        response = client.post(
+            f"/api/projects/{pid}/requirements",
+            json={"title": "非法需求", "description": description},
+        )
+        assert response.status_code == 400
+        assert response.json()["code"] == "invalid_request"
+
+    response = client.post(
+        f"/api/projects/{pid}/tasks", json={"title": "非法任务", "description": "x" * 513}
+    )
+    assert response.status_code == 400
+    assert response.json()["code"] == "invalid_request"
+    response = client.post(
+        f"/api/projects/{pid}/tasks", json={"title": "非法任务", "description": "第一行\r\n第二行"}
+    )
+    assert response.status_code == 400
+    assert response.json()["code"] == "invalid_request"
+
+
 def test_error_four_piece_shape(client: TestClient, world: dict, db):
     from app.security import hash_password
 
