@@ -119,7 +119,46 @@ BACKUP_ROOT=/tmp/zeichen-drill/backups deploy/restore.sh --yes <日期>
 | 覆盖 `certs/privkey.pem` 前未备份 | 证书不匹配,HTTPS 全挂 |
 | 在恢复演练环境执行 `zc up -d`(非 -p 独立项目名) | 误碰生产容器/卷 |
 
-## 6. 容量与日常注意
+## 6. 服务器端开发热更新(改代码即生效)
+
+> 适用:在服务器上一边开发一边热更新,免去每次打包同步。数据与生产**同库**
+> (postgres / cognee / 附件卷共用),改代码有直接风险,提交前先自测。
+
+### 启动开发态
+
+```bash
+cd /srv/zeichen
+zd='docker compose -f docker-compose.yml -f deploy/docker-compose.ip.yml -f deploy/docker-compose.dev.yml'
+$zd up -d
+# 前端 HMR:http://<IP>:5173(首次启动容器内 npm install 需几分钟)
+# 后端热重载:改 backend/app 下任何 .py,api/mcp 自动 reload
+```
+
+### 开发循环
+
+- **后端**:用 VS Code / Cursor 的 Remote-SSH 打开 `/srv/zeichen`,直接改
+  `backend/app/**` → uvicorn `--reload` 秒级生效;日志 `docker logs -f zeichen-api-1`
+- **前端**:改 `frontend/src/**` → vite HMR 即时刷新(5173 端口,`/api` 已代理到 api 容器)
+- **worker**:源码已挂载但无 reload,改完 `docker compose ... restart worker`
+- **新增 Python 依赖**(`backend/pyproject.toml` 变更):需重建镜像
+  `$zd up -d --build api mcp worker`
+- **Alembic 迁移**:api 容器启动时自动跑 `alembic upgrade head`;新增迁移文件后
+  `$zd restart api` 即可(会先跑迁移再起服务)
+
+### 回到生产态
+
+```bash
+docker compose -f docker-compose.yml -f deploy/docker-compose.ip.yml up -d --build
+# 用 git 状态确认改动已提交,生产镜像基于仓库代码重建
+```
+
+### 注意事项
+
+- `.env` 不入 git(已忽略),改代码不影响密钥;`deploy/docker-compose.dev.yml` 是开发专用 override,生产态不使用
+- 服务器直连 GitHub 不稳定,已配置镜像:`git config url."https://ghfast.top/https://github.com/".insteadOf "https://github.com/"`
+- 同库开发改动会立即影响线上 agent/成员看到的真实数据,改坏表结构前先 `deploy/backup.sh`
+
+## 7. 容量与日常注意
 
 - 磁盘:模型缓存(约 200MB)+ 备份(每日 ~百 MB 级,按数据量)+ 附件配额
   (单项目 2GB)。`df -h` 定期看;备份轮转自动清,关注对象存储计费即可。
