@@ -1,11 +1,13 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import { FolderOpen, List, LayoutGrid, Plus, Trash2, UserPlus } from 'lucide-react'
 
 import { Kanban } from '@/components/kanban'
 import { StatusSelect } from '@/components/status-select'
 import { CreateTaskDialog } from '@/components/create-task-dialog'
+import { StatusFilterPopover } from '@/components/status-filter-popover'
+import { FilterViewSwitcher, type ViewDef } from '@/components/filter-view-switcher'
 import { ErrorNotification } from '@/components/ui/notification'
 import { Badge } from '@/components/ui/badge'
 import { UserAvatar } from '@/components/user-avatar'
@@ -19,10 +21,29 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { api, ApiError, TASK_STATUSES, type TaskRow, type WorkflowStatus } from '@/lib/api'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  api,
+  ApiError,
+  TASK_STATUSES,
+  type FilterCriteria,
+  type FilterViewMode,
+  type MemberRow,
+  type Page,
+  type TaskRow,
+  type WorkflowStatus,
+} from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { useCurrentProject, useProjectRole } from '@/lib/current-project'
 import { canSetTaskStatus } from '@/lib/task-perms'
+
+const TIME_WINDOWS = [
+  { value: '', label: '不限' },
+  { value: '3', label: '近 3 天' },
+  { value: '7', label: '近 7 天' },
+  { value: '30', label: '近 30 天' },
+]
 
 export async function moveTask(id: string, to: WorkflowStatus): Promise<void> {
   await api.post(`/tasks/${id}/status`, { status: to })
@@ -121,18 +142,88 @@ export function TasksPage() {
   const qc = useQueryClient()
   const role = useProjectRole()
   const canEdit = role === 'editor' || role === 'owner'
-  const [view, setView] = useState<'board' | 'list'>('board')
+
+  // 筛选条件(服务端下推)与视图状态
+  const [statuses, setStatuses] = useState<string[]>([])
+  const [updatedWithinDays, setUpdatedWithinDays] = useState('3')
+  const [keywordInput, setKeywordInput] = useState('')
+  const [keyword, setKeyword] = useState('')
+  const [assigneeId, setAssigneeId] = useState('')
+  const [viewMode, setViewMode] = useState<FilterViewMode>('board')
+  const [activeViewId, setActiveViewId] = useState('recent')
+
   const [createOpen, setCreateOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<TaskRow | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
 
-  const { data: page, isLoading, error } = useQuery({
-    queryKey: ['tasks', projectId],
-    queryFn: () => api.get<{ items: TaskRow[]; next_cursor: string | null }>(`/projects/${projectId}/tasks?limit=100`),
+  const keywordTimer = useRef<number | null>(null)
+
+  const { data: membersData } = useQuery({
+    queryKey: ['project-members', projectId],
+    queryFn: () => api.get<MemberRow[]>(`/projects/${projectId}/members`),
+    enabled: !!projectId,
+  })
+  const members = Array.isArray(membersData) ? membersData : []
+
+  function handleKeywordChange(value: string) {
+    setKeywordInput(value)
+    if (keywordTimer.current !== null) window.clearTimeout(keywordTimer.current)
+    keywordTimer.current = window.setTimeout(() => {
+      keywordTimer.current = null
+      setKeyword(value)
+    }, 300)
+  }
+
+  function applyView(def: ViewDef) {
+    if (keywordTimer.current !== null) {
+      window.clearTimeout(keywordTimer.current)
+      keywordTimer.current = null
+    }
+    const c = def.criteria ?? {}
+    setStatuses(c.statuses ?? [])
+    setUpdatedWithinDays(c.updated_within_days != null ? String(c.updated_within_days) : '')
+    const kw = c.keyword ?? ''
+    setKeywordInput(kw)
+    setKeyword(kw)
+    setAssigneeId(c.assignee_id ?? '')
+    setViewMode(def.view_mode)
+    setActiveViewId(def.id)
+  }
+
+  const criteria: FilterCriteria = {
+    view_mode: viewMode,
+    ...(statuses.length > 0 ? { statuses: [...statuses] } : {}),
+    ...(updatedWithinDays !== '' ? { updated_within_days: Number(updatedWithinDays) } : {}),
+    ...(keyword.trim() !== '' ? { keyword: keyword.trim() } : {}),
+    ...(assigneeId !== '' ? { assignee_id: assigneeId } : {}),
+  }
+
+  const {
+    data: pageData,
+    isLoading,
+    error,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
+    queryKey: ['tasks', projectId, { statuses, updatedWithinDays, keyword, assigneeId }],
+    queryFn: ({ pageParam }) => {
+      const params = new URLSearchParams()
+      for (const s of statuses) params.append('status', s)
+      if (updatedWithinDays !== '') params.set('updated_within_days', updatedWithinDays)
+      const kw = keyword.trim()
+      if (kw !== '') params.set('keyword', kw)
+      if (assigneeId !== '') params.set('assignee_id', assigneeId)
+      params.set('limit', '20')
+      if (pageParam != null && pageParam !== '') params.set('cursor', String(pageParam))
+      return api.get<Page<TaskRow>>(`/projects/${projectId}/tasks?${params.toString()}`)
+    },
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
     enabled: !!projectId,
   })
 
-  const tasks = page?.items ?? []
+  const tasks = (pageData?.pages ?? []).flatMap((p) => p.items)
 
   async function doMove(id: string, to: WorkflowStatus) {
     setActionError(null)
@@ -179,7 +270,7 @@ export function TasksPage() {
 
   return (
     <div className="flex min-h-[calc(100dvh-3rem)] flex-col gap-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">任务</h1>
           <p className="text-sm text-muted-foreground">
@@ -187,16 +278,13 @@ export function TasksPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex overflow-hidden rounded-md border">
-            <Button variant={view === 'board' ? 'secondary' : 'ghost'} size="sm" className="rounded-none" onClick={() => setView('board')}>
-              <LayoutGrid className="h-4 w-4" />
-              看板
-            </Button>
-            <Button variant={view === 'list' ? 'secondary' : 'ghost'} size="sm" className="rounded-none" onClick={() => setView('list')}>
-              <List className="h-4 w-4" />
-              列表
-            </Button>
-          </div>
+          <FilterViewSwitcher
+            projectId={projectId ?? ''}
+            entityType="task"
+            activeViewId={activeViewId}
+            onSelectView={applyView}
+            currentCriteria={criteria}
+          />
           {canEdit && (
             <Button onClick={() => setCreateOpen(true)}>
               <Plus className="mr-2 h-4 w-4" />
@@ -206,14 +294,77 @@ export function TasksPage() {
         </div>
       </div>
 
+      <div className="flex flex-wrap items-center gap-2">
+        <StatusFilterPopover statuses={TASK_STATUSES} value={statuses} onChange={setStatuses} />
+        <select
+          aria-label="时间窗口"
+          value={updatedWithinDays}
+          onChange={(e) => setUpdatedWithinDays(e.target.value)}
+          className="h-8 rounded-md border bg-transparent px-2 text-sm"
+        >
+          {TIME_WINDOWS.map((w) => (
+            <option key={w.value} value={w.value}>
+              {w.label}
+            </option>
+          ))}
+        </select>
+        {Array.isArray(membersData) && (
+          <select
+            aria-label="负责人"
+            value={assigneeId}
+            onChange={(e) => setAssigneeId(e.target.value)}
+            className="h-8 rounded-md border bg-transparent px-2 text-sm"
+          >
+            <option value="">全部负责人</option>
+            {members.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.nickname || m.username}
+              </option>
+            ))}
+          </select>
+        )}
+        <div className="w-48">
+          <Label htmlFor="task-keyword" className="sr-only">
+            关键词
+          </Label>
+          <Input
+            id="task-keyword"
+            value={keywordInput}
+            onChange={(e) => handleKeywordChange(e.target.value)}
+            autoComplete="off"
+            placeholder="关键词"
+          />
+        </div>
+        <div className="flex overflow-hidden rounded-md border">
+          <Button
+            variant={viewMode === 'board' ? 'secondary' : 'ghost'}
+            size="sm"
+            className="rounded-none"
+            onClick={() => setViewMode('board')}
+          >
+            <LayoutGrid className="h-4 w-4" />
+            看板
+          </Button>
+          <Button
+            variant={viewMode === 'list' ? 'secondary' : 'ghost'}
+            size="sm"
+            className="rounded-none"
+            onClick={() => setViewMode('list')}
+          >
+            <List className="h-4 w-4" />
+            列表
+          </Button>
+        </div>
+      </div>
+
       {isLoading && <p className="text-sm text-muted-foreground">加载中…</p>}
       <ErrorNotification message={error ? (error as Error).message : null} />
       <ErrorNotification message={actionError} />
-      {!isLoading && view === 'list' && tasks.length === 0 && (
+      {!isLoading && viewMode === 'list' && tasks.length === 0 && (
         <p className="py-10 text-center text-sm text-muted-foreground">暂无任务</p>
       )}
 
-      {view === 'board' ? (
+      {viewMode === 'board' ? (
         <Kanban
           className="flex-1"
           items={tasks}
@@ -245,6 +396,18 @@ export function TasksPage() {
               onDelete={setDeleteTarget}
             />
           ))}
+        </div>
+      )}
+
+      {hasNextPage && (
+        <div className="flex justify-center">
+          <Button
+            variant="outline"
+            onClick={() => void fetchNextPage()}
+            disabled={isFetchingNextPage}
+          >
+            {isFetchingNextPage ? '加载中…' : '加载更多'}
+          </Button>
         </div>
       )}
 

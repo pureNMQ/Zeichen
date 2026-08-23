@@ -1,10 +1,12 @@
-import { useState, type FormEvent } from 'react'
+import { useRef, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query'
 import { FolderOpen, LayoutGrid, List, Plus } from 'lucide-react'
 
 import { Kanban } from '@/components/kanban'
 import { StatusSelect } from '@/components/status-select'
+import { StatusFilterPopover } from '@/components/status-filter-popover'
+import { FilterViewSwitcher, type ViewDef } from '@/components/filter-view-switcher'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -19,18 +21,25 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ErrorNotification } from '@/components/ui/notification'
-import { api, ApiError, EXECUTION_REQUIREMENT_STATUSES, REQUIREMENT_STATUSES, type RequirementRow, type RequirementStatus } from '@/lib/api'
+import {
+  api,
+  ApiError,
+  EXECUTION_REQUIREMENT_STATUSES,
+  REQUIREMENT_STATUSES,
+  type FilterCriteria,
+  type FilterViewMode,
+  type Page,
+  type RequirementRow,
+  type RequirementStatus,
+} from '@/lib/api'
 import { useCurrentProject, useProjectRole } from '@/lib/current-project'
 
-const FILTERS: (RequirementStatus | 'all')[] = ['all', ...REQUIREMENT_STATUSES]
-
-const STATUS_TEXT: Record<RequirementStatus, string> = {
-  pending: '待确认',
-  backlog: '待办',
-  in_progress: '实现中',
-  done: '已完成',
-  cancelled: '已取消',
-}
+const TIME_WINDOWS = [
+  { value: '', label: '不限' },
+  { value: '3', label: '近 3 天' },
+  { value: '7', label: '近 7 天' },
+  { value: '30', label: '近 30 天' },
+]
 
 export async function moveRequirement(id: string, to: RequirementStatus): Promise<void> {
   await api.post(`/requirements/${id}/status`, { status: to })
@@ -95,23 +104,80 @@ export function RequirementsPage() {
   const qc = useQueryClient()
   const role = useProjectRole()
   const canEdit = role === 'editor' || role === 'owner'
-  const [view, setView] = useState<'list' | 'board'>('list')
-  const [filter, setFilter] = useState<RequirementStatus | 'all'>('all')
+
+  // 筛选条件(服务端下推)与视图状态
+  const [statuses, setStatuses] = useState<string[]>([])
+  const [updatedWithinDays, setUpdatedWithinDays] = useState('3')
+  const [keywordInput, setKeywordInput] = useState('')
+  const [keyword, setKeyword] = useState('')
+  const [viewMode, setViewMode] = useState<FilterViewMode>('board')
+  const [activeViewId, setActiveViewId] = useState('recent')
+
   const [createOpen, setCreateOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<RequirementRow | null>(null)
   const [confirmCount, setConfirmCount] = useState('')
   const [actionError, setActionError] = useState<string | null>(null)
 
-  const { data: page, isLoading, error } = useQuery({
-    queryKey: ['requirements', projectId],
-    queryFn: () =>
-      api.get<{ items: RequirementRow[]; next_cursor: string | null }>(
-        `/projects/${projectId}/requirements?limit=100`,
-      ),
+  const keywordTimer = useRef<number | null>(null)
+
+  function handleKeywordChange(value: string) {
+    setKeywordInput(value)
+    if (keywordTimer.current !== null) window.clearTimeout(keywordTimer.current)
+    keywordTimer.current = window.setTimeout(() => {
+      keywordTimer.current = null
+      setKeyword(value)
+    }, 300)
+  }
+
+  function applyView(def: ViewDef) {
+    if (keywordTimer.current !== null) {
+      window.clearTimeout(keywordTimer.current)
+      keywordTimer.current = null
+    }
+    const c = def.criteria ?? {}
+    setStatuses(c.statuses ?? [])
+    setUpdatedWithinDays(c.updated_within_days != null ? String(c.updated_within_days) : '')
+    const kw = c.keyword ?? ''
+    setKeywordInput(kw)
+    setKeyword(kw)
+    setViewMode(def.view_mode)
+    setActiveViewId(def.id)
+  }
+
+  const criteria: FilterCriteria = {
+    view_mode: viewMode,
+    ...(statuses.length > 0 ? { statuses: [...statuses] } : {}),
+    ...(updatedWithinDays !== '' ? { updated_within_days: Number(updatedWithinDays) } : {}),
+    ...(keyword.trim() !== '' ? { keyword: keyword.trim() } : {}),
+  }
+
+  const {
+    data: pageData,
+    isLoading,
+    error,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
+    queryKey: ['requirements', projectId, { statuses, updatedWithinDays, keyword }],
+    queryFn: ({ pageParam }) => {
+      const params = new URLSearchParams()
+      for (const s of statuses) params.append('status', s)
+      if (updatedWithinDays !== '') params.set('updated_within_days', updatedWithinDays)
+      const kw = keyword.trim()
+      if (kw !== '') params.set('keyword', kw)
+      params.set('limit', '20')
+      if (pageParam != null && pageParam !== '') params.set('cursor', String(pageParam))
+      return api.get<Page<RequirementRow>>(
+        `/projects/${projectId}/requirements?${params.toString()}`,
+      )
+    },
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
     enabled: !!projectId,
   })
 
-  const items = (page?.items ?? []).filter((r) => filter === 'all' || r.status === filter)
+  const items = (pageData?.pages ?? []).flatMap((p) => p.items)
   const boardItems = items.filter((r) => r.status !== 'pending')
 
   async function doMove(id: string, to: RequirementStatus) {
@@ -150,7 +216,7 @@ export function RequirementsPage() {
 
   return (
     <div className="flex min-h-[calc(100dvh-3rem)] flex-col gap-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">需求</h1>
           <p className="text-sm text-muted-foreground">
@@ -158,33 +224,67 @@ export function RequirementsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex overflow-hidden rounded-md border">
-            <Button variant={view === 'list' ? 'secondary' : 'ghost'} size="sm" className="rounded-none" onClick={() => setView('list')}>
-              <List className="h-4 w-4" />
-              列表
-            </Button>
-            <Button variant={view === 'board' ? 'secondary' : 'ghost'} size="sm" className="rounded-none" onClick={() => setView('board')}>
-              <LayoutGrid className="h-4 w-4" />
-              看板
-            </Button>
-          </div>
-          <select
-            value={filter}
-            onChange={(e) => setFilter(e.target.value as RequirementStatus | 'all')}
-            className="h-8 rounded-md border bg-transparent px-2 text-sm"
-          >
-            {FILTERS.map((f) => (
-              <option key={f} value={f}>
-                {f === 'all' ? '全部状态' : STATUS_TEXT[f]}
-              </option>
-            ))}
-          </select>
+          <FilterViewSwitcher
+            projectId={projectId ?? ''}
+            entityType="requirement"
+            activeViewId={activeViewId}
+            onSelectView={applyView}
+            currentCriteria={criteria}
+          />
           {canEdit && (
             <Button onClick={() => setCreateOpen(true)}>
               <Plus className="mr-2 h-4 w-4" />
               新建需求
             </Button>
           )}
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <StatusFilterPopover statuses={REQUIREMENT_STATUSES} value={statuses} onChange={setStatuses} />
+        <select
+          aria-label="时间窗口"
+          value={updatedWithinDays}
+          onChange={(e) => setUpdatedWithinDays(e.target.value)}
+          className="h-8 rounded-md border bg-transparent px-2 text-sm"
+        >
+          {TIME_WINDOWS.map((w) => (
+            <option key={w.value} value={w.value}>
+              {w.label}
+            </option>
+          ))}
+        </select>
+        <div className="w-48">
+          <Label htmlFor="requirement-keyword" className="sr-only">
+            关键词
+          </Label>
+          <Input
+            id="requirement-keyword"
+            value={keywordInput}
+            onChange={(e) => handleKeywordChange(e.target.value)}
+            autoComplete="off"
+            placeholder="关键词"
+          />
+        </div>
+        <div className="flex overflow-hidden rounded-md border">
+          <Button
+            variant={viewMode === 'list' ? 'secondary' : 'ghost'}
+            size="sm"
+            className="rounded-none"
+            onClick={() => setViewMode('list')}
+          >
+            <List className="h-4 w-4" />
+            列表
+          </Button>
+          <Button
+            variant={viewMode === 'board' ? 'secondary' : 'ghost'}
+            size="sm"
+            className="rounded-none"
+            onClick={() => setViewMode('board')}
+          >
+            <LayoutGrid className="h-4 w-4" />
+            看板
+          </Button>
         </div>
       </div>
 
@@ -195,7 +295,7 @@ export function RequirementsPage() {
         <p className="py-10 text-center text-sm text-muted-foreground">暂无需求</p>
       )}
 
-      {view === 'board' ? (
+      {viewMode === 'board' ? (
         <Kanban
           className="flex-1"
           items={boardItems}
@@ -224,6 +324,18 @@ export function RequirementsPage() {
               canDelete={canEdit}
             />
           ))}
+        </div>
+      )}
+
+      {hasNextPage && (
+        <div className="flex justify-center">
+          <Button
+            variant="outline"
+            onClick={() => void fetchNextPage()}
+            disabled={isFetchingNextPage}
+          >
+            {isFetchingNextPage ? '加载中…' : '加载更多'}
+          </Button>
         </div>
       )}
 

@@ -197,6 +197,28 @@ export interface Page<T> {
   next_cursor: string | null
 }
 
+// 个人筛选视图(T3):仅类型,运行期擦除;运行时符号见页面/组件实现
+export type FilterViewMode = 'board' | 'list'
+
+export interface FilterCriteria {
+  statuses?: string[]
+  updated_within_days?: number
+  keyword?: string
+  assignee_id?: string
+  view_mode?: FilterViewMode
+}
+
+export interface FilterViewRow {
+  id: string
+  project_id: string
+  user_id: string
+  entity_type: 'requirement' | 'task'
+  name: string
+  criteria: FilterCriteria
+  created_at: string
+  updated_at: string
+}
+
 export type DocumentType = 'wiki' | 'glossary'
 
 export type RepositoryVcsType = 'git' | 'svn' | 'other'
