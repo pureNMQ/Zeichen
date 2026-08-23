@@ -1,6 +1,6 @@
 [project]
 name = "zeichen-backend"
-version = "0.1.1"
+version = "0.2.0"
 description = "贼船 Zeichen — 业务后端(API 与 MCP 共享 service 层)"
 requires-python = ">=3.12"
 dependencies = [
