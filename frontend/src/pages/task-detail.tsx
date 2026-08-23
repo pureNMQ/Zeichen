@@ -128,7 +128,7 @@ export function TaskDetailPage() {
               所属需求:{task.requirement_id.slice(0, 8)}
             </Link>
           )}
-          {task.description && <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{task.description}</p>}
+          {task.description && <p className="mt-2 text-sm text-muted-foreground">{task.description}</p>}
         </div>
         <div className="flex shrink-0 flex-wrap justify-end gap-2">
           {task.assignee && (

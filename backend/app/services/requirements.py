@@ -16,6 +16,7 @@ from ..models import Requirement, Task, User
 from .pagination import page_result
 from .permissions import get_accessible_project, require_project_role
 from .polymorphic import record_activity
+from .short_text import normalize_short_description
 from .workflow import assert_status_valid
 
 
@@ -44,6 +45,7 @@ def create_requirement(
     if not title:
         raise invalid_request("标题不能为空")
     require_project_role(db, actor.id, project_id, min_level="editor")
+    description = normalize_short_description(description)
     requirement = Requirement(
         project_id=project_id, title=title, description=description, created_by=actor.id
     )
@@ -103,7 +105,7 @@ def update_requirement(
             raise invalid_request("标题不能为空")
         requirement.title = title
     if description is not None:
-        requirement.description = description
+        requirement.description = normalize_short_description(description)
     record_activity(db, requirement.project_id, actor.id, "requirement", requirement.id, "update", "更新需求")
     db.commit()
     return requirement
