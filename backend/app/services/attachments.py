@@ -21,7 +21,7 @@ from .pagination import page_result
 from .permissions import get_accessible_project, require_project_role
 from .polymorphic import record_activity, resolve_target
 
-TARGET_TYPES = ("requirement", "task", "document", "code_symbol", "project")
+TARGET_TYPES = ("requirement", "task", "document", "project")
 
 
 def _now() -> datetime:
@@ -82,13 +82,12 @@ def upload(
     project = get_accessible_project(db, actor.id, project_id, min_level="editor")
     # target 必须属于该项目且存在
     resolve_target(db, target_type, target_id)
-    from ..models import Requirement, Task, Document, CodeSymbol
+    from ..models import Requirement, Task, Document
 
     _PROJECT_COLUMN = {
         "requirement": Requirement,
         "task": Task,
         "document": Document,
-        "code_symbol": CodeSymbol,
     }
     if target_type in _PROJECT_COLUMN:
         obj = db.get(_PROJECT_COLUMN[target_type], target_id)

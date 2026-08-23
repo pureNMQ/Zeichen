@@ -1,4 +1,4 @@
-﻿"""MCP 工具集:requirements.* / tasks.* / comment.* / ref.* / project.* / agent.*(28 工具)。
+"""MCP 工具集:requirements.* / tasks.* / comment.* / ref.* / project.* / agent.*(28 工具)。
 
 - 每个工具复用 backend service 层,错误四件套映射为 MCP 错误消息前缀 `code: message`
 - cursor 分页统一(pagination.py);删除类 = 软删 + restore
@@ -17,7 +17,6 @@ from ..errors import AppError
 from ..models import ProjectMember, User
 from ..services import projects as project_svc
 from ..services import documents as document_svc
-from ..services import code_reference as code_svc
 from ..services import repositories as repository_svc
 from ..services import polymorphic as poly_svc
 from ..services import requirements as req_svc
@@ -148,7 +147,7 @@ def _register_all(mcp) -> None:
     @mcp.tool(name="repositories.delete")
     @sessioned
     def repositories_delete(id: str) -> dict:
-        """软删除代码仓库记录；不影响实际仓库或已导入的 API 参考。"""
+        """软删除代码仓库记录；不影响实际仓库。"""
         db, actor = dbc()
         repository_svc.delete_repository(db, actor, uuid.UUID(id))
         return {"deleted": True, "id": id}
@@ -603,75 +602,6 @@ def _register_all(mcp) -> None:
 
     _register_directory_tools(mcp, "glossary")
 
-    # ---------- docs.code.* ----------
-    @mcp.tool(name="docs.code.library_create")
-    @sessioned
-    def docs_code_library_create(project_id: str, name: str, language: str, package: str, version: str | None = None) -> dict:
-        db, actor = dbc()
-        return code_svc._library_dict(code_svc.create_library(db, actor, uuid.UUID(project_id), name, language, package, version))
-
-    @mcp.tool(name="docs.code.library_list")
-    @sessioned
-    def docs_code_library_list(project_id: str) -> dict:
-        db, actor = dbc()
-        return {"items": code_svc.list_libraries(db, actor, uuid.UUID(project_id))}
-
-    @mcp.tool(name="docs.code.search")
-    @sessioned
-    def docs_code_search(project_id: str, query: str | None = None, library_id: str | None = None, kind: str | None = None) -> dict:
-        db, actor = dbc()
-        return {"items": code_svc.search_symbols(db, actor, uuid.UUID(project_id), query, uuid.UUID(library_id) if library_id else None, kind)}
-
-    @mcp.tool(name="docs.code.get")
-    @sessioned
-    def docs_code_get(id: str) -> dict:
-        db, actor = dbc()
-        return code_svc.get_symbol(db, actor, uuid.UUID(id))
-
-    @mcp.tool(name="docs.code.create")
-    @sessioned
-    def docs_code_create(library_id: str, symbol: dict) -> dict:
-        db, actor = dbc()
-        return code_svc._symbol_dict(code_svc.create_symbol(db, actor, uuid.UUID(library_id), symbol))
-
-    @mcp.tool(name="docs.code.update")
-    @sessioned
-    def docs_code_update(id: str, expected_revision: int, patch: dict) -> dict:
-        db, actor = dbc()
-        return code_svc._symbol_dict(code_svc.update_symbol(db, actor, uuid.UUID(id), expected_revision, patch))
-
-    @mcp.tool(name="docs.code.members")
-    @sessioned
-    def docs_code_members(symbol_id: str) -> dict:
-        """列出一个类型符号的直接成员；symbol_id 不是 library_id。"""
-        db, actor = dbc()
-        return {"items": code_svc.list_members(db, actor, uuid.UUID(symbol_id))}
-
-    @mcp.tool(name="docs.code.versions")
-    @sessioned
-    def docs_code_versions(id: str) -> dict:
-        db, actor = dbc()
-        return {"items": code_svc.list_versions(db, actor, uuid.UUID(id))}
-
-    @mcp.tool(name="docs.code.rollback")
-    @sessioned
-    def docs_code_rollback(id: str, revision: int, expected_revision: int) -> dict:
-        db, actor = dbc()
-        return code_svc._symbol_dict(code_svc.rollback_symbol(db, actor, uuid.UUID(id), revision, expected_revision))
-
-    @mcp.tool(name="docs.code.delete")
-    @sessioned
-    def docs_code_delete(id: str) -> dict:
-        db, actor = dbc()
-        code_svc.delete_symbol(db, actor, uuid.UUID(id))
-        return {"deleted": True, "id": id}
-
-    @mcp.tool(name="docs.code.restore")
-    @sessioned
-    def docs_code_restore(id: str) -> dict:
-        db, actor = dbc()
-        return code_svc._symbol_dict(code_svc.restore_symbol(db, actor, uuid.UUID(id)))
-
     # ---------- comment.* ----------
     @mcp.tool(name="comment.create")
     @sessioned
@@ -768,7 +698,7 @@ def _register_all(mcp) -> None:
     @sessioned
     def search_query(query: str, domains: list[str] | None = None) -> dict:
         """跨我有权限的项目搜索(query 关键词+记忆语义混合)。
-        结果按域分组:requirement/task/document/code_symbol/memory。"""
+        结果按域分组:requirement/task/document/memory。"""
         db, actor = dbc()
         return search_svc.search(db, actor, query, domains)
 

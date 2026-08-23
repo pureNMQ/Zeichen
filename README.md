@@ -12,13 +12,12 @@ Zeichen(贼船)把软件开发的规格、需求、任务、词典、调研与�
 - **用户资料**:用户昵称与头像(自定义上传或默认头像),全站统一展示
 - **需求 / 任务**:需求五态(待确认 → 待办 → 实现中 → 已完成 / 已取消)与任务流转,指派与认领
 - **文档工作台**:文档目录树、多版本、评论、附件(单文件 20MB、单项目 2GB)、实体间引用(derives / documents / implements / mentions)
-- **代码引用库**:代码库 / 类型符号 / 版本(CodeLibrary、CodeSymbol)结构化沉淀
 - **项目代码仓库**:登记项目关联的代码仓库(git / svn / 其他)与默认分支
 - **长期记忆**:基于 Cognee 的项目共享记忆图谱,agent 会话异步蒸馏(improve worker)
 - **Cognee 管理**:工作区管理员可查看/配置 Cognee LLM 与嵌入模型,受控重启服务
 - **通知与搜索**:站内通知、跨域语义搜索(关键词 + 记忆混合)
 - **标准工作流 Skills**:为 agent 提供标准化的需求/任务/文档工作流技能包
-- **MCP 工具集**:70+ 工具,按域命名 —— `requirements.*` / `tasks.*` / `docs.*`(wiki / glossary / code 代码引用库)/ `comment.*` / `ref.*` / `memory.*` / `project.*` / `agent.*` / `search.*` / `attachment.*`,统一 `code: message` 错误四件套
+- **MCP 工具集**:70+ 工具,按域命名 —— `requirements.*` / `tasks.*` / `docs.*`(wiki / glossary)/ `comment.*` / `ref.*` / `memory.*` / `project.*` / `agent.*` / `search.*` / `attachment.*`,统一 `code: message` 错误四件套
 
 ## 技术栈
 

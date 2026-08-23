@@ -37,7 +37,6 @@ const TARGET_LABEL: Record<string, string> = {
   requirement: '需求',
   task: '任务',
   document: '文档',
-  code_symbol: '代码符号',
   project: '项目',
 }
 
@@ -49,8 +48,6 @@ function targetHref(targetType: string, targetId: string): string {
       return `/tasks/${targetId}`
     case 'document':
       return `/documents/wiki/${targetId}`
-    case 'code_symbol':
-      return `/code-reference/${targetId}`
     default:
       return '/projects'
   }

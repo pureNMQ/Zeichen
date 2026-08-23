@@ -20,7 +20,6 @@ function referenceHref(type: string, id: string, module?: string | null) {
   if (type === 'task') return `/tasks/${id}`
   if (type === 'document' && module === 'wiki') return `/documents/wiki/${id}`
   if (type === 'document' && module === 'glossary') return `/documents/glossary/term/${id}`
-  if (type === 'code_symbol') return `/code-reference/${id}`
   return null
 }
 

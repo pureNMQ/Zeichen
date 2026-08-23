@@ -30,7 +30,6 @@ _TARGET_CREATED_BY = {
     "requirement": Requirement,
     "task": Task,
     "document": None,  # created_by 直接用 PolymorphicTargetMixin 无;走 _entity_created_by
-    "code_symbol": None,
 }
 
 # 全部 activity 都触发通知:project 目标的活动仅 owner/admin 接收(见 _relevant_member_ids)
@@ -84,11 +83,10 @@ def _relevant_member_ids(db: Session, activity: Activity) -> set[uuid.UUID]:
         # 项目级活动(记忆)仅 owner/admin 接收,已在上面
         pass
     else:
-        # document / code_symbol:创建者来自基类 created_by 列
-        from ..models import CodeSymbol, Document
+        # document:创建者来自基类 created_by 列
+        from ..models import Document
 
-        model = Document if activity.target_type == "document" else CodeSymbol
-        obj = db.get(model, activity.target_id)
+        obj = db.get(Document, activity.target_id)
         if obj is not None and obj.created_by:
             recipients.add(obj.created_by)
 

@@ -60,27 +60,9 @@ class TestKeywordSearch:
         assert all(item["domain"] == "requirement" for item in result["items"])
 
 
-class TestCodeSymbolSearch:
-    def test_search_code_symbols(self, db: Session, world: dict):
-        from app.services import code_reference as code_svc
-
-        lib = code_svc.create_library(
-            db, world["admin"], world["project"].id, "sdk", "csharp", "Acme.Core"
-        )
-        code_svc.create_symbol(
-            db,
-            world["admin"],
-            lib.id,
-            {
-                "kind": "class",
-                "name": "LoginService",
-                "namespace": "Acme.Core",
-                "summary": "handles login flows",
-                "definition": {},
-            },
-        )
-        result = svc.search(db, world["member"], "Login")
-        assert any(item["domain"] == "code_symbol" and item["title"] == "LoginService" for item in result["items"])
+class TestCodeSymbolSearchRemoved:
+    def test_code_symbol_search_is_removed(self):
+        assert not hasattr(svc, "search_code_symbols")
 
 
 class TestMemorySearch:
@@ -183,14 +165,12 @@ class TestEmptyScopeAndEdgeGuards:
         assert svc.search_requirements(db, project_ids, "") == []
         assert svc.search_tasks(db, project_ids, "  ") == []
         assert svc.search_documents(db, project_ids, "") == []
-        assert svc.search_code_symbols(db, project_ids, "") == []
         assert svc.search_memory(db, project_ids, "  ") == []
 
     def test_domain_functions_short_circuit_on_empty_projects(self, db: Session, world: dict):
         assert svc.search_requirements(db, [], "登录") == []
         assert svc.search_tasks(db, [], "登录") == []
         assert svc.search_documents(db, [], "登录") == []
-        assert svc.search_code_symbols(db, [], "登录") == []
         assert svc.search_memory(db, [], "登录") == []
 
     def test_project_names_returns_empty_mapping_without_ids(self, db: Session, world: dict):

@@ -12,7 +12,6 @@ const DOMAIN_LABEL: Record<SearchItem['domain'], string> = {
   requirement: '需求',
   task: '任务',
   document: '文档',
-  code_symbol: '代码符号',
   memory: '记忆',
 }
 
@@ -32,8 +31,6 @@ function hrefOf(item: SearchItem): string {
       return `/tasks/${item.id}`
     case 'document':
       return `/documents/wiki/${item.id}`
-    case 'code_symbol':
-      return `/code-reference/${item.id}`
     default:
       return '/projects'
   }
@@ -51,7 +48,7 @@ export function SearchPage() {
 
   const grouped = useMemo(() => {
     const groups: { domain: SearchItem['domain']; items: SearchItem[] }[] = []
-    const order: SearchItem['domain'][] = ['requirement', 'task', 'document', 'code_symbol', 'memory']
+    const order: SearchItem['domain'][] = ['requirement', 'task', 'document', 'memory']
     for (const domain of order) {
       const items = (data?.items ?? []).filter((item) => item.domain === domain)
       if (items.length > 0) groups.push({ domain, items })

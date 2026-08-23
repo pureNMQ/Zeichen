@@ -170,44 +170,6 @@ class DocumentUpdate(BaseModel):
     metadata: dict | None = None
 
 
-class CodeLibraryCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=128)
-    language: str = Field(min_length=1, max_length=32)
-    package: str = Field(min_length=1, max_length=256)
-    version: str | None = Field(default=None, max_length=64)
-
-
-class CodeSymbolCreate(BaseModel):
-    owner_symbol_id: uuid.UUID | None = None
-    namespace: str | None = Field(default=None, max_length=256)
-    kind: Literal["class", "struct", "interface", "enum", "function", "constructor", "method", "field", "property", "constant"]
-    name: str = Field(min_length=1, max_length=256)
-    summary: str = Field(min_length=1, max_length=512)
-    remarks: str | None = None
-    accessibility: Literal["public", "protected", "internal", "private"] = "public"
-    source_declaration: str | None = None
-    since_version: str | None = Field(default=None, max_length=64)
-    deprecated: bool = False
-    definition: dict
-
-
-class CodeSymbolUpdate(BaseModel):
-    expected_revision: int = Field(ge=1)
-    name: str | None = Field(default=None, min_length=1, max_length=256)
-    summary: str | None = Field(default=None, min_length=1, max_length=512)
-    remarks: str | None = None
-    accessibility: Literal["public", "protected", "internal", "private"] | None = None
-    source_declaration: str | None = None
-    since_version: str | None = Field(default=None, max_length=64)
-    deprecated: bool | None = None
-    definition: dict | None = None
-
-
-class CodeSymbolRollback(BaseModel):
-    revision: int = Field(ge=1)
-    expected_revision: int = Field(ge=1)
-
-
 class RepositoryCreate(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     vcs_type: Literal["git", "svn", "other"]
@@ -253,8 +215,8 @@ class CommentCreate(BaseModel):
 
 
 class ReferenceCreate(BaseModel):
-    from_type: Literal["requirement", "task", "document", "code_symbol", "repository", "project"]
+    from_type: Literal["requirement", "task", "document", "repository", "project"]
     from_id: uuid.UUID
-    to_type: Literal["requirement", "task", "document", "code_symbol", "repository", "project"]
+    to_type: Literal["requirement", "task", "document", "repository", "project"]
     to_id: uuid.UUID
     type: Literal["derives", "documents", "implements", "mentions"]

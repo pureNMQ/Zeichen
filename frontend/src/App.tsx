@@ -18,7 +18,6 @@ import { RequirementDetailPage } from '@/pages/requirement-detail'
 import { SetPasswordPage } from '@/pages/set-password'
 import { TaskDetailPage } from '@/pages/task-detail'
 import { DocumentWorkbenchPage } from '@/pages/documents'
-import { CodeReferencePage } from '@/pages/code-reference'
 import { MemoryPage, MemorySessionsPage } from '@/pages/memory'
 import { CogneePage } from '@/pages/cognee'
 import { RepositoriesPage } from '@/pages/repositories'
@@ -117,8 +116,6 @@ export function App() {
         <Route path="documents/glossary" element={<DocumentWorkbenchPage module="glossary" />} />
         <Route path="documents/glossary/directory/:id" element={<DocumentWorkbenchPage module="glossary" routeNodeKind="directory" />} />
         <Route path="documents/glossary/term/:id" element={<DocumentWorkbenchPage module="glossary" routeNodeKind="document" />} />
-        <Route path="code-reference" element={<CodeReferencePage />} />
-        <Route path="code-reference/:id" element={<CodeReferencePage />} />
         <Route path="repositories" element={<RepositoriesPage />} />
         <Route path="memory" element={<MemoryPage />} />
         <Route path="memory/sessions" element={<MemorySessionsPage />} />

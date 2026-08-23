@@ -1,4 +1,4 @@
-﻿"""MCP 端到端验证(规格书 §4):真实 uvicorn 服务 + Bearer API key + 工具全链路。
+"""MCP 端到端验证(规格书 §4):真实 uvicorn 服务 + Bearer API key + 工具全链路。
 
 客户端为最小 wire 协议实现(mcp SDK 1.28/1.29 自带 client 传输在本环境有
 transport bug,§9 记录):POST initialize → Mcp-Session-Id → POST tools/call,
@@ -205,15 +205,15 @@ def test_agent_claim_to_requirement_done(mcp_server: dict):
 
     tools = client.list_tools()
     assert len(tools) >= 60
-    for ns in ("requirements.", "tasks.", "repositories.", "docs.wiki.", "docs.glossary.", "docs.code.", "comment.", "ref.", "project.", "agent."):
+    for ns in ("requirements.", "tasks.", "repositories.", "docs.wiki.", "docs.glossary.", "comment.", "ref.", "project.", "agent."):
         assert any(t.startswith(ns) for t in tools), f"缺少 {ns} 工具"
+    assert not any(t.startswith("docs.code.") for t in tools), "docs.code.* 工具应随 API 参考模块移除"
     assert "requirements.set_status" in tools and "requirements.complete" not in tools
     assert "tasks.set_status" in tools and "tasks.start" not in tools and "tasks.complete" not in tools
     assert "memory.improve" in tools and "memory.improve_status" in tools
     for name in (
         "docs.wiki.children", "docs.wiki.ancestors", "docs.wiki.move",
         "docs.glossary.directory_create", "docs.glossary.directory_move",
-        "docs.code.library_create", "docs.code.create", "docs.code.get",
         "repositories.list", "repositories.create", "repositories.update", "repositories.delete", "repositories.restore",
     ):
         assert name in tools
@@ -358,30 +358,6 @@ def test_document_hierarchy_over_mcp(mcp_server: dict):
     directory = client.call("docs.glossary.directory_create", project_id=project_id, name="MCP 术语")
     invalid_move = client.call("docs.glossary.directory_move", id=directory["id"], parent_id="null")
     assert "invalid_request" in str(invalid_move), invalid_move
-
-    library = client.call("docs.code.library_create", project_id=project_id, name="MCP Runtime", language="csharp", package="Mcp.Runtime")
-    definition = client.call(
-        "docs.code.create", library_id=library["id"], symbol={
-            "kind": "enum", "namespace": "Mcp.Runtime", "name": "Mode", "summary": "MCP 模式。",
-            "definition": {"is_flags": False, "members": [{"position": 0, "name": "Read", "assigned_value": "0"}]},
-        },
-    )
-    assert client.call("docs.code.get", id=definition["id"])["definition"]["members"][0]["name"] == "Read"
-    type_symbol = client.call(
-        "docs.code.create", library_id=library["id"], symbol={
-            "kind": "class", "namespace": "Mcp.Runtime", "name": "Container", "summary": "成员容器。",
-            "definition": {},
-        },
-    )
-    assert client.call("docs.code.members", symbol_id=type_symbol["id"])["items"] == []
-    signature_error = client.call(
-        "docs.code.create", library_id=library["id"], symbol={
-            "kind": "function", "namespace": "Mcp.Runtime", "name": "test_add", "summary": "测试相加。",
-            "signature": "def test_add(a: int, b: int) -> int",
-            "definition": {"returns": {"type": "int"}},
-        },
-    )
-    assert "invalid_request" in signature_error["error"]
 
 
 def test_cursor_pagination_over_mcp(mcp_server: dict):

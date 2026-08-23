@@ -1,8 +1,4 @@
-"""Wiki and glossary documents.
-
-Code API reference has its own aggregate in ``code_reference.py`` and is not a
-document subtype.
-"""
+"""Wiki and glossary documents."""
 
 import uuid
 

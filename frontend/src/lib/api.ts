@@ -199,20 +199,6 @@ export interface Page<T> {
 
 export type DocumentType = 'wiki' | 'glossary'
 
-export type CodeSymbolKind = 'class' | 'struct' | 'interface' | 'enum' | 'function' | 'constructor' | 'method' | 'field' | 'property' | 'constant'
-
-export interface CodeLibrary {
-  id: string
-  project_id: string
-  name: string
-  language: string
-  package: string
-  version: string | null
-  created_at: string
-  updated_at: string
-  deleted_at: string | null
-}
-
 export type RepositoryVcsType = 'git' | 'svn' | 'other'
 
 export interface RepositoryRow {
@@ -228,56 +214,6 @@ export interface RepositoryRow {
   created_at: string
   updated_at: string
   deleted_at: string | null
-}
-
-export interface CodeEnumMember {
-  position: number
-  name: string
-  assigned_value: string | null
-  summary: string | null
-}
-
-export interface CodeSymbol {
-  id: string
-  library_id: string
-  owner_symbol_id: string | null
-  kind: CodeSymbolKind
-  name: string
-  qualified_name: string
-  namespace: string | null
-  summary: string
-  remarks?: string
-  accessibility: 'public' | 'protected' | 'internal' | 'private'
-  source_declaration: string | null
-  since_version: string | null
-  deprecated: boolean
-  definition: Record<string, unknown> & { members?: CodeEnumMember[] }
-  members?: Array<{
-    id: string
-    kind: CodeSymbolKind
-    name: string
-    qualified_name: string
-    summary: string
-    signature: string
-    deprecated: boolean
-  }>
-  signature: string
-  revision: number
-  created_at: string
-  updated_at: string
-  deleted_at: string | null
-}
-
-export interface CodeTreeNode {
-  node_kind: 'library' | 'namespace' | 'member_group' | 'symbol'
-  id: string
-  title: string
-  language?: string
-  package?: string
-  symbol_kind?: CodeSymbolKind
-  summary?: string
-  signature?: string
-  children: CodeTreeNode[]
 }
 
 export interface DocumentRow {
@@ -400,7 +336,7 @@ export interface NotificationRow {
   created_at: string
 }
 
-export type SearchDomain = 'requirement' | 'task' | 'document' | 'code_symbol' | 'memory'
+export type SearchDomain = 'requirement' | 'task' | 'document' | 'memory'
 
 export interface SearchItem {
   domain: SearchDomain

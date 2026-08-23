@@ -13,19 +13,18 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from ..errors import conflict, invalid_request, not_found, permission_denied
-from ..models import Activity, CodeSymbol, Comment, Document, Project, Reference, Repository, Requirement, Task, User
+from ..models import Activity, Comment, Document, Project, Reference, Repository, Requirement, Task, User
 from .pagination import page_result
 from .permissions import get_accessible_project, get_project_role, is_admin, require_project_role
 from .user_profiles import avatar_url, display_name
 
-TARGET_TYPES = ("requirement", "task", "document", "code_symbol", "repository", "project")
+TARGET_TYPES = ("requirement", "task", "document", "repository", "project")
 REFERENCE_TYPES = ("derives", "documents", "implements", "mentions")
 
 _TARGET_MODELS = {
     "requirement": Requirement,
     "task": Task,
     "document": Document,
-    "code_symbol": CodeSymbol,
     "repository": Repository,
 }
 
@@ -47,8 +46,7 @@ def resolve_target(db: Session, target_type: str, target_id: uuid.UUID) -> Proje
     )
     if obj is None:
         raise not_found("目标不存在")
-    project_id = obj.library.project_id if target_type == "code_symbol" else obj.project_id
-    return db.scalar(select(Project).where(Project.id == project_id))
+    return db.scalar(select(Project).where(Project.id == obj.project_id))
 
 
 def record_activity(
@@ -244,8 +242,6 @@ def _ref_dict(db: Session, r: Reference) -> dict:
         target = db.get(model, target_id) if model else None
         if target is None:
             return ("已删除", None)
-        if target_type == "code_symbol":
-            return (target.name, None)
         return (
             getattr(target, "title", None) or getattr(target, "name", None) or "已删除",
             getattr(target, "doc_type", None),

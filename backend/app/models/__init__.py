@@ -3,7 +3,6 @@ from .user import ApiKey, PasswordSetupToken, User
 from .team_project import Project, ProjectMember, Team, WorkspaceMember
 from .requirement import Requirement, Task
 from .document import Document, DocumentDirectory, DocumentVersion
-from .code_reference import CodeLibrary, CodeSymbol, CodeSymbolVersion, EnumMember
 from .repository import Repository
 from .polymorphic import Activity, Attachment, Comment, Reference
 from .memory_dataset import MemoryDataset
@@ -27,10 +26,6 @@ __all__ = [
     "Document",
     "DocumentDirectory",
     "DocumentVersion",
-    "CodeLibrary",
-    "CodeSymbol",
-    "CodeSymbolVersion",
-    "EnumMember",
     "Repository",
     "Comment",
     "Activity",

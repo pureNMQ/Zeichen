@@ -18,7 +18,7 @@ def search(
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    valid = {"requirement", "task", "document", "code_symbol", "memory"}
+    valid = {"requirement", "task", "document", "memory"}
     domains = None
     if domain:
         domains = [d for d in domain if d in valid]

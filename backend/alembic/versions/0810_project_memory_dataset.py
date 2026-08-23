@@ -1,7 +1,7 @@
 """Add the opaque project-to-cognee dataset mapping.
 
 Revision ID: 0810memorydataset
-Revises: 0808sqlitecoderef
+Revises: 0420docworkbench
 Create Date: 2026-08-06 14:00:00.000000
 """
 
@@ -9,7 +9,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "0810memorydataset"
-down_revision = "0808sqlitecoderef"
+down_revision = "0420docworkbench"
 branch_labels = None
 depends_on = None
 

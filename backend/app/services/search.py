@@ -1,6 +1,6 @@
 """全局搜索服务(规格书 §4.2 search.query / frontend-requirements §2.5)。
 
-- 关键词部分:业务实体(需求/任务/文档/代码符号)SQL LIKE 检索,跨用户有权限的全部项目
+- 关键词部分:业务实体(需求/任务/文档)SQL LIKE 检索,跨用户有权限的全部项目
 - 语义部分:记忆域经 cognee recall 检索,同样限定在有权限的项目内
 - Web 与 MCP 共用同一后端,结果按域分组
 """
@@ -11,8 +11,6 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from ..models import (
-    CodeLibrary,
-    CodeSymbol,
     Document,
     Project,
     ProjectMember,
@@ -148,39 +146,6 @@ def search_documents(db: Session, project_ids: list[uuid.UUID], query: str) -> l
     ]
 
 
-def search_code_symbols(db: Session, project_ids: list[uuid.UUID], query: str) -> list[dict]:
-    needle = _needle(query)
-    if not project_ids or not needle:
-        return []
-    rows = db.execute(
-        select(CodeSymbol, CodeLibrary.project_id)
-        .join(CodeLibrary, CodeLibrary.id == CodeSymbol.library_id)
-        .where(
-            CodeLibrary.project_id.in_(project_ids),
-            CodeLibrary.deleted_at.is_(None),
-            CodeSymbol.deleted_at.is_(None),
-            or_(
-                CodeSymbol.name.ilike(f"%{needle}%"),
-                CodeSymbol.summary.ilike(f"%{needle}%"),
-                CodeSymbol.remarks.ilike(f"%{needle}%"),
-            ),
-        )
-        .order_by(CodeSymbol.name)
-        .limit(MAX_RESULTS_PER_DOMAIN)
-    ).all()
-    return [
-        {
-            "domain": "code_symbol",
-            "id": str(s.id),
-            "project_id": str(project_id),
-            "kind": s.kind,
-            "title": s.name,
-            "summary": s.summary,
-        }
-        for s, project_id in rows
-    ]
-
-
 def search_memory(
     db: Session, project_ids: list[uuid.UUID], query: str, client=None
 ) -> list[dict]:
@@ -254,8 +219,6 @@ def search(
         items.extend(search_tasks(db, project_ids, query))
     if requested is None or "document" in requested:
         items.extend(search_documents(db, project_ids, query))
-    if requested is None or "code_symbol" in requested:
-        items.extend(search_code_symbols(db, project_ids, query))
     if requested is None or "memory" in requested:
         items.extend(search_memory(db, project_ids, query, client))
 
