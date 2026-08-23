@@ -36,6 +36,12 @@ description: 定义使用 Zeichen 协作工具的公共协议，包括项目上�
 - 先读取相关现有记录并查重，再创建或更新协作实体。
 - 记忆用于补充历史上下文；将其作为依据前，用需求、任务、Wiki、评论或可验证证据核对。
 
+## 列表筛选约定(需求/任务)
+
+- `requirements.list` / `tasks.list` 支持显式筛选参数:多值状态(`status` 逗号分隔,如 `"backlog,in_progress"`)、时间窗口(`updated_within_days`)、关键词(`keyword`),任务可另按负责人(`assignee_id`);列表默认按最后活跃时间(`updated_at`)倒序。
+- 非必要情况下默认筛「近 3 天活跃」项(`updated_within_days=3`),聚焦正在处理的事务;确需全量时再显式传参拉取。
+- 换筛选条件后不得复用旧 `cursor`(条件哈希不匹配会被拒绝)。
+
 ## 写入与文档
 
 - 创建或更新 Requirement、Task 时，描述只支持简短纯文本。长篇背景、验收细则、方案比较和标准流程写 Wiki；实施证据使用简短纯文本写评论。Wiki、词典应使用 Markdown。
