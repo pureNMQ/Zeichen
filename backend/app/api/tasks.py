@@ -25,14 +25,17 @@ def list_tasks(
     project_id: uuid.UUID,
     requirement_id: uuid.UUID | None = None,
     assignee_id: uuid.UUID | None = None,
-    status: str | None = None,
+    status: list[str] | None = Query(None),
+    updated_within_days: str | None = None,
+    keyword: str | None = None,
     cursor: str | None = None,
     limit: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
     return service.list_tasks(
-        db, user, project_id, requirement_id, assignee_id, status, cursor, limit
+        db, user, project_id, requirement_id, assignee_id, status, cursor, limit,
+        updated_within_days=updated_within_days, keyword=keyword,
     )
 
 

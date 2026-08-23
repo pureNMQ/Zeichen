@@ -7,8 +7,9 @@
 """
 
 import uuid
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
@@ -142,16 +143,29 @@ def list_tasks(
     project_id: uuid.UUID,
     requirement_id: uuid.UUID | None,
     assignee_id: uuid.UUID | None,
-    status: str | None,
+    status: str | list[str] | None,
     cursor: str | None,
     limit: int,
+    updated_within_days: int | str | None = None,
+    keyword: str | None = None,
 ) -> dict:
+    """任务列表:多维筛选(状态/指派/需求) + updated_within_days 时间窗口 + keyword。
+
+    筛选在 offset/limit 分页前执行;排序 updated_at DESC, id DESC(稳定次序)。
+    cursor 条件哈希纳入全部筛选维度(status 列表排序后入哈希),跨条件复用游标
+    → invalid_request。
+    """
     get_accessible_project(db, user.id, project_id, min_level="viewer")
+    statuses = _normalize_statuses(status)
+    days = _normalize_updated_within_days(updated_within_days)
+    keyword = _normalize_keyword(keyword)
     filters = {
         "project_id": str(project_id),
         "requirement_id": str(requirement_id) if requirement_id else None,
         "assignee_id": str(assignee_id) if assignee_id else None,
-        "status": status,
+        "statuses": statuses,
+        "updated_within_days": days,
+        "keyword": keyword,
     }
     from .pagination import decode_cursor
 
@@ -161,9 +175,17 @@ def list_tasks(
         stmt = stmt.where(Task.requirement_id == requirement_id)
     if assignee_id:
         stmt = stmt.where(Task.assignee_id == assignee_id)
-    if status:
-        stmt = stmt.where(Task.status == status)
-    rows = db.scalars(stmt.order_by(Task.created_at).offset(offset).limit(limit)).all()
+    if statuses:
+        stmt = stmt.where(Task.status.in_(statuses))
+    if days is not None:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        stmt = stmt.where(Task.updated_at >= cutoff)
+    if keyword:
+        like = f"%{keyword}%"
+        stmt = stmt.where(or_(Task.title.ilike(like), Task.description.ilike(like)))
+    rows = db.scalars(
+        stmt.order_by(Task.updated_at.desc(), Task.id.desc()).offset(offset).limit(limit)
+    ).all()
     items = [_task_dict(db, t) for t in rows]
     return page_result(items, offset, limit, filters)
 
@@ -300,6 +322,47 @@ def restore_task(db: Session, actor: User, task_id: uuid.UUID) -> Task:
     record_activity(db, task.project_id, actor.id, "task", task.id, "restore", "恢复任务")
     db.commit()
     return task
+
+
+def _normalize_statuses(status: str | list[str] | None) -> list[str] | None:
+    """status 多值归一化:str → [str];list 保序去空;None/空 → None(不过滤)。"""
+    if status is None:
+        return None
+    if isinstance(status, str):
+        statuses = [status]
+    else:
+        statuses = list(status)
+    cleaned = [s.strip() for s in statuses if isinstance(s, str) and s.strip()]
+    cleaned.sort()  # 条件哈希稳定:同条件顺序互换复用游标
+    return cleaned or None
+
+
+def _normalize_updated_within_days(value: int | str | None) -> int | None:
+    """updated_within_days 校验:None → None;整数/数字字符串 ≥1 → int;其余 → invalid_request。"""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise invalid_request("updated_within_days 必须是 ≥1 的整数")
+    if isinstance(value, int):
+        days = value
+    elif isinstance(value, str):
+        text = value.strip()
+        if not text.isdigit():
+            raise invalid_request("updated_within_days 必须是 ≥1 的整数")
+        days = int(text)
+    else:
+        raise invalid_request("updated_within_days 必须是 ≥1 的整数")
+    if days < 1:
+        raise invalid_request("updated_within_days 必须是 ≥1 的整数")
+    return days
+
+
+def _normalize_keyword(keyword: str | None) -> str | None:
+    """keyword:strip,空 → None(不过滤)。"""
+    if keyword is None:
+        return None
+    text = str(keyword).strip()
+    return text or None
 
 
 def _now():

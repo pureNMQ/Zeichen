@@ -57,18 +57,44 @@ class TestListFilters:
         svc.set_task_status(db, world["agent"], make_task(db, world, "任务二")["id"], "in_progress")
         make_task(db, world, "任务三")
 
-        page = svc.list_tasks(db, world["member"], world["project"].id, None, None, None, None, 20)
+        # 新签名(T1):status 多值(list[str] | None),新增 updated_within_days/keyword
+        pid = world["project"].id
+        page = svc.list_tasks(
+            db=db, user=world["member"], project_id=pid, requirement_id=None,
+            assignee_id=None, status=None, cursor=None, limit=20,
+            updated_within_days=None, keyword=None,
+        )
         assert len(page["items"]) == 3
-        by_status = svc.list_tasks(db, world["member"], world["project"].id, None, None, "in_progress", None, 20)
+        by_status = svc.list_tasks(
+            db=db, user=world["member"], project_id=pid, requirement_id=None,
+            assignee_id=None, status=["in_progress"], cursor=None, limit=20,
+            updated_within_days=None, keyword=None,
+        )
         assert [i["title"] for i in by_status["items"]] == ["任务二"]
-        by_agent = svc.list_tasks(db, world["member"], world["project"].id, None, world["agent"].id, None, None, 20)
+        by_agent = svc.list_tasks(
+            db=db, user=world["member"], project_id=pid, requirement_id=None,
+            assignee_id=world["agent"].id, status=None, cursor=None, limit=20,
+            updated_within_days=None, keyword=None,
+        )
         assert [i["title"] for i in by_agent["items"]] == ["任务一"]
-        by_req = svc.list_tasks(db, world["member"], world["project"].id, req.id, None, None, None, 20)
+        by_req = svc.list_tasks(
+            db=db, user=world["member"], project_id=pid, requirement_id=req.id,
+            assignee_id=None, status=None, cursor=None, limit=20,
+            updated_within_days=None, keyword=None,
+        )
         assert [i["title"] for i in by_req["items"]] == ["任务一"]
-        page1 = svc.list_tasks(db, world["member"], world["project"].id, None, None, None, None, 2)
+        page1 = svc.list_tasks(
+            db=db, user=world["member"], project_id=pid, requirement_id=None,
+            assignee_id=None, status=None, cursor=None, limit=2,
+            updated_within_days=None, keyword=None,
+        )
         assert len(page1["items"]) == 2
         assert page1["next_cursor"] is not None
-        page2 = svc.list_tasks(db, world["member"], world["project"].id, None, None, None, page1["next_cursor"], 2)
+        page2 = svc.list_tasks(
+            db=db, user=world["member"], project_id=pid, requirement_id=None,
+            assignee_id=None, status=None, cursor=page1["next_cursor"], limit=2,
+            updated_within_days=None, keyword=None,
+        )
         assert len(page2["items"]) == 1
         assert page2["next_cursor"] is None
 

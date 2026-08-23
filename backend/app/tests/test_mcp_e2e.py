@@ -384,6 +384,93 @@ def test_cursor_pagination_over_mcp(mcp_server: dict):
     assert "invalid_request" in err["error"]
 
 
+def test_list_filters_over_mcp(mcp_server: dict):
+    """T1:requirements.list / tasks.list 的 keyword、updated_within_days、逗号分隔多状态。
+
+    旧 cursor 跨条件拒绝仍成立(keyword 变更 / 新增时间窗口均拒绝)。
+    updated_within_days 排除语义:直连 e2e 库把行 updated_at 回拨 5 天验证。
+    """
+    import uuid
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session as SASession
+
+    from app.models import Requirement as ReqModel
+
+    client = RawMcpClient(mcp_server["url"], mcp_server["token"])
+    client.initialize()
+    pid = mcp_server["project_id"]
+
+    r1 = client.call("requirements.create", project_id=pid, title="MCP Login 需求")
+    client.call("requirements.set_status", id=r1["id"], status="backlog")
+    r2 = client.call("requirements.create", project_id=pid, title="MCP Pay 需求")
+    client.call("requirements.set_status", id=r2["id"], status="in_progress")
+    r3 = client.call("requirements.create", project_id=pid, title="MCP 旧需求")
+
+    # keyword:大小写不敏感,标题命中
+    page = client.call("requirements.list", project_id=pid, keyword="login")
+    assert [i["id"] for i in page["items"]] == [r1["id"]], page
+    page = client.call("requirements.list", project_id=pid, keyword="LOGIN")
+    assert [i["id"] for i in page["items"]] == [r1["id"]], page
+    # keyword 无命中
+    assert client.call("requirements.list", project_id=pid, keyword="zzz-nope")["items"] == []
+
+    # 逗号分隔多状态
+    page = client.call("requirements.list", project_id=pid, status="backlog,in_progress")
+    ids = {i["id"] for i in page["items"]}
+    assert r1["id"] in ids and r2["id"] in ids and r3["id"] not in ids, page
+    # 单值不变
+    page = client.call("requirements.list", project_id=pid, status="backlog")
+    assert [i["id"] for i in page["items"]] == [r1["id"]], page
+
+    # updated_within_days:回拨 r3 5 天 → 窗口 3 排除、窗口 30 包含
+    # 共享 module 级 DB:上游用例(test_cursor_pagination_over_mcp)遗留 25 条 pending 需求,
+    # r3 回拨后按 updated_at DESC 排到最末,默认 limit=20 会截断;故显式 limit=100 分页。
+    db_path = mcp_server["log_file"].parent / "e2e.db"
+    engine = create_engine(f"sqlite:///{db_path.as_posix()}", connect_args={"timeout": 10})
+    with SASession(engine) as s:
+        row = s.get(ReqModel, uuid.UUID(r3["id"]))
+        assert row is not None
+        row.updated_at = datetime.now(timezone.utc) - timedelta(days=5)
+        s.commit()
+    engine.dispose()
+    page = client.call("requirements.list", project_id=pid, updated_within_days=3, limit=100)
+    assert r3["id"] not in {i["id"] for i in page["items"]}, page
+    page = client.call("requirements.list", project_id=pid, updated_within_days=30, limit=100)
+    assert r3["id"] in {i["id"] for i in page["items"]}, page
+    # updated_within_days=0 → invalid_request
+    err = client.call("requirements.list", project_id=pid, updated_within_days=0)
+    assert "invalid_request" in err["error"], err
+
+    # 旧 cursor 跨条件拒绝:keyword 变更 / 新增时间窗口
+    page1 = client.call("requirements.list", project_id=pid, keyword="MCP", limit=1)
+    assert page1["next_cursor"] is not None
+    err = client.call("requirements.list", project_id=pid, keyword="pay", cursor=page1["next_cursor"])
+    assert "invalid_request" in err["error"], err
+    err = client.call(
+        "requirements.list", project_id=pid, keyword="MCP", updated_within_days=3, cursor=page1["next_cursor"]
+    )
+    assert "invalid_request" in err["error"], err
+
+    # tasks.list 同样三件套
+    t1 = client.call("tasks.create", project_id=pid, title="MCP Form 任务")
+    t2 = client.call("tasks.create", project_id=pid, title="MCP Pay 任务")
+    client.call("tasks.set_status", id=t2["id"], status="in_progress")
+    page = client.call("tasks.list", project_id=pid, keyword="FORM")
+    assert [i["id"] for i in page["items"]] == [t1["id"]], page
+    page = client.call("tasks.list", project_id=pid, status="backlog,in_progress")
+    assert {t1["id"], t2["id"]} <= {i["id"] for i in page["items"]}, page
+    page = client.call("tasks.list", project_id=pid, updated_within_days=3)
+    assert {t1["id"], t2["id"]} <= {i["id"] for i in page["items"]}, page
+
+    # 清理本测试建的实体(恢复列表基线)
+    client.call("tasks.delete", id=t1["id"])
+    client.call("tasks.delete", id=t2["id"])
+    for rid in (r1["id"], r2["id"], r3["id"]):
+        client.call("requirements.delete", id=rid, confirm_task_count=0)
+
+
 def test_bad_key_rejected(mcp_server: dict):
     client = RawMcpClient(mcp_server["url"], "zc_invalid-key-0000000000")
     with pytest.raises(httpx.HTTPStatusError) as e:

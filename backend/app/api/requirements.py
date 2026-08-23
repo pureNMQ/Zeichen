@@ -23,13 +23,18 @@ router = APIRouter(prefix="/api", tags=["requirements"])
 @router.get("/projects/{project_id}/requirements")
 def list_requirements(
     project_id: uuid.UUID,
-    status: str | None = None,
+    status: list[str] | None = Query(None),
+    updated_within_days: str | None = None,
+    keyword: str | None = None,
     cursor: str | None = None,
     limit: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    return service.list_requirements(db, user, project_id, status, cursor, limit)
+    return service.list_requirements(
+        db, user, project_id, status, cursor, limit,
+        updated_within_days=updated_within_days, keyword=keyword,
+    )
 
 
 @router.post("/projects/{project_id}/requirements", status_code=201)

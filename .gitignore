@@ -18,6 +18,9 @@ dist/
 .env
 .env.*
 !.env.example
+
+# DSH local tooling
+.dsh/
 !deploy/.env.prod.example
 
 # Cognee

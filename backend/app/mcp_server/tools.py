@@ -67,6 +67,14 @@ def _req_id(requirement_id: str | None) -> uuid.UUID | None:
     return uuid.UUID(requirement_id) if requirement_id else None
 
 
+def _split_statuses(status: str | None) -> list[str] | None:
+    """MCP status 逗号分隔字符串 → list;单值不变;None/空 → None(不过滤)。"""
+    if status is None:
+        return None
+    parts = [s.strip() for s in status.split(",") if s.strip()]
+    return parts or None
+
+
 def _optional_uuid(value: str | None, field_name: str) -> uuid.UUID | None:
     """Parse an optional MCP UUID while preserving the established empty=root semantics."""
     if value is None or value == "":
@@ -222,12 +230,21 @@ def _register_all(mcp) -> None:
     @mcp.tool(name="requirements.list")
     @sessioned
     def requirements_list(
-        project_id: str, status: str | None = None, cursor: str | None = None, limit: int | None = None
+        project_id: str,
+        status: str | None = None,
+        updated_within_days: int | None = None,
+        keyword: str | None = None,
+        cursor: str | None = None,
+        limit: int | None = None,
     ) -> dict:
-        """需求列表(可按状态过滤,cursor 分页)。"""
+        """需求列表(cursor 分页;keyword 标题/描述包含、updated_within_days 时间窗口;
+        status 多值用逗号分隔,如 status='backlog,in_progress')。"""
         db, actor = dbc()
-        cursor, limit = _paged({"project_id": project_id, "status": status}, cursor, limit)
-        return req_svc.list_requirements(db, actor, uuid.UUID(project_id), status, cursor, limit)
+        cursor, limit = _paged({}, cursor, limit)
+        return req_svc.list_requirements(
+            db, actor, uuid.UUID(project_id), _split_statuses(status), cursor, limit,
+            updated_within_days=updated_within_days, keyword=keyword,
+        )
 
     @mcp.tool(name="requirements.update")
     @sessioned
@@ -300,19 +317,19 @@ def _register_all(mcp) -> None:
         requirement_id: str | None = None,
         assignee_id: str | None = None,
         status: str | None = None,
+        updated_within_days: int | None = None,
+        keyword: str | None = None,
         cursor: str | None = None,
         limit: int | None = None,
     ) -> dict:
-        """任务列表(多维度过滤,cursor 分页)。"""
+        """任务列表(多维度过滤,cursor 分页;keyword 标题/描述包含、updated_within_days 时间窗口;
+        status 多值用逗号分隔,如 status='backlog,in_progress')。"""
         db, actor = dbc()
-        filters = {
-            "project_id": project_id, "requirement_id": requirement_id,
-            "assignee_id": assignee_id, "status": status,
-        }
-        cursor, limit = _paged(filters, cursor, limit)
+        cursor, limit = _paged({}, cursor, limit)
         return task_svc.list_tasks(
             db, actor, uuid.UUID(project_id), _req_id(requirement_id),
-            _req_id(assignee_id), status, cursor, limit,
+            _req_id(assignee_id), _split_statuses(status), cursor, limit,
+            updated_within_days=updated_within_days, keyword=keyword,
         )
 
     @mcp.tool(name="tasks.update")

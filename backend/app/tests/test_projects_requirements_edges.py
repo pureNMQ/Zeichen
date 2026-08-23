@@ -26,7 +26,12 @@ class TestRequirementEdges:
         req_svc.create_requirement(db, world["admin"], world["project"].id, "待办需求")
         doing = req_svc.create_requirement(db, world["admin"], world["project"].id, "进行中需求")
         req_svc.set_requirement_status(db, world["admin"], doing.id, "in_progress")
-        page = req_svc.list_requirements(db, world["member"], world["project"].id, "in_progress", None, 20)
+        # 新签名(T1):status 多值(list[str] | None),新增 updated_within_days/keyword
+        page = req_svc.list_requirements(
+            db=db, user=world["member"], project_id=world["project"].id,
+            status=["in_progress"], cursor=None, limit=20,
+            updated_within_days=None, keyword=None,
+        )
         assert [i["title"] for i in page["items"]] == ["进行中需求"]
 
     def test_restore_missing_or_alive(self, db: Session, world: dict):

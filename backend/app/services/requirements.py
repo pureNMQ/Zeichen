@@ -7,8 +7,9 @@
 """
 
 import uuid
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from ..errors import conflict, invalid_request, not_found
@@ -72,21 +73,49 @@ def list_requirements(
     db: Session,
     user: User,
     project_id: uuid.UUID,
-    status: str | None,
+    status: str | list[str] | None,
     cursor: str | None,
     limit: int,
+    updated_within_days: int | str | None = None,
+    keyword: str | None = None,
 ) -> dict:
+    """需求列表:多值状态 / updated_within_days 时间窗口 / keyword 标题或描述包含。
+
+    筛选在 offset/limit 分页前执行;排序 updated_at DESC, id DESC(稳定次序)。
+    cursor 条件哈希纳入全部筛选维度(status 列表排序后入哈希),跨条件复用游标
+    → invalid_request。
+    """
     get_accessible_project(db, user.id, project_id, min_level="viewer")
-    filters = {"project_id": str(project_id), "status": status}
+    statuses = _normalize_statuses(status)
+    days = _normalize_updated_within_days(updated_within_days)
+    keyword = _normalize_keyword(keyword)
+    filters = {
+        "project_id": str(project_id),
+        "statuses": statuses,
+        "updated_within_days": days,
+        "keyword": keyword,
+    }
     from .pagination import decode_cursor
 
     offset = decode_cursor(filters, cursor)
     stmt = select(Requirement).where(
         Requirement.project_id == project_id, Requirement.deleted_at.is_(None)
     )
-    if status:
-        stmt = stmt.where(Requirement.status == status)
-    rows = db.scalars(stmt.order_by(Requirement.created_at).offset(offset).limit(limit)).all()
+    if statuses:
+        stmt = stmt.where(Requirement.status.in_(statuses))
+    if days is not None:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        stmt = stmt.where(Requirement.updated_at >= cutoff)
+    if keyword:
+        like = f"%{keyword}%"
+        stmt = stmt.where(
+            or_(Requirement.title.ilike(like), Requirement.description.ilike(like))
+        )
+    rows = db.scalars(
+        stmt.order_by(Requirement.updated_at.desc(), Requirement.id.desc())
+        .offset(offset)
+        .limit(limit)
+    ).all()
     items = [_requirement_dict(db, r) for r in rows]
     return page_result(items, offset, limit, filters)
 
@@ -178,6 +207,47 @@ def _get_editable(db: Session, actor: User, requirement_id: uuid.UUID) -> Requir
         raise not_found("需求不存在")
     require_project_role(db, actor.id, requirement.project_id, min_level="editor")
     return requirement
+
+
+def _normalize_statuses(status: str | list[str] | None) -> list[str] | None:
+    """status 多值归一化:str → [str];list 保序去空;None/空 → None(不过滤)。"""
+    if status is None:
+        return None
+    if isinstance(status, str):
+        statuses = [status]
+    else:
+        statuses = list(status)
+    cleaned = [s.strip() for s in statuses if isinstance(s, str) and s.strip()]
+    cleaned.sort()  # 条件哈希稳定:同条件顺序互换复用游标
+    return cleaned or None
+
+
+def _normalize_updated_within_days(value: int | str | None) -> int | None:
+    """updated_within_days 校验:None → None;整数/数字字符串 ≥1 → int;其余 → invalid_request。"""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise invalid_request("updated_within_days 必须是 ≥1 的整数")
+    if isinstance(value, int):
+        days = value
+    elif isinstance(value, str):
+        text = value.strip()
+        if not text.isdigit():
+            raise invalid_request("updated_within_days 必须是 ≥1 的整数")
+        days = int(text)
+    else:
+        raise invalid_request("updated_within_days 必须是 ≥1 的整数")
+    if days < 1:
+        raise invalid_request("updated_within_days 必须是 ≥1 的整数")
+    return days
+
+
+def _normalize_keyword(keyword: str | None) -> str | None:
+    """keyword:strip,空 → None(不过滤)。"""
+    if keyword is None:
+        return None
+    text = str(keyword).strip()
+    return text or None
 
 
 def _now():
