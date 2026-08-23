@@ -1,0 +1,34 @@
+# 贼船 Zeichen — 服务器端开发热更新 override(叠加在根 compose 之上)。
+#
+# 用途:在服务器上直接改代码、秒级生效,无需每次打包同步:
+#   * api / mcp:挂载 backend 源码 + uvicorn --reload,改 Python 代码即重载
+#   * worker:挂载源码(无 reload,改代码后 `docker compose restart worker`)
+#   * web:开发态不用本镜像,直接在服务器跑 vite dev(HMR),见下方用法
+#   * postgres / cognee:保持现有生产实例(同库热更新,注意误操作风险)
+#
+# 用法(仓库根目录,依赖 .env 已配好):
+#   docker compose -f docker-compose.yml -f deploy/docker-compose.ip.yml -f deploy/docker-compose.dev.yml up -d
+#   cd frontend && npm run dev -- --host 0.0.0.0   # 前端 HMR,http://<IP>:5173
+#
+# 新增 Python 依赖(backend/pyproject.toml 变更)时需重新构建镜像:
+#   docker compose -f docker-compose.yml -f deploy/docker-compose.ip.yml -f deploy/docker-compose.dev.yml up -d --build api mcp worker
+name: zeichen
+
+services:
+  api:
+    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"]
+    volumes:
+      - ./backend/app:/srv/zeichen/app
+      - ./backend/alembic:/srv/zeichen/alembic
+      - ./backend/alembic.ini:/srv/zeichen/alembic.ini
+      - attachments:/srv/zeichen/storage/attachments
+
+  mcp:
+    command: ["uvicorn", "app.mcp_server.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    volumes:
+      - ./backend/app:/srv/zeichen/app
+      - attachments:/srv/zeichen/storage/attachments
+
+  worker:
+    volumes:
+      - ./backend/app:/srv/zeichen/app
