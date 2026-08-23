@@ -170,6 +170,21 @@ class DocumentUpdate(BaseModel):
     metadata: dict | None = None
 
 
+class FilterViewCreate(BaseModel):
+    """字段类型宽松,校验放 service(保证 400 而非 422)。"""
+
+    entity_type: str | None = None
+    name: str | None = None
+    criteria: dict | None = None
+
+
+class FilterViewUpdate(BaseModel):
+    """PATCH:name/criteria 可只传其一;model_fields_set 区分未传与传 null。"""
+
+    name: str | None = None
+    criteria: dict | None = None
+
+
 class RepositoryCreate(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     vcs_type: Literal["git", "svn", "other"]

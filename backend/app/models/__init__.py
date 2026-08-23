@@ -11,6 +11,7 @@ from .memory_improve_job import MemoryImproveJob
 from .cognee_configuration import CogneeConfiguration
 from .cognee_restart_job import CogneeRestartJob
 from .notification import Notification
+from .filter_view import ProjectFilterView
 
 __all__ = [
     "Base",
@@ -37,4 +38,5 @@ __all__ = [
     "CogneeConfiguration",
     "CogneeRestartJob",
     "Notification",
+    "ProjectFilterView",
 ]

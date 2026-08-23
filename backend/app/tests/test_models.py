@@ -195,3 +195,47 @@ def test_memory_grant_rejects_self_viewer_target(session: Session, world: tuple[
     session.add(MemoryGrant(grantor_id=alice.id, viewer_agent_id=bob.id, target_agent_id=bob.id))
     with pytest.raises(IntegrityError):
         session.commit()
+
+
+def test_project_filter_view_roundtrip_and_json_criteria(
+    session: Session, world: tuple[User, Team, Project]
+) -> None:
+    """project_filter_view:表名契约、JSON criteria 往返、无软删/created_by。"""
+    from app.models import ProjectFilterView
+
+    u, _, p = world
+    criteria = {"statuses": ["pending", "backlog"], "keyword": "搜索", "view_mode": "board"}
+    view = ProjectFilterView(
+        project_id=p.id,
+        user_id=u.id,
+        entity_type="requirement",
+        name="全部需求",
+        criteria=criteria,
+    )
+    session.add(view)
+    session.commit()
+    assert ProjectFilterView.__tablename__ == "project_filter_view"
+    assert view.id is not None
+    assert view.criteria == criteria
+    # 契约:物理删除(无 deleted_at)、无 created_by
+    assert not hasattr(view, "deleted_at")
+    assert not hasattr(view, "created_by")
+
+
+def test_project_filter_view_unique_constraint(
+    session: Session, world: tuple[User, Team, Project]
+) -> None:
+    """唯一约束 (project_id, user_id, entity_type, name) 生效。"""
+    from app.models import ProjectFilterView
+
+    u, _, p = world
+    session.add(
+        ProjectFilterView(project_id=p.id, user_id=u.id, entity_type="task", name="同名", criteria={})
+    )
+    session.commit()
+    session.add(
+        ProjectFilterView(project_id=p.id, user_id=u.id, entity_type="task", name="同名", criteria={})
+    )
+    with pytest.raises(IntegrityError):
+        session.commit()
+    session.rollback()
