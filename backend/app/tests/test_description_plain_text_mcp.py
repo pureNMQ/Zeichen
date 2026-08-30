@@ -1,0 +1,91 @@
+"""REQ-2 红灯:MCP 与 Web API 描述纯文本语义一致。
+
+MCP 的 requirements.* / tasks.* 无独立校验路径,与 HTTP 同走
+service 层 normalize_short_description;本文件经真实 MCP 服务验证:
+Markdown 规范化、HTML/图片拒绝、长度上限,以及存量 Markdown 描述
+读取原样返回、更新时才应用新规则。
+"""
+
+import uuid
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session as SASession
+
+from app.models import Requirement as ReqModel
+from app.tests.test_mcp_e2e import RawMcpClient, mcp_server  # noqa: F401
+
+
+def _client(mcp_server: dict) -> RawMcpClient:
+    client = RawMcpClient(mcp_server["url"], mcp_server["token"])
+    client.initialize()
+    return client
+
+
+def test_mcp_requirement_description_plain_text_semantics(mcp_server: dict):
+    client = _client(mcp_server)
+    pid = mcp_server["project_id"]
+
+    req = client.call(
+        "requirements.create", project_id=pid, title="MCP 纯文本",
+        description="**扫码** 或 [密码](https://example.com/doc) 登录",
+    )
+    assert req["description"] == "扫码 或 密码 登录"
+
+    updated = client.call("requirements.update", id=req["id"], description="`pytest` **回归**")
+    assert updated["description"] == "pytest 回归"
+
+    html = client.call(
+        "requirements.create", project_id=pid, title="MCP 富文本", description="<div>富文本</div>"
+    )
+    assert "invalid_request" in html["error"]
+    image = client.call(
+        "requirements.create", project_id=pid, title="MCP 图片",
+        description="界面 ![截图](https://example.com/a.png) 如下",
+    )
+    assert "invalid_request" in image["error"]
+
+    over_limit = client.call(
+        "requirements.create", project_id=pid, title="MCP 超长", description="a" * 513
+    )
+    assert "invalid_request" in over_limit["error"]
+
+
+def test_mcp_task_description_plain_text_semantics(mcp_server: dict):
+    client = _client(mcp_server)
+    pid = mcp_server["project_id"]
+
+    t = client.call("tasks.create", project_id=pid, title="MCP 任务", description="**红线** 用例")
+    assert t["description"] == "红线 用例"
+
+    html = client.call("tasks.update", id=t["id"], description="<b>加粗</b>")
+    assert "invalid_request" in html["error"]
+
+
+def test_mcp_legacy_markdown_description_read_unaffected_and_normalized_on_update(mcp_server: dict):
+    client = _client(mcp_server)
+    pid = uuid.UUID(mcp_server["project_id"])
+    legacy = "# 存量标题\n- 列表 **加粗**"
+
+    db_path = mcp_server["log_file"].parent / "e2e.db"
+    engine = create_engine(f"sqlite:///{db_path.as_posix()}", connect_args={"timeout": 10})
+    with SASession(engine) as s:
+        row = ReqModel(
+            project_id=pid, title="存量需求", description=legacy,
+            status="backlog", created_by=uuid.UUID(mcp_server["agent_id"]),
+        )
+        s.add(row)
+        s.commit()
+        rid = str(row.id)
+    engine.dispose()
+
+    # 存量 Markdown 读取原样返回(不迁移、不丢数据)
+    got = client.call("requirements.get", id=rid)
+    assert got["description"] == legacy
+    # 仅更新标题:描述不动
+    kept = client.call("requirements.update", id=rid, title="只改标题")
+    assert kept["description"] == legacy
+    # 更新描述:应用新规则
+    applied = client.call("requirements.update", id=rid, description="[新](https://example.com/new) **描述**")
+    assert applied["description"] == "新 描述"
+
+    assert client.call("requirements.delete", id=rid, confirm_task_count=0)["deleted"] is True
