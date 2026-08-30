@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronRight, ExternalLink, Sparkles, Trash2 } from 'lucide-react'
+import { ChevronRight, ExternalLink, Loader2, Sparkles, Trash2 } from 'lucide-react'
 import { Link, NavLink, Navigate } from 'react-router-dom'
 
 import { Badge } from '@/components/ui/badge'
@@ -110,9 +110,12 @@ function DetailDialog({ open, onOpenChange, title, description, children }: {
 
 function LongTermMemories({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient()
+  const { notify } = useNotification()
   const [source, setSource] = useState('all')
   const [selected, setSelected] = useState<MemoryItem | null>(null)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [clearOpen, setClearOpen] = useState(false)
+  const [isClearing, setIsClearing] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const memoryQuery = useQuery({
     queryKey: ['memory', projectId],
@@ -143,17 +146,38 @@ function LongTermMemories({ projectId }: { projectId: string }) {
     }
   }
 
+  async function clearAll() {
+    setActionError(null)
+    setIsClearing(true)
+    try {
+      await api.delete(`/projects/${projectId}/memory?confirmed=true`)
+      setClearOpen(false)
+      await queryClient.invalidateQueries({ queryKey: ['memory', projectId] })
+      notify('已清空当前项目的全部共享记忆。', 'success')
+    } catch (error) {
+      setClearOpen(false)
+      setActionError(error instanceof ApiError ? error.message : '清空记忆失败')
+    } finally {
+      setIsClearing(false)
+    }
+  }
+
   return (
     <section className="space-y-4">
-      <div className="max-w-sm space-y-1.5">
-        <Label htmlFor="memory-source">来源</Label>
-        <Select value={source} onValueChange={setSource}>
-          <SelectTrigger id="memory-source"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">全部来源</SelectItem>
-            {sources.map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>)}
-          </SelectContent>
-        </Select>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="max-w-sm space-y-1.5">
+          <Label htmlFor="memory-source">来源</Label>
+          <Select value={source} onValueChange={setSource}>
+            <SelectTrigger id="memory-source"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部来源</SelectItem>
+              {sources.map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        <Button variant="destructive" onClick={() => setClearOpen(true)}>
+          <Trash2 className="mr-1 h-3.5 w-3.5" />清空记忆
+        </Button>
       </div>
       <ErrorNotification message={memoryQuery.error ? (memoryQuery.error as Error).message : null} />
       <ErrorNotification message={actionError} />
@@ -187,6 +211,20 @@ function LongTermMemories({ projectId }: { projectId: string }) {
         <DialogContent>
           <DialogHeader><DialogTitle>删除这条记忆？</DialogTitle><DialogDescription>此操作不可恢复，确定后将从项目共享记忆中永久移除。</DialogDescription></DialogHeader>
           <DialogFooter><Button variant="outline" onClick={() => setDeleteOpen(false)}>取消</Button><Button variant="destructive" onClick={() => void forget()}>确认删除</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={clearOpen} onOpenChange={setClearOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>清空全部共享记忆？</DialogTitle>
+            <DialogDescription>将删除当前项目的全部共享记忆（长期记忆与所有会话蒸馏数据），此操作不可恢复。</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setClearOpen(false)}>取消</Button>
+            <Button variant="destructive" onClick={() => void clearAll()} disabled={isClearing}>
+              {isClearing ? <><Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />清空中…</> : '清空'}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </section>

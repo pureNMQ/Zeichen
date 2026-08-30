@@ -1,11 +1,12 @@
-import { useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMemo, useState } from 'react'
+import { useInfiniteQuery } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Loader2, Search } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { ErrorNotification } from '@/components/ui/notification'
-import { api, type SearchItem } from '@/lib/api'
+import { api, type SearchDomain, type SearchItem } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
 const DOMAIN_LABEL: Record<SearchItem['domain'], string> = {
@@ -15,12 +16,29 @@ const DOMAIN_LABEL: Record<SearchItem['domain'], string> = {
   memory: '记忆',
 }
 
+const DOMAIN_TABS: { value: 'all' | SearchDomain; label: string }[] = [
+  { value: 'all', label: '全部' },
+  { value: 'requirement', label: '需求' },
+  { value: 'task', label: '任务' },
+  { value: 'document', label: '文档' },
+  { value: 'memory', label: '记忆' },
+]
+
 const STATUS_LABEL: Record<string, string> = {
   backlog: '待办',
   in_progress: '实现中',
   verifying: '验收中',
   done: '已完成',
   cancelled: '已取消',
+}
+
+type DomainFilter = 'all' | SearchDomain
+
+function searchUrl(query: string, domain: DomainFilter, cursor?: string) {
+  const params = new URLSearchParams({ q: query })
+  if (domain !== 'all') params.set('domain', domain)
+  if (cursor) params.set('cursor', cursor)
+  return `/search?${params.toString()}`
 }
 
 function hrefOf(item: SearchItem): string {
@@ -39,22 +57,27 @@ function hrefOf(item: SearchItem): string {
 export function SearchPage() {
   const [params] = useSearchParams()
   const query = params.get('q') ?? ''
+  const [domain, setDomain] = useState<DomainFilter>('all')
 
-  const { data, isLoading, isError, error } = useQuery({
-    queryKey: ['search', query],
-    queryFn: () => api.get<{ items: SearchItem[] }>(`/search?q=${encodeURIComponent(query)}`),
+  const { data, isLoading, isError, error, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteQuery({
+    queryKey: ['search', query, domain],
+    queryFn: ({ pageParam }) =>
+      api.get<{ items: SearchItem[]; next_cursor: string | null }>(searchUrl(query, domain, pageParam)),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
     enabled: query.trim().length > 0,
   })
 
+  const items = useMemo(() => data?.pages.flatMap((page) => page.items) ?? [], [data])
   const grouped = useMemo(() => {
     const groups: { domain: SearchItem['domain']; items: SearchItem[] }[] = []
     const order: SearchItem['domain'][] = ['requirement', 'task', 'document', 'memory']
-    for (const domain of order) {
-      const items = (data?.items ?? []).filter((item) => item.domain === domain)
-      if (items.length > 0) groups.push({ domain, items })
+    for (const group of order) {
+      const groupItems = items.filter((item) => item.domain === group)
+      if (groupItems.length > 0) groups.push({ domain: group, items: groupItems })
     }
     return groups
-  }, [data])
+  }, [items])
 
   const errorMessage = isError && error instanceof Error ? error.message : null
 
@@ -66,13 +89,34 @@ export function SearchPage() {
           {query.trim() ? <>关键词：{query}</> : '输入关键词跨项目搜索'}
         </p>
       </div>
+      {query.trim() && (
+        <div role="tablist" aria-label="结果域过滤" className="flex gap-1 border-b">
+          {DOMAIN_TABS.map((tab) => (
+            <button
+              key={tab.value}
+              type="button"
+              role="tab"
+              aria-selected={domain === tab.value}
+              onClick={() => setDomain(tab.value)}
+              className={cn(
+                'border-b-2 px-3 pb-2 pt-1 text-sm font-medium transition-colors',
+                domain === tab.value
+                  ? 'border-primary text-foreground'
+                  : 'border-transparent text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      )}
       <ErrorNotification message={errorMessage} />
       {query.trim() && isLoading && (
         <div className="flex items-center justify-center gap-2 py-12 text-muted-foreground">
           <Loader2 className="h-5 w-5 animate-spin" /> 搜索中…
         </div>
       )}
-      {query.trim() && !isLoading && grouped.length === 0 && (
+      {query.trim() && !isLoading && items.length === 0 && (
         <Card>
           <CardContent className="flex flex-col items-center gap-2 py-12 text-muted-foreground">
             <Search className="h-8 w-8" />
@@ -118,6 +162,14 @@ export function SearchPage() {
           </div>
         </section>
       ))}
+      {query.trim() && hasNextPage && (
+        <div className="flex justify-center pt-2">
+          <Button type="button" variant="outline" disabled={isFetchingNextPage} onClick={() => void fetchNextPage()}>
+            {isFetchingNextPage && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
+            {isFetchingNextPage ? '加载中…' : '加载更多'}
+          </Button>
+        </div>
+      )}
     </div>
   )
 }
