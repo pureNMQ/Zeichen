@@ -89,6 +89,13 @@ class Settings(BaseSettings):
     attachment_max_file_bytes: int = 20 * 1024 * 1024
     attachment_project_quota_bytes: int = 2 * 1024 * 1024 * 1024
 
+    # 软删实体物理清理定时任务(REQ-3 / 规格书 §2.1 / §8.2):
+    # 软删满 retention_days 天的实体由定时任务物理清理(恰好满期即清,<= 判定);
+    # 清理循环按 interval_seconds 周期执行(默认 24h)。env:PHYSICAL_PURGE_RETENTION_DAYS
+    # / PHYSICAL_PURGE_INTERVAL_SECONDS。
+    physical_purge_retention_days: int = 90
+    physical_purge_interval_seconds: float = 24 * 60 * 60
+
     @property
     def mcp_allowed_host_patterns(self) -> list[str]:
         """Return the non-empty comma-separated MCP Host allowlist entries."""

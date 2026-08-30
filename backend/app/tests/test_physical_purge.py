@@ -420,6 +420,9 @@ def test_live_entities_never_purged(db, world, now):
         author_id=admin.id,
         body="活跃评论",
     )
+    # 先落 t/d:ref.from_id 需要任务真实主键(客户端默认主键 flush 时才生成)
+    db.add_all([t, d, c])
+    db.flush()
     ref = Reference(
         project_id=project.id,
         from_type="task",
@@ -445,7 +448,7 @@ def test_live_entities_never_purged(db, world, now):
         storage_path="seeded/live.bin",
         created_by=admin.id,
     )
-    db.add_all([t, d, c, ref, repo, att])
+    db.add_all([ref, repo, att])
     # 刚软删(0 天)的实体:保留期取极端值 0 时应被清理,证明清理逻辑真实生效
     dead = Requirement(
         project_id=project.id, title="刚软删需求", status="backlog", deleted_at=now
