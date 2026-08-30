@@ -2,7 +2,7 @@
 
 - 关键词部分:业务实体(需求/任务/文档)SQL LIKE 检索,跨用户有权限的全部项目
 - 语义部分:记忆域经 cognee recall 检索,同样限定在有权限的项目内
-- Web 与 MCP 共用同一后端,结果按域分组
+- Web 与 MCP 共用同一后端,结果按域分组合并后走 cursor 分页(services/pagination.py 规范)
 """
 
 import uuid
@@ -10,6 +10,7 @@ import uuid
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from ..errors import invalid_request
 from ..models import (
     Document,
     Project,
@@ -20,9 +21,8 @@ from ..models import (
     User,
     WorkspaceMember,
 )
+from .pagination import MAX_PAGE_SIZE, decode_cursor_page, page_result
 from .permissions import get_team, is_admin
-
-MAX_RESULTS_PER_DOMAIN = 20
 
 
 def _accessible_project_ids(db: Session, user: User) -> list[uuid.UUID]:
@@ -72,8 +72,7 @@ def search_requirements(db: Session, project_ids: list[uuid.UUID], query: str) -
                 Requirement.description.ilike(f"%{needle}%"),
             ),
         )
-        .order_by(Requirement.updated_at.desc())
-        .limit(MAX_RESULTS_PER_DOMAIN)
+        .order_by(Requirement.updated_at.desc(), Requirement.id)
     ).all()
     return [
         {
@@ -101,8 +100,7 @@ def search_tasks(db: Session, project_ids: list[uuid.UUID], query: str) -> list[
                 Task.description.ilike(f"%{needle}%"),
             ),
         )
-        .order_by(Task.updated_at.desc())
-        .limit(MAX_RESULTS_PER_DOMAIN)
+        .order_by(Task.updated_at.desc(), Task.id)
     ).all()
     return [
         {
@@ -130,8 +128,7 @@ def search_documents(db: Session, project_ids: list[uuid.UUID], query: str) -> l
                 Document.content.ilike(f"%{needle}%"),
             ),
         )
-        .order_by(Document.updated_at.desc())
-        .limit(MAX_RESULTS_PER_DOMAIN)
+        .order_by(Document.updated_at.desc(), Document.id)
     ).all()
     return [
         {
@@ -149,7 +146,10 @@ def search_documents(db: Session, project_ids: list[uuid.UUID], query: str) -> l
 def search_memory(
     db: Session, project_ids: list[uuid.UUID], query: str, client=None
 ) -> list[dict]:
-    """语义检索:对每个有权限项目的 Dataset 调用 cognee recall,汇总相关片段。"""
+    """语义检索:对每个有权限项目的 Dataset 调用 cognee recall,汇总相关片段。
+
+    每个项目最多取 recall 前 3 条(相关性截取);跨项目按 project_id 排序保证分页顺序稳定。
+    """
     if not project_ids or not query.strip():
         return []
     from .cognee import CogneeClient
@@ -157,7 +157,7 @@ def search_memory(
 
     client = client or CogneeClient()
     results: list[dict] = []
-    for project_id in project_ids:
+    for project_id in sorted(project_ids):
         try:
             dataset = _dataset(db, project_id, client, create=False)
         except Exception:
@@ -176,8 +176,6 @@ def search_memory(
                     "summary": text,
                 }
             )
-        if len(results) >= MAX_RESULTS_PER_DOMAIN:
-            break
     return results
 
 
@@ -197,19 +195,32 @@ def _extract_recall_text(payload) -> list[str]:
     return parts
 
 
+def _cursor_filters(query: str, domains: list[str] | None) -> dict:
+    """游标条件哈希绑定查询词与域过滤集合。"""
+    return {"q": query, "domains": sorted(set(domains)) if domains else None}
+
+
 def search(
     db: Session,
     user: User,
     query: str,
     domains: list[str] | None = None,
+    cursor: str | None = None,
+    limit: int | None = None,
     client=None,
 ) -> dict:
-    """跨域搜索,返回按域分组的 {items}。domains 为 None 表示全部分组。"""
+    """跨域搜索,返回 {items, next_cursor}(cursor 分页,见 services/pagination.py)。
+
+    domains 为 None 表示全部域;默认页大小 DEFAULT_PAGE_SIZE,limit 可在 1..MAX_PAGE_SIZE 内调整。
+    """
     project_ids = _accessible_project_ids(db, user)
-    names = _project_names(db, project_ids)
     query = query.strip()
-    if not query:
+    if not project_ids or not query:
         return {"items": []}
+    if limit is not None and (limit < 1 or limit > MAX_PAGE_SIZE):
+        raise invalid_request("limit 必须在 1..100 之间")
+    filters = _cursor_filters(query, domains)
+    offset, page_size = decode_cursor_page(filters, cursor, limit)
     requested = set(domains) if domains else None
 
     items: list[dict] = []
@@ -222,6 +233,9 @@ def search(
     if requested is None or "memory" in requested:
         items.extend(search_memory(db, project_ids, query, client))
 
-    for item in items:
-        item["project_name"] = names.get(uuid.UUID(item["project_id"]), "")
-    return {"items": items}
+    if items:
+        names = _project_names(db, project_ids)
+        for item in items:
+            item["project_name"] = names.get(uuid.UUID(item["project_id"]), "")
+    page = items[offset : offset + page_size]
+    return page_result(page, offset, page_size, filters)

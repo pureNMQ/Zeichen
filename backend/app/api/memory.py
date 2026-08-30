@@ -50,6 +50,22 @@ def get_session_detail(session_id: str, project_id: uuid.UUID, user: User = Depe
     return memory_service.get_session_detail(db, user, project_id, session_id)
 
 
+def _parse_confirmed(value: str | None) -> bool:
+    return value is not None and value.strip().lower() == "true"
+
+
+@router.delete("")
+def clear_memory(
+    project_id: uuid.UUID,
+    confirmed: str | None = Query(default=None),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """清空当前项目全部共享记忆(仅人类、需 confirmed=true,缺失/未确认 → invalid_request)。"""
+    memory_service.clear(db, user, project_id, _parse_confirmed(confirmed))
+    return {"status": "cleared"}
+
+
 @router.delete("/{data_id}")
 def forget(data_id: str, project_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
     return {"result": memory_service.forget(db, user, project_id, data_id)}

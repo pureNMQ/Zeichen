@@ -128,7 +128,8 @@ class TestMemorySearch:
         assert svc._extract_recall_text("plain string") == []
         assert svc._extract_recall_text(None) == []
 
-    def test_memory_domain_caps_at_max_results(self, db: Session, world: dict, monkeypatch):
+    def test_memory_domain_no_global_hard_cap(self, db: Session, world: dict, monkeypatch):
+        """REQ-4 移除各域 20 条硬上限后:8 项目 × 每项目 recall 前 3 条 = 24 条全量返回。"""
         from app.models import MemoryDataset, ProjectMember
         from app.services import cognee as cognee_module
         from app.services import memory as memory_svc
@@ -149,8 +150,9 @@ class TestMemorySearch:
             db.add(ProjectMember(project_id=other.id, user_id=world["member"].id, role="viewer"))
             db.add(MemoryDataset(project_id=other.id, cognee_dataset_id=f"ds-{other.id}"))
             db.commit()
-        result = svc.search(db, world["member"], "登录", domains=["memory"])
-        assert len(result["items"]) >= svc.MAX_RESULTS_PER_DOMAIN
+        result = svc.search(db, world["member"], "登录", domains=["memory"], limit=100)
+        assert len(result["items"]) == 24
+        assert result["next_cursor"] is None
 
 
 class TestEmptyScopeAndEdgeGuards:

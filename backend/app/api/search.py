@@ -15,6 +15,8 @@ router = APIRouter(prefix="/api/search", tags=["search"])
 def search(
     q: str = Query(min_length=1, max_length=200),
     domain: list[str] | None = Query(default=None),
+    limit: int | None = Query(default=None, ge=1, le=100),
+    cursor: str | None = Query(default=None),
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -22,4 +24,4 @@ def search(
     domains = None
     if domain:
         domains = [d for d in domain if d in valid]
-    return service.search(db, user, q, domains)
+    return service.search(db, user, q, domains, cursor=cursor, limit=limit)
