@@ -23,6 +23,12 @@ dist/
 .dsh/
 !deploy/.env.prod.example
 
+# 环境专属 compose override(含公网 IP,勿提交开源仓库)
+/deploy/docker-compose.ip.yml
+
+# ZCode local tooling(workspace skills 符号链接指向 Skills/,勿提交)
+/.zcode/
+
 # Cognee
 .cognee_data/
 .cognee_system/
