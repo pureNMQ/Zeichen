@@ -1,10 +1,11 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { ChevronDown, LogOut, KeyRound, Search, UserRound } from 'lucide-react'
+import { ChevronDown, LogOut, KeyRound, Search, UserRound, Sun, Moon } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { useCurrentProject } from '@/lib/current-project'
 import { useDocumentNavigation } from '@/lib/document-navigation'
+import { useTheme } from '@/lib/theme'
 import { Button } from '@/components/ui/button'
 import { UserAvatar } from '@/components/user-avatar'
 import { identityName } from '@/lib/user-identity'
@@ -239,6 +240,24 @@ function ChangePasswordDialog({ open, onOpenChange }: { open: boolean; onOpenCha
   )
 }
 
+function ThemeToggleButton() {
+  const { theme, toggleTheme } = useTheme()
+
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon-sm"
+      className="shrink-0"
+      aria-label="切换主题"
+      title={`切换主题(当前${theme === 'dark' ? '暗色' : '浅色'})`}
+      onClick={toggleTheme}
+    >
+      {theme === 'dark' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+    </Button>
+  )
+}
+
 function GlobalSearchBox() {
   const [query, setQuery] = useState('')
   const navigate = useNavigate()
@@ -328,6 +347,7 @@ export function AppShell() {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          <ThemeToggleButton />
           <NotificationBell />
         </div>
       </aside>

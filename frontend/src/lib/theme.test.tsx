@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
+
+// jsdom 环境的全局 URL 无法以 file: 为基准解析相对路径,改用 cwd 定位(dark-palette.test.ts 同模式)
+const FRONTEND_ROOT = existsSync(resolve(process.cwd(), 'src', 'index.css'))
+  ? process.cwd()
+  : join(process.cwd(), 'frontend')
 
 // 契约(REQ-6 明暗主题):
 // - ThemeProvider / useTheme 位于 @/lib/theme(与 lib/auth、lib/current-project 同层)
@@ -87,7 +93,7 @@ describe('ThemeProvider 默认与切换', () => {
 
 describe('首帧无闪烁', () => {
   it('index.html 在 <head> 内联主题初始化脚本:读取持久化键并应用 dark 类', () => {
-    const html = readFileSync(new URL('../../index.html', import.meta.url), 'utf-8')
+    const html = readFileSync(join(FRONTEND_ROOT, 'index.html'), 'utf-8')
     const head = html.slice(0, html.indexOf('</head>'))
     const inlineScripts = [...head.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map(
       (m) => m[1],
@@ -99,7 +105,7 @@ describe('首帧无闪烁', () => {
   })
 
   it('应用根部挂载 ThemeProvider:main.tsx 接入', () => {
-    const main = readFileSync(new URL('../main.tsx', import.meta.url), 'utf-8')
+    const main = readFileSync(join(FRONTEND_ROOT, 'src', 'main.tsx'), 'utf-8')
     expect(main).toContain('ThemeProvider')
   })
 })

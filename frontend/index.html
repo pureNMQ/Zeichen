@@ -5,6 +5,16 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>贼船 Zeichen</title>
+    <script>
+      // 首帧防闪烁:在样式渲染前应用持久化的主题(默认浅色,不做跟随系统)
+      ;(function () {
+        try {
+          if (localStorage.getItem('zeichen.theme') === 'dark') {
+            document.documentElement.classList.add('dark')
+          }
+        } catch (e) {}
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>
