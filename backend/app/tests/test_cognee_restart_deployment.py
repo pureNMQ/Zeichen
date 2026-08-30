@@ -14,8 +14,11 @@ start-all.ps1;docker-compose.yml(所有部署形态的公共基底)没有任何�
 import re
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 COMPOSE_FILE = REPO_ROOT / "docker-compose.yml"
+PROD_OVERRIDE_FILE = REPO_ROOT / "deploy" / "docker-compose.prod.yml"
 
 RESTART_WORKER_MODULE = "app.workers.cognee_restart"
 DOCKER_SOCK = "/var/run/docker.sock"
@@ -120,3 +123,48 @@ def test_deployment_contract_requires_both_worker_and_channel():
         "worker 与 docker.sock 通道必须同时落在重启 worker 服务上;当前:"
         f"worker={sorted(workers)},sock={sorted(sock_services)}"
     )
+
+
+# 部署缺陷(2026-08-30):通道 argv 只用根 docker-compose.yml 重建 cognee,生产
+# 多文件 compose 组合(根 + prod + 环境专属覆盖层)下,prod 覆盖层注入的 cognee
+# 安全加固(REQUIRE_AUTHENTICATION 等)在重建后丢失。生产重建必须与运行栈一致。
+COMPOSE_FILES_SETTING = "COGNEE_COMPOSE_FILES"
+PROD_REQUIRED_COMPOSE_FILES = ("docker-compose.yml", "deploy/docker-compose.prod.yml")
+
+
+def _injected_compose_files_value(block: str) -> str:
+    """提取 restart-worker 块内 COGNEE_COMPOSE_FILES 的原始值(兼容冒号/等号两种 env 写法)。"""
+    match = re.search(
+        rf"^\s*(?:-\s*)?{COMPOSE_FILES_SETTING}\s*[:=]\s*(.+?)\s*(?:#.*)?$",
+        block,
+        re.M,
+    )
+    return match.group(1).strip() if match else ""
+
+
+def _resolved_default(value: str) -> str:
+    """兼容 ${VAR:-default} 注入形式:取默认段;纯字面值原样返回。"""
+    wrapper = re.fullmatch(r"\$\{[^}]*:-(.*)\}", value)
+    return wrapper.group(1) if wrapper else value
+
+
+def test_prod_override_injects_compose_file_list_for_restart_worker():
+    """生产覆盖层必须为 restart-worker 注入 compose 文件列表,保证重建与运行栈一致。"""
+    if not PROD_OVERRIDE_FILE.exists():
+        pytest.fail(
+            f"缺少生产 compose 覆盖层 {PROD_OVERRIDE_FILE.relative_to(REPO_ROOT)}"
+        )
+    services = _service_blocks(PROD_OVERRIDE_FILE)
+    assert "restart-worker" in services, "生产覆盖层缺少 restart-worker 服务块"
+    raw = _injected_compose_files_value(services["restart-worker"])
+    assert raw, (
+        f"生产覆盖层未为 restart-worker 注入 {COMPOSE_FILES_SETTING}:"
+        "重建将退回仅根 docker-compose.yml,prod 覆盖层的 cognee 安全加固丢失"
+    )
+    resolved = _resolved_default(raw)
+    for required in PROD_REQUIRED_COMPOSE_FILES:
+        assert required in resolved, (
+            f"{COMPOSE_FILES_SETTING} 解析默认值必须含 {required}"
+            f"(根文件与生产覆盖层),实际:{resolved};"
+            "环境专属覆盖层允许经部署 env 覆盖追加"
+        )
