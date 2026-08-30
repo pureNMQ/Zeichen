@@ -140,33 +140,55 @@ def _write_runtime_environment(configuration: CogneeConfiguration) -> None:
         pass
 
 
+class DockerComposeRestartChannel:
+    """Minimal-privilege docker.sock execution channel.
+
+    It exposes exactly one operation: recreating the fixed ``cognee`` service
+    with a server-owned, constant ``docker compose`` argv.  It never accepts a
+    command, service, or path from clients, never runs another docker
+    subcommand, and never interpolates a shell.
+    """
+
+    def recreate_cognee(self, *, runtime_env_file: Path, project_dir: Path) -> None:
+        settings = get_settings()
+        # A recreate is required: Docker restart does not pick up changed
+        # container environment variables.  Every argument is server-owned and
+        # constant; the runtime env file and project directory come from the
+        # caller (the worker passes deployment settings), never from a request.
+        completed = subprocess.run(
+            [
+                settings.cognee_compose_executable,
+                "compose",
+                "--env-file",
+                ".env",
+                "--env-file",
+                str(runtime_env_file),
+                "up",
+                "-d",
+                "--force-recreate",
+                "cognee",
+            ],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            timeout=settings.cognee_restart_timeout_seconds,
+            check=False,
+        )
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout or "Docker Compose 执行失败").strip()
+            raise RuntimeError(detail[:2000])
+
+
+def get_docker_channel() -> DockerComposeRestartChannel:
+    """Injection point: workers and tests may substitute a fake channel."""
+    return DockerComposeRestartChannel()
+
+
 def _recreate_cognee() -> None:
-    settings = get_settings()
-    # A recreate is required: Docker restart does not pick up changed container
-    # environment variables.  Every argument is server-owned and constant.
-    runtime_env = _env_file_path()
-    completed = subprocess.run(
-        [
-            settings.cognee_compose_executable,
-            "compose",
-            "--env-file",
-            ".env",
-            "--env-file",
-            str(runtime_env),
-            "up",
-            "-d",
-            "--force-recreate",
-            "cognee",
-        ],
-        cwd=settings.cognee_compose_project_dir,
-        capture_output=True,
-        text=True,
-        timeout=settings.cognee_restart_timeout_seconds,
-        check=False,
+    get_docker_channel().recreate_cognee(
+        runtime_env_file=_env_file_path(),
+        project_dir=get_settings().cognee_compose_project_dir,
     )
-    if completed.returncode != 0:
-        detail = (completed.stderr or completed.stdout or "Docker Compose 执行失败").strip()
-        raise RuntimeError(detail[:2000])
 
 
 def execute(db: Session, job_id: uuid.UUID) -> dict:

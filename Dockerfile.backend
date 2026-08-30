@@ -21,6 +21,14 @@ COPY backend/alembic.ini ./
 
 RUN pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" ${PIP_TRUSTED_HOST:+--trusted-host "${PIP_TRUSTED_HOST}"} .
 
+# restart-worker 服务经只读 docker.sock 以服务端固定 argv 调宿主 `docker compose`
+# 重建 cognee 容器:仅需 CLI 与 compose v2 插件(Debian trixie 官方源自带,
+# 兼容 cognee 服务的 env_file.required 长语法),不安装 daemon。受限网络请先
+# 将 /etc/apt/sources.list*.d 换成国内镜像源再构建。
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends docker-cli docker-compose \
+    && rm -rf /var/lib/apt/lists/*
+
 EXPOSE 8000
 
 # API 服务默认入口:先跑迁移再起服务。mcp / worker 服务在 compose 里覆盖 command。

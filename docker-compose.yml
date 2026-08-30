@@ -141,6 +141,40 @@ services:
       api:
         condition: service_healthy
 
+  # Cognee 重启 worker:持久消费 cognee_restart_job 队列,消除「永久排队」。
+  # 经只读 docker.sock 以服务端固定 argv 调 docker compose 重建 cognee 容器
+  # (最小权限:全仓仅本服务持有 docker.sock,且镜像内无 daemon)。
+  restart-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+      args:
+        PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
+    restart: unless-stopped
+    command: ["python", "-m", "app.workers.cognee_restart"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://zeichen:zeichen@postgres:5432/zeichen
+      # 与 api 相同的会话密钥:解密受管 LLM 密钥写入 runtime env 必须一致
+      SESSION_SECRET: ${SESSION_SECRET:-dev-only-session-secret-change-me-0123456789abcdef}
+      COGNEE_BASE_URL: http://cognee:8000/api/v1
+      COGNEE_SERVICE_EMAIL: ${COGNEE_SERVICE_EMAIL:-zeichen-service@example.com}
+      COGNEE_SERVICE_PASSWORD: ${COGNEE_SERVICE_PASSWORD:-zeichen-local-cognee-service-password}
+      # 容器内固定路径:compose 项目目录与受管 runtime env(写入 .scratch 后
+      # 以 --env-file 传入 docker compose)
+      COGNEE_COMPOSE_PROJECT_DIR: /srv/zeichen
+      COGNEE_RUNTIME_ENV_FILE: /srv/zeichen/.scratch/cognee-runtime.env
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # compose 项目文件与受管 env(.scratch 可写:重建前先写入 runtime env)
+      - ./docker-compose.yml:/srv/zeichen/docker-compose.yml:ro
+      - ./.env:/srv/zeichen/.env:ro
+      - ./.scratch:/srv/zeichen/.scratch
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+
   web:
     build:
       context: .
