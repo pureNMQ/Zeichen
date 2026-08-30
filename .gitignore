@@ -44,6 +44,9 @@ Thumbs.db
 .scratch/*.log
 **/.scratch/attachments/
 
+# 受管 Cognee runtime env(worker 运行时以 root:0600 重写并写入解密后的 LLM 密钥,防泄漏)
+.scratch/cognee-runtime.env
+
 # Local Codex MCP credentials/configuration (project-scoped, never commit)
 /.codex/config.toml
 
