@@ -144,30 +144,35 @@ class DockerComposeRestartChannel:
     """Minimal-privilege docker.sock execution channel.
 
     It exposes exactly one operation: recreating the fixed ``cognee`` service
-    with a server-owned, constant ``docker compose`` argv.  It never accepts a
-    command, service, or path from clients, never runs another docker
-    subcommand, and never interpolates a shell.
+    with a server-owned, constant ``docker compose`` argv.  The compose file
+    list, runtime env file, and project directory all come from server-owned
+    deployment settings, never from a request.  It never accepts a command,
+    service, or path from clients, never runs another docker subcommand, and
+    never interpolates a shell.
     """
 
     def recreate_cognee(self, *, runtime_env_file: Path, project_dir: Path) -> None:
         settings = get_settings()
         # A recreate is required: Docker restart does not pick up changed
         # container environment variables.  Every argument is server-owned and
-        # constant; the runtime env file and project directory come from the
-        # caller (the worker passes deployment settings), never from a request.
+        # constant.  Configured compose files are layered in order with global
+        # ``-f`` flags before the ``up`` subcommand so the rebuild matches the
+        # running stack (overlay hardening must survive a recreate).
+        argv = [settings.cognee_compose_executable, "compose"]
+        for compose_file in settings.cognee_compose_file_list:
+            argv += ["-f", compose_file]
+        argv += [
+            "--env-file",
+            ".env",
+            "--env-file",
+            str(runtime_env_file),
+            "up",
+            "-d",
+            "--force-recreate",
+            "cognee",
+        ]
         completed = subprocess.run(
-            [
-                settings.cognee_compose_executable,
-                "compose",
-                "--env-file",
-                ".env",
-                "--env-file",
-                str(runtime_env_file),
-                "up",
-                "-d",
-                "--force-recreate",
-                "cognee",
-            ],
+            argv,
             cwd=project_dir,
             capture_output=True,
             text=True,

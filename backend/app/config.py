@@ -60,6 +60,13 @@ class Settings(BaseSettings):
     cognee_runtime_env_file: Path = Path("../.scratch/cognee-runtime.env")
     cognee_compose_executable: str = "docker"
     cognee_restart_timeout_seconds: float = 180.0
+    # Compose files used to recreate the cognee container, layered in order on
+    # top of the compose project directory.  Accepts a comma-separated string
+    # (COGNEE_COMPOSE_FILES) or a list; the default keeps the open-source
+    # out-of-box behavior of rebuilding with the root docker-compose.yml only.
+    # Production overlays must inject the full stack combination so overlay
+    # hardening survives a force-recreate instead of silently dropping off.
+    cognee_compose_files: str | list[str] = "docker-compose.yml"
     # The Compose deployment's existing provider key is read only to produce a
     # masked administrator-facing status.  Plaintext is never returned by API.
     cognee_deployment_env_file: Path = Path("../.env")
@@ -86,6 +93,19 @@ class Settings(BaseSettings):
     def mcp_allowed_host_patterns(self) -> list[str]:
         """Return the non-empty comma-separated MCP Host allowlist entries."""
         return [host.strip() for host in self.mcp_allowed_hosts.split(",") if host.strip()]
+
+    @property
+    def cognee_compose_file_list(self) -> list[str]:
+        """Normalize ``cognee_compose_files`` into an ordered compose file list.
+
+        Accepts the configured forms (comma/whitespace-separated string or a
+        sequence) and preserves the configured order, which the restart channel
+        replays verbatim as ``-f <file>`` arguments.
+        """
+        raw = self.cognee_compose_files
+        if isinstance(raw, str):
+            return [part for part in raw.replace(",", " ").split() if part]
+        return [str(item) for item in raw]
 
 
 @lru_cache

@@ -129,3 +129,12 @@ services:
       DATABASE_URL: postgresql+psycopg://zeichen:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/zeichen
       SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env}
       COGNEE_SERVICE_API_KEY: ${COGNEE_SERVICE_API_KEY:-}
+      # 重建与运行栈一致:重启通道按此列表顺序逐个 -f 叠加 compose 文件再
+      # force-recreate cognee,否则 prod 覆盖层注入的 cognee 安全加固
+      # (REQUIRE_AUTHENTICATION 等)在重建后丢失。环境专属覆盖层(ip/dev)
+      # 允许经部署 .env 的 COGNEE_COMPOSE_FILES 覆盖追加。
+      COGNEE_COMPOSE_FILES: ${COGNEE_COMPOSE_FILES:-docker-compose.yml,deploy/docker-compose.prod.yml}
+    volumes:
+      # 通道在容器内按上表 -f 读取覆盖文件,deploy/ 目录必须只读可见
+      # (根 compose 仅挂载根 docker-compose.yml)
+      - ./deploy:/srv/zeichen/deploy:ro
