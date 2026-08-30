@@ -12,11 +12,11 @@ export const STATUS_COLORS: Record<WorkflowStatus, string> = {
 }
 
 export const STATUS_DOT: Record<WorkflowStatus, string> = {
-  pending: 'bg-violet-500',
+  pending: 'bg-violet-500 dark:bg-violet-400',
   backlog: 'bg-muted-foreground/60',
-  in_progress: 'bg-blue-500',
-  verifying: 'bg-amber-500',
-  done: 'bg-green-500',
+  in_progress: 'bg-blue-500 dark:bg-blue-400',
+  verifying: 'bg-amber-500 dark:bg-amber-400',
+  done: 'bg-green-500 dark:bg-green-400',
   cancelled: 'bg-destructive',
 }
 

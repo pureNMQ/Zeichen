@@ -153,7 +153,7 @@ export function CogneePage() {
             {busy ? '重启进行中…' : '重启 Cognee'}
           </Button>
           <Button variant="outline" onClick={() => void runtimeStatus.refetch()} disabled={runtimeStatus.isFetching}>刷新状态</Button>
-          {restartJob?.status === 'completed' && <span className="text-sm text-emerald-700">最近一次重启已完成</span>}
+          {restartJob?.status === 'completed' && <span className="text-sm text-emerald-700 dark:text-emerald-400">最近一次重启已完成</span>}
           {restartJob?.status === 'failed' && <span className="text-sm text-destructive">最近一次重启失败</span>}
           </div>
         </CardContent>
@@ -188,7 +188,7 @@ export function CogneePage() {
             </section>
             <div className="flex flex-wrap items-center gap-3">
               <Button type="submit" disabled={saving}>{saving ? '保存中…' : '保存配置'}</Button>
-              <span className={currentConfiguration.pending_restart ? 'text-sm text-amber-700' : 'text-sm text-emerald-700'}>
+              <span className={currentConfiguration.pending_restart ? 'text-sm text-amber-700 dark:text-amber-400' : 'text-sm text-emerald-700 dark:text-emerald-400'}>
                 {configurationStatus}
               </span>
             </div>
