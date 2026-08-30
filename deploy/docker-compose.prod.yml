@@ -119,3 +119,13 @@ services:
         limits:
           cpus: "0.25"
           memory: 128M
+
+  # restart-worker 与 worker 使用同一套环境覆盖:根 compose 中 DATABASE_URL
+  # 为本地默认值(zeichen:zeichen),部署环境必须引用 .env 变量,否则容器内
+  # PostgreSQL 认证失败、崩溃重启,Cognee 重启队列无人消费。
+  restart-worker:
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://zeichen:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/zeichen
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env}
+      COGNEE_SERVICE_API_KEY: ${COGNEE_SERVICE_API_KEY:-}
