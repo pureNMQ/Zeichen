@@ -128,7 +128,7 @@ services:
       args:
         PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
     restart: unless-stopped
-    command: ["python", "-m", "app.workers.memory_improve"]
+    command: ["python", "-m", "app.workers.main"]
     environment:
       DATABASE_URL: postgresql+psycopg://zeichen:zeichen@postgres:5432/zeichen
       SESSION_SECRET: ${SESSION_SECRET:-dev-only-session-secret-change-me-0123456789abcdef}
