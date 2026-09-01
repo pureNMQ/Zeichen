@@ -26,6 +26,10 @@ mcp = FastMCP(
         resource_server_url=settings.mcp_resource_server_url,
     ),
     token_verifier=ApiKeyTokenVerifier(),
+    # 无会话(stateless)模式(REQ 88e42bad):服务端不创建/维护 MCP 会话,每个请求
+    # 独立处理。消除进程重启(uvicorn --reload 重载、容器重建、升级)导致客户端
+    # 会话失效、工具调用持续 Session not found 的问题;认证仍逐请求校验。
+    stateless_http=True,
     # Keep DNS-rebinding protection enabled by default. MCP_ALLOWED_HOSTS lets
     # a reverse-proxied deployment explicitly allow its public Host header;
     # MCP_ENABLE_DNS_REBINDING_PROTECTION=false is an intentional opt-out for

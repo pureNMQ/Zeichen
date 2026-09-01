@@ -50,6 +50,7 @@ class RawMcpClient:
     ):
         self.url = url
         self.session_id: str | None = None
+        self._initialized = False
         self._id = 0
         self._headers = {
             "Content-Type": "application/json",
@@ -91,9 +92,11 @@ class RawMcpClient:
     def _post(self, method: str, params: dict, is_initialize: bool = False) -> dict:
         headers = dict(self._headers)
         if not is_initialize:
-            if self.session_id is None:
+            if not self._initialized:
                 raise RuntimeError("未先 initialize")
-            headers["Mcp-Session-Id"] = self.session_id
+            # stateless 模式服务端不签发会话 id:仅在持有会话 id 时附带。
+            if self.session_id:
+                headers["Mcp-Session-Id"] = self.session_id
         self._id += 1
         payload = {"jsonrpc": "2.0", "id": self._id, "method": method, "params": params}
         # 本地 uvicorn 回环请求不应继承机器代理设置；否则部分环境会把
@@ -105,6 +108,7 @@ class RawMcpClient:
                 sid = resp.headers.get("mcp-session-id")
                 if sid:
                     self.session_id = sid
+                self._initialized = True
             msgs = _parse_sse(resp.text)
         if not msgs:
             raise RuntimeError(f"无 SSE 响应: {method} {resp.status_code}")
@@ -201,7 +205,7 @@ def test_agent_claim_to_requirement_done(mcp_server: dict):
     client = RawMcpClient(mcp_server["url"], mcp_server["token"])
     init = client.initialize()
     assert init["serverInfo"]["name"] == "zeichen"
-    assert client.session_id is not None
+    assert client.session_id is None, "stateless 模式不签发 Mcp-Session-Id"
 
     tools = client.list_tools()
     assert len(tools) >= 60
