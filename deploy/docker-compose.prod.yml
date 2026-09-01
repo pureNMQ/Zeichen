@@ -46,8 +46,11 @@ services:
       FASTAPI_USERS_JWT_SECRET: ${COGNEE_FASTAPI_USERS_JWT_SECRET:?Set COGNEE_FASTAPI_USERS_JWT_SECRET (openssl rand -hex 32)}
       # API key 以 SHA-256 存储(存量明文 key 会失效,见 research §3.2)
       HASH_API_KEY: "true"
-      # 不摄取任意本地文件(读文件攻击面)
-      ACCEPT_LOCAL_FILE_PATH: "false"
+      # cognee 1.4.1 会话蒸馏(improve→persist_sessions)会把自身生成的会话文本先落盘到
+      # DATA_ROOT 再重新摄取,该开关为 false 会拒绝这条内部文件路径,蒸馏抛 415
+      # "Local files are not accepted"(REQ bc36ae8b)。Zeichen 从不向 cognee 传客户端
+      # 文件路径,且本服务不对宿主发布端口,放行本地文件仅作用于 cognee 自身存储。
+      ACCEPT_LOCAL_FILE_PATH: "true"
       # 不摄取公网 URL(关 SSRF 面)
       ALLOW_HTTP_REQUESTS: "false"
       # 禁裸 Cypher 查询端点;Zeichen 只用 /remember/entry /recall /improve /sessions,

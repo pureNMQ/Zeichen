@@ -19,6 +19,23 @@ def test_compose_qualifies_the_deepseek_model_for_litellm():
     assert ".scratch/cognee-runtime.env" in content
 
 
+def test_deploy_overlays_allow_cognee_own_local_file_paths_for_session_distillation():
+    """契约:生产/环境覆盖层不得关闭 ACCEPT_LOCAL_FILE_PATH。
+
+    cognee 1.4.1 的 improve→persist_sessions 蒸馏流程会把自身生成的会话文本
+    先落盘为 DATA_ROOT 本地文件、再经 data_item_to_text_file 重新摄取;该开关为
+    false 时内部文件路径被拒绝,抛 415 Local files are not accepted,蒸馏永久
+    失败(REQ bc36ae8b 原始症状)。Zeichen 从不向 cognee 传客户端文件路径。
+    """
+    root = Path(__file__).resolve().parents[3]
+    for overlay in ("deploy/docker-compose.prod.yml", "deploy/docker-compose.ip.yml"):
+        content = (root / overlay).read_text(encoding="utf-8")
+        assert 'ACCEPT_LOCAL_FILE_PATH: "false"' not in content, (
+            f"{overlay} 关闭 ACCEPT_LOCAL_FILE_PATH 会阻断 cognee 1.4.1 会话蒸馏"
+            f"(415 Local files are not accepted),必须放开(REQ bc36ae8b)"
+        )
+
+
 def test_cognee_image_build_installs_fastembed_for_the_configured_provider():
     root = Path(__file__).resolve().parents[3]
     compose = (root / "docker-compose.yml").read_text(encoding="utf-8")

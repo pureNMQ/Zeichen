@@ -8,9 +8,16 @@ from urllib.request import urlopen
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+import re
+
 from ..config import get_settings
+from ..errors import invalid_request
 from ..models import CogneeConfiguration, CogneeRestartJob, Team
 from ..security import decrypt_secret, encrypt_secret
+
+# 与 schemas.CogneeConfigurationUpdate 相同的 provider/model 限定格式契约
+# (REQ bc36ae8b):未限定 model 串会让 cognee 1.4.1 经 litellm 的 LLM 调用全部失败。
+_LLM_MODEL_PATTERN = re.compile(r"^[^/\s]+/[^/\s]+$")
 
 
 def _workspace_team(db: Session) -> Team:
@@ -44,6 +51,11 @@ def get_or_create(db: Session) -> CogneeConfiguration:
 
 def update(db: Session, values: dict) -> CogneeConfiguration:
     row = get_or_create(db)
+    if not _LLM_MODEL_PATTERN.fullmatch(str(values.get("llm_model", "")).strip()):
+        raise invalid_request(
+            "llm_model 必须为 provider/model 限定格式(如 deepseek/deepseek-v4-flash),"
+            "未限定格式会导致 LiteLLM 无法路由并阻断蒸馏"
+        )
     for field in (
         "llm_provider",
         "llm_model",

@@ -30,7 +30,7 @@ from .conftest import login
 
 CONFIGURATION_VALUES = {
     "llm_provider": "custom",
-    "llm_model": "test-model",
+    "llm_model": "test/test-model",
     "llm_endpoint": None,
     "embedding_provider": "fastembed",
     "embedding_model": "test-embedding",
@@ -143,7 +143,7 @@ def test_worker_writes_pending_configuration_to_runtime_env_before_recreate(
         db,
         {
             **CONFIGURATION_VALUES,
-            "llm_model": "next-model",
+            "llm_model": "test/next-model",
             "embedding_dimensions": 1536,
             "llm_api_key": "sk-placeholder-managed-key-0000",
         },
@@ -158,7 +158,7 @@ def test_worker_writes_pending_configuration_to_runtime_env_before_recreate(
 
     settings = get_settings()
     content = settings.cognee_runtime_env_file.read_text(encoding="utf-8")
-    assert "LLM_MODEL=next-model" in content, "更新的 LLM 模型必须进入 runtime env"
+    assert "LLM_MODEL=test/next-model" in content, "更新的 LLM 模型必须进入 runtime env"
     assert "LLM_API_KEY=sk-placeholder-managed-key-0000" in content, (
         "受管密钥(解密后)必须进入 runtime env 以便重建容器生效"
     )

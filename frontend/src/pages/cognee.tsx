@@ -167,7 +167,7 @@ export function CogneePage() {
           <form className="space-y-5" onSubmit={save}>
             <section className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5"><Label htmlFor="cognee-llm-provider">语言模型提供方</Label><Input id="cognee-llm-provider" autoComplete="off" value={form.llm_provider} onChange={(e) => update('llm_provider', e.target.value)} required /></div>
-              <div className="space-y-1.5"><Label htmlFor="cognee-llm-model">语言模型</Label><Input id="cognee-llm-model" autoComplete="off" value={form.llm_model} onChange={(e) => update('llm_model', e.target.value)} required /></div>
+              <div className="space-y-1.5"><Label htmlFor="cognee-llm-model">语言模型</Label><Input id="cognee-llm-model" autoComplete="off" placeholder="provider/model，如 deepseek/deepseek-v4-flash" value={form.llm_model} onChange={(e) => update('llm_model', e.target.value)} required /></div>
               <div className="space-y-1.5 sm:col-span-2"><Label htmlFor="cognee-llm-endpoint">语言模型接口地址</Label><Input id="cognee-llm-endpoint" autoComplete="url" value={form.llm_endpoint} onChange={(e) => update('llm_endpoint', e.target.value)} /></div>
               <div className="space-y-1.5 sm:col-span-2">
                 <Label htmlFor="cognee-llm-key">语言模型 API 密钥（留空以保留现有密钥）</Label>

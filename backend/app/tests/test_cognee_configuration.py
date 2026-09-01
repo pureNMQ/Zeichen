@@ -5,7 +5,7 @@ from .conftest import login
 
 PAYLOAD = {
     "llm_provider": "custom",
-    "llm_model": "test-model",
+    "llm_model": "test/test-model",
     "llm_endpoint": "https://llm.example.test/v1",
     "embedding_provider": "fastembed",
     "embedding_model": "test-embedding",
@@ -32,7 +32,7 @@ def test_update_cognee_configuration_hides_key_and_marks_restart(client, db, wor
     )
     assert response.status_code == 200, response.text
     body = response.json()
-    assert body["llm_model"] == "test-model"
+    assert body["llm_model"] == "test/test-model"
     assert body["llm_api_key_configured"] is True
     assert body["llm_api_key_source"] == "managed"
     assert body["llm_api_key_display"] == "sec********alue"
@@ -41,9 +41,30 @@ def test_update_cognee_configuration_hides_key_and_marks_restart(client, db, wor
     assert "secret-value" not in response.text
 
     # Omitting the secret retains it while other fields can still be updated.
-    response = client.put("/api/cognee/configuration", json={**PAYLOAD, "llm_model": "next-model"})
+    response = client.put("/api/cognee/configuration", json={**PAYLOAD, "llm_model": "test/next-model"})
     assert response.status_code == 200
     assert response.json()["llm_api_key_configured"] is True
+
+
+def test_update_rejects_llm_model_without_provider_prefix(client, db, world):
+    """契约:llm_model 必须为 provider/model 限定格式,未限定值(如 deepseek-v4-flash)拒绝。
+
+    cognee 1.4.1 经 litellm 以 model 串推断 provider,未限定串会导致全部 LLM
+    调用失败(LLM Provider NOT provided),蒸馏因此返回 409(REQ bc36ae8b)。
+    """
+    login(client, "admin", "admin-pass-1")
+
+    rejected = client.put(
+        "/api/cognee/configuration", json={**PAYLOAD, "llm_model": "deepseek-v4-flash"}
+    )
+    assert rejected.status_code == 400, rejected.text
+
+    accepted = client.put(
+        "/api/cognee/configuration", json={**PAYLOAD, "llm_model": "deepseek/deepseek-v4-flash"}
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["llm_model"] == "deepseek/deepseek-v4-flash"
+    assert accepted.json()["pending_restart"] is True
 
 
 def test_restart_is_admin_only_requires_confirmation_and_returns_a_job(client, db, world):

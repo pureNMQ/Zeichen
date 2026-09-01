@@ -9,7 +9,7 @@ def test_failed_restart_keeps_configuration_pending(db, world, monkeypatch):
         db,
         {
             "llm_provider": "custom",
-            "llm_model": "test-model",
+            "llm_model": "test/test-model",
             "llm_endpoint": None,
             "embedding_provider": "fastembed",
             "embedding_model": "test-embedding",
@@ -33,7 +33,7 @@ def test_successful_restart_clears_pending_flag(db, world, monkeypatch):
         db,
         {
             "llm_provider": "custom",
-            "llm_model": "test-model",
+            "llm_model": "test/test-model",
             "llm_endpoint": None,
             "embedding_provider": "fastembed",
             "embedding_model": "test-embedding",
@@ -54,7 +54,7 @@ def test_runtime_env_omits_empty_managed_key_for_deployment_fallback(db, world, 
         db,
         {
             "llm_provider": "custom",
-            "llm_model": "test-model",
+            "llm_model": "test/test-model",
             "llm_endpoint": None,
             "embedding_provider": "fastembed",
             "embedding_model": "test-embedding",

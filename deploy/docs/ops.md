@@ -55,6 +55,15 @@ zc up -d --build
 
 卷不动、数据不丢;前提是数据库 schema 向后兼容(回滚到旧代码前确认没有新迁移依赖)。
 
+> **cognee 安全开关说明(REQ bc36ae8b)**:生产/环境覆盖层中的
+> `ACCEPT_LOCAL_FILE_PATH` 刻意保持为 `"true"`——cognee 1.4.1 的会话蒸馏
+> (improve→persist_sessions)会把自身生成的会话文本先落盘到 DATA_ROOT 再重新摄取,
+> 该开关为 false 会阻断这条内部路径、蒸馏报 415 "Local files are not accepted"。
+> Zeichen 从不向 cognee 传入客户端文件路径,且 cognee 不对宿主发布端口,故放行本地
+> 文件只作用于 cognee 自身存储,不构成外部读文件面;其余加固
+> (`REQUIRE_AUTHENTICATION`/`ALLOW_HTTP_REQUESTS=false`/`ALLOW_CYPHER_QUERY=false`)
+> 保持不变。若未来升级 cognee 修复了该内部路径问题,可重新收紧此开关。
+
 ## 3. 备份 / 恢复
 
 ### 备份

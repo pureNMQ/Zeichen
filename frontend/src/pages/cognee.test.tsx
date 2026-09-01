@@ -61,6 +61,16 @@ describe('CogneePage', () => {
     expect(vi.mocked(api.put).mock.calls[0][1]).not.toHaveProperty('llm_api_key')
   })
 
+  it('hints the provider-qualified model format on the model input', async () => {
+    vi.mocked(api.get).mockImplementation((path: string) => path === '/cognee/configuration'
+      ? Promise.resolve(configuration)
+      : Promise.resolve({ runtime: { availability: 'reachable', detail: null, checked_at: '2026-08-13T00:00:00Z' }, latest_restart: null }))
+    renderPage()
+
+    const model = await screen.findByLabelText('语言模型')
+    expect(model).toHaveAttribute('placeholder', 'provider/model，如 deepseek/deepseek-v4-flash')
+  })
+
   it('requires a confirmation dialog before submitting a restart job', async () => {
     vi.mocked(api.get).mockImplementation((path: string) => path === '/cognee/configuration'
       ? Promise.resolve(configuration)
