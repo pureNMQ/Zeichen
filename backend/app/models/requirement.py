@@ -7,7 +7,7 @@ check 约束保证状态值合法;流转规则在 service 层(workflow.py)。
 
 import uuid
 
-from sqlalchemy import CheckConstraint, ForeignKey, String, Uuid
+from sqlalchemy import CheckConstraint, ForeignKey, String, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, CreatedByMixin, IdMixin, ProjectScopeMixin, SoftDeleteMixin, TimestampMixin
@@ -57,3 +57,22 @@ class Task(IdMixin, TimestampMixin, SoftDeleteMixin, CreatedByMixin, ProjectScop
     )
 
     requirement: Mapped[Requirement | None] = relationship(back_populates="tasks")
+
+
+class TaskBlocker(IdMixin, TimestampMixin, CreatedByMixin, ProjectScopeMixin, Base):
+    """任务阻塞依赖边(REQ-7):task_id 被 blocker_id 阻塞。
+
+    边行不软删,移除 = 物理删行;(task_id, blocker_id) 唯一防重复依赖。
+    """
+
+    __tablename__ = "task_blocker"
+    __table_args__ = (
+        UniqueConstraint("task_id", "blocker_id", name="uq_task_blocker_pair"),
+    )
+
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("task.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    blocker_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("task.id", ondelete="CASCADE"), nullable=False, index=True
+    )

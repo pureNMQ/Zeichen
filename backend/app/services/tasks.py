@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from ..errors import conflict, invalid_request, not_found, permission_denied
 from ..models import ProjectMember, Requirement, Task, User
+from . import task_blockers
 from .pagination import page_result
 from .permissions import get_accessible_project, get_project_role, is_admin, require_project_role
 from .polymorphic import record_activity
@@ -22,12 +23,13 @@ from .short_text import normalize_short_description
 from .user_profiles import avatar_url, display_name
 from .workflow import TERMINAL, assert_status_valid
 
-# update_task 的 requirement_id 哨兵:未传 = 不变;None = 显式解除
+# update_task 的 requirement_id / blocked_by 哨兵:未传 = 不变;None/[] = 显式解除/清空
 _UNSET = object()
 
 
 def _task_dict(db: Session, t: Task) -> dict:
     assignee = db.get(User, t.assignee_id) if t.assignee_id else None
+    blocked_by = task_blockers.blocker_summaries(db, t)
     return {
         "id": str(t.id),
         "title": t.title,
@@ -42,6 +44,8 @@ def _task_dict(db: Session, t: Task) -> dict:
         "created_by": str(t.created_by) if t.created_by else None,
         "created_at": t.created_at.isoformat(),
         "updated_at": t.updated_at.isoformat(),
+        "blocked": task_blockers.is_blocked([i["status"] for i in blocked_by]),
+        "blocked_by": blocked_by,
     }
 
 
@@ -107,6 +111,7 @@ def create_task(
     description: str | None = None,
     requirement_id: uuid.UUID | None = None,
     assignee_id: uuid.UUID | None = None,
+    blocked_by: list[uuid.UUID] | None = None,
 ) -> Task:
     title = title.strip()
     if not title:
@@ -128,6 +133,8 @@ def create_task(
     )
     db.add(task)
     db.flush()
+    if blocked_by:
+        task_blockers.set_blockers_core(db, actor, task, blocked_by)
     record_activity(db, project_id, actor.id, "task", task.id, "create", "创建任务")
     db.commit()
     return task
@@ -197,11 +204,12 @@ def update_task(
     title: str | None = None,
     description: str | None = None,
     requirement_id: object = _UNSET,
+    blocked_by: object = _UNSET,
 ) -> Task:
-    """更新任务元数据;requirement_id 可设/可换/可解除(null=解除)。
+    """更新任务元数据;requirement_id / blocked_by 可设/可换/可解除(null/[]=解除/清空)。
 
     requirement_id 权限与改状态同规则(已指派仅本人/工作区 admin/项目 owner,
-    未指派任意编辑权);校验需求同项目且未删除。
+    未指派任意编辑权);校验需求同项目且未删除。blocked_by 整体替换前置集合。
     """
     task = _get_editable(db, actor, task_id)
     if title is not None:
@@ -220,6 +228,8 @@ def update_task(
                 _check_requirement(db, task.project_id, rid)
             task.requirement_id = rid
             summary = "关联需求" if rid else "解除需求关联"
+    if blocked_by is not _UNSET:
+        task_blockers.set_blockers_core(db, actor, task, blocked_by)
     record_activity(db, task.project_id, actor.id, "task", task.id, "update", summary)
     db.commit()
     return task

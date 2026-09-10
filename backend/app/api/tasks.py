@@ -54,6 +54,7 @@ def create_task(
         body.description,
         body.requirement_id,
         body.assignee_id,
+        body.blocked_by,
     )
     return service._task_dict(db, task)
 
@@ -76,10 +77,11 @@ def update_task(
 ) -> dict:
     fields = body.model_fields_set
     requirement_id = body.requirement_id if "requirement_id" in fields else service._UNSET
+    blocked_by = body.blocked_by if "blocked_by" in fields else service._UNSET
     return service._task_dict(
         db,
         service.update_task(
-            db, user, task_id, body.title, body.description, requirement_id
+            db, user, task_id, body.title, body.description, requirement_id, blocked_by
         ),
     )
 

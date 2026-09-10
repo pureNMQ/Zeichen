@@ -67,6 +67,19 @@ def _req_id(requirement_id: str | None) -> uuid.UUID | None:
     return uuid.UUID(requirement_id) if requirement_id else None
 
 
+def _uuid_list(values: list[str] | None) -> list[uuid.UUID] | None:
+    """MCP 字符串 id 列表 → UUID 列表;None/[] 原样传递(None/[]=解除/清空语义)。"""
+    if values is None:
+        return None
+    result: list[uuid.UUID] = []
+    for value in values:
+        try:
+            result.append(uuid.UUID(value))
+        except (AttributeError, TypeError, ValueError):
+            raise ToolError(f"invalid_request: blocked_by 必须是合法 UUID 列表") from None
+    return result
+
+
 def _split_statuses(status: str | None) -> list[str] | None:
     """MCP status 逗号分隔字符串 → list;单值不变;None/空 → None(不过滤)。"""
     if status is None:
@@ -294,12 +307,15 @@ def _register_all(mcp) -> None:
         description: str | None = None,
         requirement_id: str | None = None,
         assignee_id: str | None = None,
+        blocked_by: list[str] | None = None,
     ) -> dict:
-        """创建任务(requirement_id 可空=独立任务;assignee_id 可空=待认领)。"""
+        """创建任务(requirement_id 可空=独立任务;assignee_id 可空=待认领;
+        blocked_by=前置任务 id 列表,仅同项目)。"""
         db, actor = dbc()
         t = task_svc.create_task(
             db, actor, uuid.UUID(project_id), title, description,
             _req_id(requirement_id), _req_id(assignee_id),
+            _uuid_list(blocked_by),
         )
         return task_svc._task_dict(db, t)
 
@@ -339,15 +355,19 @@ def _register_all(mcp) -> None:
         title: str | None = None,
         description: str | None = None,
         requirement_id: str | None = _UNSET,
+        blocked_by: list[str] | None = _UNSET,
     ) -> dict:
-        """更新任务元数据；省略 requirement_id 保留关联，传 null 或空字符串解除关联。"""
+        """更新任务元数据；省略 requirement_id/blocked_by 保留原值，requirement_id 传 null
+        或空字符串解除关联，blocked_by 传 null 或 [] 清空(整体替换)。"""
         db, actor = dbc()
-        if requirement_id is _UNSET:
-            t = task_svc.update_task(db, actor, uuid.UUID(id), title, description)
-        else:
-            t = task_svc.update_task(
-                db, actor, uuid.UUID(id), title, description, _req_id(requirement_id)
-            )
+        kwargs: dict = {}
+        if requirement_id is not _UNSET:
+            kwargs["requirement_id"] = _req_id(requirement_id)
+        if blocked_by is not _UNSET:
+            kwargs["blocked_by"] = _uuid_list(blocked_by)
+        t = task_svc.update_task(
+            db, actor, uuid.UUID(id), title, description, **kwargs
+        )
         return task_svc._task_dict(db, t)
 
     @mcp.tool(name="tasks.set_status")

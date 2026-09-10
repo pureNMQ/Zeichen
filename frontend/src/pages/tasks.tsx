@@ -83,6 +83,7 @@ function TaskCard({
             onSelect={(s) => onStatus(t, s)}
             disabled={!canSetStatus}
           />
+          {t.blocked && <Badge variant="destructive">受阻</Badge>}
           {t.assignee && (
             <Badge variant="outline" className="gap-1.5">
               <UserAvatar user={{ id: t.assignee_id, username: t.assignee, avatar: t.assignee_avatar }} className="h-4 w-4 text-[9px]" />

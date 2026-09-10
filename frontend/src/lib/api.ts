@@ -138,6 +138,13 @@ export interface RequirementRow {
   task_count: number
 }
 
+export interface TaskBlockerSummary {
+  id: string
+  title: string
+  status: TaskStatus
+  resolved: boolean
+}
+
 export interface TaskRow {
   id: string
   title: string
@@ -152,6 +159,8 @@ export interface TaskRow {
   created_by: string | null
   created_at: string
   updated_at: string
+  blocked?: boolean
+  blocked_by?: TaskBlockerSummary[]
 }
 
 export interface CommentRow {

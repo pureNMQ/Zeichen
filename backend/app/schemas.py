@@ -170,12 +170,14 @@ class TaskCreate(BaseModel):
     description: str | None = None
     requirement_id: uuid.UUID | None = None
     assignee_id: uuid.UUID | None = None
+    blocked_by: list[uuid.UUID] | None = None
 
 
 class TaskUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=256)
     description: str | None = None
     requirement_id: uuid.UUID | None = None
+    blocked_by: list[uuid.UUID] | None = None
 
 
 class TaskAssignBody(BaseModel):

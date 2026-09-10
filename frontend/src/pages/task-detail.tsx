@@ -128,6 +128,23 @@ export function TaskDetailPage() {
               所属需求:{task.requirement_id.slice(0, 8)}
             </Link>
           )}
+          {task.blocked && (
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+              <Badge variant="destructive">受阻</Badge>
+              <span className="text-muted-foreground">前置任务未全部完成:</span>
+              {(task.blocked_by ?? [])
+                .filter((b) => !b.resolved)
+                .map((b) => (
+                  <Link
+                    key={b.id}
+                    to={`/tasks/${b.id}`}
+                    className="text-sm text-primary underline-offset-2 hover:underline"
+                  >
+                    {b.title}
+                  </Link>
+                ))}
+            </div>
+          )}
           {task.description && <p className="mt-2 text-sm text-muted-foreground">{task.description}</p>}
         </div>
         <div className="flex shrink-0 flex-wrap justify-end gap-2">
