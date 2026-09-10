@@ -1,11 +1,31 @@
 """HTTP API 与 Web 共用的请求/响应结构(pydantic)。"""
 
+import re
 import uuid
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from .errors import invalid_request
 
 PasswordField = Field(min_length=8, max_length=128)
+
+# cognee 受管配置 llm_model 的 provider/model 限定格式契约(REQ bc36ae8b):
+# 含且仅含一个 /,两侧非空、无空白。cognee 1.4.1 经 litellm 以 model 串推断
+# provider,未限定串会让全部 LLM 调用失败(LLM Provider NOT provided),蒸馏永久
+# 失败。schema 层与 services.cognee_configuration.update 共用此规则。
+LLM_MODEL_PATTERN = re.compile(r"^[^/\s]+/[^/\s]+$")
+
+
+def validate_llm_model(value: str) -> str:
+    """返回去除首尾空白的限定 model 串;未限定时抛 invalid_request(HTTP 400)。"""
+    normalized = str(value).strip()
+    if not LLM_MODEL_PATTERN.fullmatch(normalized):
+        raise invalid_request(
+            "llm_model 必须为 provider/model 限定格式(如 deepseek/deepseek-v4-flash),"
+            "未限定格式会导致 LiteLLM 无法路由并阻断蒸馏"
+        )
+    return normalized
 
 
 class UsernamePassword(BaseModel):
@@ -114,6 +134,13 @@ class CogneeConfigurationUpdate(BaseModel):
     embedding_provider: str = Field(min_length=1, max_length=64)
     embedding_model: str = Field(min_length=1, max_length=256)
     embedding_dimensions: int | None = Field(default=None, ge=1, le=65536)
+
+    @field_validator("llm_model")
+    @classmethod
+    def _require_provider_qualified_llm_model(cls, value: str) -> str:
+        # 抛 AppError 而非 ValueError:由统一错误 handler 转 400 invalid_request,
+        # 与服务层契约一致,避免 pydantic 默认的 422。
+        return validate_llm_model(value)
 
 
 class CogneeRestartRequest(BaseModel):

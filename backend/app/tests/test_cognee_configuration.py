@@ -67,6 +67,33 @@ def test_update_rejects_llm_model_without_provider_prefix(client, db, world):
     assert accepted.json()["pending_restart"] is True
 
 
+def test_schema_rejects_unqualified_llm_model_before_reaching_the_service():
+    """契约:CogneeConfigurationUpdate.llm_model 在 schema 层即强制 provider/model 限定格式。
+
+    含且仅含一个 /,两侧非空、无空白;违反时抛 invalid_request(HTTP 400),与
+    services.cognee_configuration.update 的防御性校验共用同一规则(REQ bc36ae8b)。
+    """
+    import pytest
+
+    from app.errors import AppError
+    from app.schemas import CogneeConfigurationUpdate
+
+    for unqualified in (
+        "deepseek-v4-flash",  # 无 provider 前缀
+        "deepseek/",  # 右侧为空
+        "/deepseek-v4-flash",  # 左侧为空
+        "openai/gpt/4o",  # 多于一个 /
+        "deep seek/v4-flash",  # 左侧含空白
+        "deepseek/v4 flash",  # 右侧含空白
+    ):
+        with pytest.raises(AppError) as excinfo:
+            CogneeConfigurationUpdate(**{**PAYLOAD, "llm_model": unqualified})
+        assert excinfo.value.code == "invalid_request", unqualified
+
+    accepted = CogneeConfigurationUpdate(**{**PAYLOAD, "llm_model": "  deepseek/deepseek-v4-flash  "})
+    assert accepted.llm_model == "deepseek/deepseek-v4-flash"
+
+
 def test_restart_is_admin_only_requires_confirmation_and_returns_a_job(client, db, world):
     assert client.post("/api/cognee/configuration/restarts", json={"confirmed": True}).status_code == 401
     login(client, "bob", "temporary-pass-1")
