@@ -186,12 +186,12 @@ describe('需求列表页(当前项目)', () => {
 
   it('默认选中「近期活跃」:取第一个可见项目,首次加载带 updated_within_days=3 且以看板展示', async () => {
     renderRequirements()
-    // 默认展示模式为看板:四执行态列头可见,待确认需求被隐藏
+    // 默认展示模式为看板:五列(含待确认)全部可见(REQ 9cac46ea)
     expect(await screen.findByText('登录功能')).toBeInTheDocument()
-    for (const label of ['待办', '实现中', '已完成', '已取消']) {
+    for (const label of ['待确认', '待办', '实现中', '已完成', '已取消']) {
       expect(screen.getAllByText(label).length).toBeGreaterThan(0)
     }
-    expect(screen.queryByText('等待产品确认')).not.toBeInTheDocument()
+    expect(screen.getByText('等待产品确认')).toBeInTheDocument()
     expect(screen.getByText(/当前项目:demo/)).toBeInTheDocument()
     expect(screen.getByText('2 任务')).toBeInTheDocument()
     // 视图切换器:全部 / 近期活跃
@@ -242,11 +242,11 @@ describe('筛选视图与视图切换器(默认「近期活跃」)', () => {
     await waitFor(() => {
       expect(requirementParams().has('updated_within_days')).toBe(false)
     })
-    // 切回「近期活跃」:恢复看板(待确认隐藏)并重新带时间窗口
+    // 切回「近期活跃」:恢复看板(待确认列与卡片可见)并重新带时间窗口
     await user.click(screen.getByRole('button', { name: /近期活跃/ }))
     await waitFor(() => {
       expect(requirementParams().get('updated_within_days')).toBe('3')
-      expect(screen.queryByText('等待产品确认')).not.toBeInTheDocument()
+      expect(screen.getByText('等待产品确认')).toBeInTheDocument()
       expect(screen.getAllByText('已取消').length).toBeGreaterThan(0) // 看板列头
     })
   })
@@ -420,7 +420,7 @@ describe('分页与共用筛选结果', () => {
     await user.click(await screen.findByRole('checkbox', { name: '待办' }))
     await waitFor(() => expect(requirementParams().getAll('status')).toEqual(['backlog']))
     await user.keyboard('{Escape}') // 关闭筛选弹层
-    // 看板(默认展示模式):仅 backlog 需求
+    // 看板(默认展示模式):仅 backlog 需求(状态筛选由查询承担,与列无关)
     expect(await screen.findByText('登录功能')).toBeInTheDocument()
     expect(screen.queryByText('等待产品确认')).not.toBeInTheDocument()
     expect(screen.queryByText('已验收需求')).not.toBeInTheDocument()
@@ -439,14 +439,14 @@ describe('需求执行看板(四列自由拖拽)', () => {
     localStorage.clear()
   })
 
-  it('看板默认展示四个执行态并隐藏待确认需求,筛选条提供五态多选', async () => {
+  it('看板默认展示五列(含待确认)且显示待确认需求,筛选条提供五态多选', async () => {
     renderRequirements([projects[1]])
-    // 默认即看板:四执行态列头可见,无「验收中」列
-    for (const label of ['待办', '实现中', '已完成', '已取消']) {
+    // 默认即看板:五列列头可见(含待确认),无「验收中」列
+    for (const label of ['待确认', '待办', '实现中', '已完成', '已取消']) {
       expect((await screen.findAllByText(label)).length).toBeGreaterThan(0)
     }
     expect(screen.queryByText('验收中')).not.toBeInTheDocument()
-    expect(screen.queryByText('等待产品确认')).not.toBeInTheDocument()
+    expect(screen.getByText('等待产品确认')).toBeInTheDocument()
     // 状态筛选为五态多选
     const user = (await import('@testing-library/user-event')).default
     await user.click(screen.getByRole('button', { name: /状态/ }))
