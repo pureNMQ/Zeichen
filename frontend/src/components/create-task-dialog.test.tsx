@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 vi.mock('@/lib/api', () => {
   class ApiError extends Error {}
-  return { ApiError, api: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() } }
+  return { ApiError, api: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn(), upload: vi.fn() } }
 })
 
 import { api } from '@/lib/api'
@@ -22,6 +22,44 @@ function renderDialog(open: boolean, presetRequirementId: string | null = null) 
     </QueryClientProvider>,
   )
 }
+
+describe('任务创建表单引用与附件回填(REQ ee290fae)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    vi.mocked(api.get).mockImplementation((path: string) => {
+      if (path === '/projects') return Promise.resolve([{ id: 'p1', name: 'P', created_at: '2026-08-01T00:00:00Z', my_role: 'owner' }])
+      if (path.startsWith('/projects/p1/requirements')) return Promise.resolve({ items: [{ id: 'r9', title: '目标需求', status: 'backlog', project_id: 'p1', created_by: 'u1', created_at: '2026-08-01T00:00:00Z', updated_at: '2026-08-01T00:00:00Z', task_count: 0 }], next_cursor: null })
+      return Promise.resolve({ items: [], next_cursor: null })
+    })
+    localStorage.setItem('zeichen.currentProjectId', 'p1')
+  })
+
+  it('创建成功后按暂存顺序回填引用与附件', async () => {
+    const user = userEvent.setup()
+    vi.mocked(api.post).mockResolvedValue({ id: 'new1' })
+    vi.mocked(api.upload).mockResolvedValue({})
+    renderDialog(true)
+
+    await user.type(await screen.findByLabelText('标题'), '带关联的任务')
+    await user.click(screen.getByRole('combobox', { name: '引用目标' }))
+    await user.click(await screen.findByRole('option', { name: '目标需求' }))
+    await user.click(screen.getByRole('button', { name: '添加引用' }))
+    expect(screen.getAllByText(/目标需求/).length).toBeGreaterThan(0)
+
+    const file = new File(['hello'], 'spec.txt', { type: 'text/plain' })
+    await user.upload(screen.getByLabelText('附件(可选,创建后上传)'), file)
+    expect(screen.getByText('spec.txt')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /创建/ }))
+    await waitFor(() => {
+      expect(api.post).toHaveBeenCalledWith('/targets/task/new1/references', {
+        from_type: 'task', from_id: 'new1', to_type: 'requirement', to_id: 'r9', type: 'derives',
+      })
+      expect(api.upload).toHaveBeenCalledWith('/targets/task/new1/attachments', file)
+    })
+  })
+})
 
 describe('任务创建表单草稿暂存(REQ ff7a0aa2)', () => {
   beforeEach(() => {

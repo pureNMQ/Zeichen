@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/select'
 import { api, ApiError, type RequirementRow } from '@/lib/api'
 import { clearDraft, readDraft, writeDraft } from '@/lib/form-draft'
+import { CreateExtras, type StagedReference } from '@/components/create-extras'
 import { useCurrentProject } from '@/lib/current-project'
 
 export function CreateTaskDialog({
@@ -41,6 +42,8 @@ export function CreateTaskDialog({
   const [requirementId, setRequirementId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [refs, setRefs] = useState<StagedReference[]>([])
+  const [files, setFiles] = useState<File[]>([])
 
   const draftKey = projectId ? `zeichen.draft.task:${projectId}` : null
 
@@ -60,6 +63,8 @@ export function CreateTaskDialog({
       setTitle('')
       setDescription('')
       setRequirementId(presetRequirementId)
+      setRefs([])
+      setFiles([])
     }
   }, [open, presetRequirementId, draftKey])
 
@@ -78,6 +83,8 @@ export function CreateTaskDialog({
     setTitle('')
     setDescription('')
     setRequirementId(presetRequirementId)
+    setRefs([])
+    setFiles([])
     setError(null)
   }
 
@@ -96,11 +103,32 @@ export function CreateTaskDialog({
     setError(null)
     setSubmitting(true)
     try {
-      await api.post(`/projects/${projectId}/tasks`, {
+      const created = await api.post<{ id: string }>(`/projects/${projectId}/tasks`, {
         title: title.trim(),
         description: description.trim() || null,
         requirement_id: requirementId,
       })
+      // 依次回填暂存的引用与附件;失败保留剩余项,提示后可重试
+      const remainingRefs = [...refs]
+      const remainingFiles = [...files]
+      try {
+        while (remainingRefs.length > 0) {
+          const r = remainingRefs[0]
+          await api.post(`/targets/task/${created.id}/references`, { from_type: 'task', from_id: created.id, to_type: r.toType, to_id: r.toId, type: r.type })
+          remainingRefs.shift()
+        }
+        while (remainingFiles.length > 0) {
+          await api.upload(`/targets/task/${created.id}/attachments`, remainingFiles[0])
+          remainingFiles.shift()
+        }
+      } catch {
+        setRefs(remainingRefs)
+        setFiles(remainingFiles)
+        setError('已创建,但部分引用/附件回填失败,可稍后在详情页重试')
+        return
+      }
+      setRefs([])
+      setFiles([])
       if (draftKey) clearDraft(draftKey)
       onOpenChange(false)
       await qc.invalidateQueries({ queryKey: ['tasks', projectId] })
@@ -145,6 +173,7 @@ export function CreateTaskDialog({
               </SelectContent>
             </Select>
           </div>
+          {projectId && <CreateExtras projectId={projectId} refs={refs} onRefsChange={setRefs} files={files} onFilesChange={setFiles} />}
           {error && <p className="text-sm text-destructive">{error}</p>}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={clearFormDraft}>

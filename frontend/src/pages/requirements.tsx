@@ -33,6 +33,7 @@ import {
 } from '@/lib/api'
 import { useCurrentProject, useProjectRole } from '@/lib/current-project'
 import { clearDraft, readDraft, writeDraft } from '@/lib/form-draft'
+import { CreateExtras, type StagedReference } from '@/components/create-extras'
 
 const TIME_WINDOWS = [
   { value: '', label: '不限' },
@@ -378,6 +379,8 @@ function CreateRequirementDialog({ open, onOpenChange }: { open: boolean; onOpen
   const [description, setDescription] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [refs, setRefs] = useState<StagedReference[]>([])
+  const [files, setFiles] = useState<File[]>([])
 
   const draftKey = projectId ? `zeichen.draft.requirement:${projectId}` : null
 
@@ -387,6 +390,8 @@ function CreateRequirementDialog({ open, onOpenChange }: { open: boolean; onOpen
     const draft = draftKey ? readDraft<{ title: string; description: string }>(draftKey) : null
     setTitle(draft?.title ?? '')
     setDescription(draft?.description ?? '')
+    setRefs([])
+    setFiles([])
   }, [open, draftKey])
 
   useEffect(() => {
@@ -403,6 +408,8 @@ function CreateRequirementDialog({ open, onOpenChange }: { open: boolean; onOpen
     if (draftKey) clearDraft(draftKey)
     setTitle('')
     setDescription('')
+    setRefs([])
+    setFiles([])
     setError(null)
   }
 
@@ -411,7 +418,27 @@ function CreateRequirementDialog({ open, onOpenChange }: { open: boolean; onOpen
     setError(null)
     setSubmitting(true)
     try {
-      await api.post(`/projects/${projectId}/requirements`, { title: title.trim(), description: description.trim() || null })
+      const created = await api.post<{ id: string }>(`/projects/${projectId}/requirements`, { title: title.trim(), description: description.trim() || null })
+      const remainingRefs = [...refs]
+      const remainingFiles = [...files]
+      try {
+        while (remainingRefs.length > 0) {
+          const r = remainingRefs[0]
+          await api.post(`/targets/requirement/${created.id}/references`, { from_type: 'requirement', from_id: created.id, to_type: r.toType, to_id: r.toId, type: r.type })
+          remainingRefs.shift()
+        }
+        while (remainingFiles.length > 0) {
+          await api.upload(`/targets/requirement/${created.id}/attachments`, remainingFiles[0])
+          remainingFiles.shift()
+        }
+      } catch {
+        setRefs(remainingRefs)
+        setFiles(remainingFiles)
+        setError('已创建,但部分引用/附件回填失败,可稍后在详情页重试')
+        return
+      }
+      setRefs([])
+      setFiles([])
       if (draftKey) clearDraft(draftKey)
       setTitle('')
       setDescription('')
@@ -440,6 +467,7 @@ function CreateRequirementDialog({ open, onOpenChange }: { open: boolean; onOpen
             <Label htmlFor="req-desc">描述</Label>
             <Input id="req-desc" value={description} onChange={(e) => setDescription(e.target.value)} autoComplete="off" maxLength={512} />
           </div>
+          {projectId && <CreateExtras projectId={projectId} refs={refs} onRefsChange={setRefs} files={files} onFilesChange={setFiles} />}
           {error && <p className="text-sm text-destructive">{error}</p>}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={clearFormDraft}>
