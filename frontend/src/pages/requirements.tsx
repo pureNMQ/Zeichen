@@ -24,7 +24,6 @@ import { ErrorNotification } from '@/components/ui/notification'
 import {
   api,
   ApiError,
-  EXECUTION_REQUIREMENT_STATUSES,
   REQUIREMENT_STATUSES,
   type FilterCriteria,
   type FilterViewMode,
@@ -178,7 +177,7 @@ export function RequirementsPage() {
   })
 
   const items = (pageData?.pages ?? []).flatMap((p) => p.items)
-  const boardItems = items.filter((r) => r.status !== 'pending')
+  const boardItems = items
 
   async function doMove(id: string, to: RequirementStatus) {
     setActionError(null)
@@ -301,7 +300,7 @@ export function RequirementsPage() {
           items={boardItems}
           canDrag={canEdit}
           onMove={(id, to) => void doMove(id, to as RequirementStatus)}
-          columns={EXECUTION_REQUIREMENT_STATUSES}
+          columns={REQUIREMENT_STATUSES}
           renderCard={(r) => (
             <RequirementCard
               r={r}
