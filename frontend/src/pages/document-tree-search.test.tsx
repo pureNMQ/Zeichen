@@ -89,3 +89,57 @@ describe('文档树内搜索', () => {
     expect(screen.queryByRole('button', { name: '另一篇 Wiki' })).not.toBeInTheDocument()
   })
 })
+
+describe('词典树内搜索(词条与目录)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    vi.mocked(api.get).mockImplementation((path: string) => {
+      if (path === '/projects') return Promise.resolve([{ id: 'p1', name: '测试项目', created_at: '2026-08-01T00:00:00Z', my_role: 'owner' }])
+      if (path === '/projects/p1/documents/glossary/children?limit=100')
+        return Promise.resolve({
+          items: [
+            { id: 'term1', node_kind: 'document' as const, title: '订单模型', doc_type: 'glossary' as const, content: '', metadata: {}, project_id: 'p1', created_by: 'u1', created_at: '2026-08-01T00:00:00Z', updated_at: '2026-08-01T00:00:00Z', deleted_at: null, parent_id: null, directory_id: null, has_children: false },
+            { id: 'dir1', node_kind: 'directory' as const, title: '业务目录', name: '业务目录', module_type: 'glossary' as const, project_id: 'p1', parent_id: null, created_by: 'u1', created_at: '2026-08-01T00:00:00Z', updated_at: '2026-08-01T00:00:00Z', deleted_at: null, has_children: true },
+            { id: 'term2', node_kind: 'document' as const, title: '用户词条', doc_type: 'glossary' as const, content: '', metadata: {}, project_id: 'p1', created_by: 'u1', created_at: '2026-08-01T00:00:00Z', updated_at: '2026-08-01T00:00:00Z', deleted_at: null, parent_id: null, directory_id: null, has_children: false },
+          ],
+          next_cursor: null,
+        })
+      return Promise.resolve({ items: [], next_cursor: null })
+    })
+  })
+
+  function renderGlossary() {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    return render(
+      <QueryClientProvider client={client}>
+        <CurrentProjectProvider>
+          <DocumentNavigationProvider>
+            <MemoryRouter initialEntries={['/documents/glossary']}>
+              <Routes>
+                <Route path="/documents/glossary" element={<DocumentWorkbenchPage module="glossary" />} />
+                <Route path="/documents/glossary/term/:id" element={<DocumentWorkbenchPage module="glossary" />} />
+                <Route path="/documents/glossary/directory/:id" element={<DocumentWorkbenchPage module="glossary" />} />
+              </Routes>
+            </MemoryRouter>
+          </DocumentNavigationProvider>
+        </CurrentProjectProvider>
+      </QueryClientProvider>,
+    )
+  }
+
+  it('词条与目录节点均按标题过滤', async () => {
+    const user = userEvent.setup()
+    renderGlossary()
+
+    const search = await screen.findByRole('textbox', { name: /搜索文档/ })
+    await user.type(search, '订单')
+    expect(screen.getByRole('button', { name: '订单模型' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '用户词条' })).not.toBeInTheDocument()
+
+    await user.clear(search)
+    await user.type(search, '业务')
+    expect(screen.getByRole('button', { name: '业务目录' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '订单模型' })).not.toBeInTheDocument()
+  })
+})
