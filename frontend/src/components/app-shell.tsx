@@ -315,7 +315,7 @@ export function AppShell() {
         <div className="flex items-center gap-1 border-t p-2">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="w-full justify-start gap-2 font-normal">
+              <Button variant="ghost" className="min-w-0 flex-1 justify-start gap-2 font-normal">
                 {user && <UserAvatar user={user} className="h-6 w-6" />}
                 <span className="truncate">{user ? identityName(user) : ''}</span>
               </Button>
