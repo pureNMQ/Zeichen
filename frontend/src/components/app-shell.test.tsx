@@ -108,4 +108,16 @@ describe('AppShell 侧边栏', () => {
     await user.click(await screen.findByRole('option', { name: '网站改版' }))
     expect(localStorage.getItem('zeichen.currentProjectId')).toBe('p2')
   })
+
+  it('侧边栏底部用户按钮可收缩(flex-1 min-w-0),通知铃铛不溢出侧栏(REQ fa6e667e)', async () => {
+    renderShell('admin')
+    const bell = await screen.findByRole('button', { name: '通知' })
+    const row = bell.closest('div.border-t')!
+    const userButton = row.querySelector('button:not([aria-label])')!
+    expect(userButton.className).toContain('flex-1')
+    expect(userButton.className).toContain('min-w-0')
+    expect(userButton.className).not.toContain('w-full')
+    // 铃铛徽标锚定在按钮内沿,右移不超过行内边距(-right-1.5 < p-2)
+    expect(bell.className).toContain('shrink-0')
+  })
 })
