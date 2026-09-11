@@ -22,4 +22,16 @@ describe('user identity', () => {
     expect(container.querySelector('svg')).toBeInTheDocument()
     expect(screen.queryByText('B')).not.toBeInTheDocument()
   })
+
+  it('keeps the @account line rendered at equal height even without a nickname', () => {
+    const noNickname = { id: 'user-7', username: 'bob', nickname: null, avatar: null }
+    const { rerender } = render(<UserIdentityLabel user={noNickname} showUsername />)
+    const placeholder = screen.getByText('@bob')
+    expect(placeholder).toHaveClass('invisible')
+    expect(placeholder).toHaveAttribute('aria-hidden', 'true')
+
+    rerender(<UserIdentityLabel user={{ username: 'alice', nickname: '小艾', avatar: null }} showUsername />)
+    expect(screen.getByText('@alice')).not.toHaveClass('invisible')
+    expect(screen.getByText('@alice')).not.toHaveAttribute('aria-hidden', 'true')
+  })
 })
