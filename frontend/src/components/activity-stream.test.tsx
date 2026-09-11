@@ -31,7 +31,7 @@ it('活动行垂直居中对齐,长摘要以 min-w-0 截断不破坏布局', asy
   expect(line).toHaveClass('items-center')
   expect(line).not.toHaveClass('items-baseline')
 
-  const summary = screen.getByText((content, element) => element?.tagName === 'SPAN' && (element.textContent ?? '').startsWith('—'))
+  const summary = screen.getByText((_content, element) => element?.tagName === 'SPAN' && (element.textContent ?? '').startsWith('—'))
   expect(summary).toHaveClass('truncate')
   expect(summary).toHaveClass('min-w-0')
 

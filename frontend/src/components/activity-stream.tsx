@@ -31,13 +31,13 @@ export function ActivityStream({ targetType, targetId }: { targetType: string; t
       <div className="space-y-1.5">
         {isLoading && <p className="text-xs text-muted-foreground">加载中…</p>}
         {(data?.items ?? []).map((a) => (
-          <div key={a.id} className="flex items-baseline gap-2 text-sm">
+          <div key={a.id} className="flex items-center gap-2 text-sm">
             <span className="inline-flex shrink-0 items-center gap-2 font-medium">
               <UserAvatar user={{ id: a.actor_id, username: a.actor, avatar: a.actor_avatar }} className="h-6 w-6" />
               {a.actor}
             </span>
             <span className="shrink-0 text-xs text-muted-foreground">{ACTION_LABEL[a.action] ?? a.action}</span>
-            {a.summary && <span className="truncate text-xs text-muted-foreground">— {a.summary}</span>}
+            {a.summary && <span className="min-w-0 truncate text-xs text-muted-foreground">— {a.summary}</span>}
             <span className="ml-auto shrink-0 text-xs text-muted-foreground">
               {new Date(a.created_at).toLocaleString()}
             </span>
