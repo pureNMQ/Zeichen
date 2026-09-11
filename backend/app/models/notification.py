@@ -9,7 +9,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, Uuid
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base, IdMixin, PolymorphicTargetMixin, ProjectScopeMixin, TimestampMixin
@@ -27,3 +27,37 @@ class Notification(IdMixin, TimestampMixin, ProjectScopeMixin, PolymorphicTarget
     action: Mapped[str] = mapped_column(String(64), nullable=False)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+
+
+class NotificationPreference(IdMixin, TimestampMixin, Base):
+    """用户级通知偏好(REQ 023b607e):仅记录「关闭」的组合,缺省为开启。
+
+    scope_type = 'domain' 时 scope_key 为实体类型(requirement/task/document/project);
+    scope_type = 'action' 时 scope_key 为动作词(create/status/comment/...)。
+    偏好只做收窄过滤,不做扩大;实体级关注(EntityWatch)可突破收窄。
+    """
+
+    __tablename__ = "notification_preference"
+    __table_args__ = (
+        UniqueConstraint("user_id", "scope_type", "scope_key", name="uq_notif_pref_user_scope"),
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    scope_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    scope_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class EntityWatch(IdMixin, TimestampMixin, ProjectScopeMixin, PolymorphicTargetMixin, Base):
+    """实体级关注(REQ 023b607e):关注的实体变更始终通知,不受域/动作收窄影响。"""
+
+    __tablename__ = "entity_watch"
+    __table_args__ = (
+        UniqueConstraint("user_id", "target_type", "target_id", name="uq_entity_watch_user_target"),
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True
+    )

@@ -7,6 +7,7 @@ import { ActivityStream } from '@/components/activity-stream'
 import { AttachmentList } from '@/components/attachment-list'
 import { CommentStream } from '@/components/comment-stream'
 import { StatusBadge } from '@/components/status-badge'
+import { WatchButton } from '@/components/watch-button'
 import { StatusSelect } from '@/components/status-select'
 import { Button } from '@/components/ui/button'
 import { ErrorNotification } from '@/components/ui/notification'
@@ -148,6 +149,7 @@ export function TaskDetailPage() {
           {task.description && <p className="mt-2 text-sm text-muted-foreground">{task.description}</p>}
         </div>
         <div className="flex shrink-0 flex-wrap justify-end gap-2">
+          <WatchButton targetType="task" targetId={task.id} />
           {task.assignee && (
             <Badge variant="outline" className="gap-1.5">
               <UserAvatar user={{ id: task.assignee_id, username: task.assignee, avatar: task.assignee_avatar }} className="h-4 w-4 text-[9px]" />

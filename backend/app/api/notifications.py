@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from ..models import User
 from ..services import notifications as service
+from ..schemas import NotificationPreferencesUpdate
 from ..services.pagination import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from .deps import current_user
 
@@ -50,3 +51,23 @@ def mark_all_read(
 ) -> dict:
     service.mark_all_read(db, user)
     return {"ok": True}
+
+
+prefs_router = APIRouter(prefix="/api/users/me", tags=["notifications"])
+
+
+@prefs_router.get("/notification-preferences")
+def get_notification_preferences(
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    return service.get_preferences(db, user)
+
+
+@prefs_router.put("/notification-preferences")
+def update_notification_preferences(
+    body: NotificationPreferencesUpdate,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    return service.update_preferences(db, user, body.domains, body.actions)

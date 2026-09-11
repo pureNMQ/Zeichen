@@ -10,7 +10,7 @@ from .memory import MemoryGrant
 from .memory_improve_job import MemoryImproveJob
 from .cognee_configuration import CogneeConfiguration
 from .cognee_restart_job import CogneeRestartJob
-from .notification import Notification
+from .notification import EntityWatch, Notification, NotificationPreference
 from .filter_view import ProjectFilterView
 
 __all__ = [
@@ -38,6 +38,8 @@ __all__ = [
     "MemoryImproveJob",
     "CogneeConfiguration",
     "CogneeRestartJob",
+    "EntityWatch",
     "Notification",
+    "NotificationPreference",
     "ProjectFilterView",
 ]

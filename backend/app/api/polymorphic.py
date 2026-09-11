@@ -102,3 +102,35 @@ def delete_reference(
 ) -> dict:
     service.delete_reference(db, user, ref_id)
     return {"ok": True}
+
+
+@router.get("/targets/{target_type}/{target_id}/watch")
+def get_watch_state(
+    target_type: str,
+    target_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    return {"watching": service.is_watching(db, user, target_type, target_id)}
+
+
+@router.post("/targets/{target_type}/{target_id}/watch", status_code=201)
+def watch_target(
+    target_type: str,
+    target_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    service.watch_entity(db, user, target_type, target_id)
+    return {"watching": True}
+
+
+@router.delete("/targets/{target_type}/{target_id}/watch")
+def unwatch_target(
+    target_type: str,
+    target_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    service.unwatch_entity(db, user, target_type, target_id)
+    return {"watching": False}

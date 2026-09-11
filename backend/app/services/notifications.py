@@ -8,13 +8,15 @@
 
 import uuid
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete as sa_delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from ..models import (
     Activity,
     Comment,
+    EntityWatch,
     Notification,
+    NotificationPreference,
     Project,
     ProjectMember,
     Requirement,
@@ -23,7 +25,7 @@ from ..models import (
     WorkspaceMember,
 )
 from .pagination import page_result
-from .permissions import get_team, is_admin
+from .permissions import get_team, is_admin, require_project_role
 
 # activity 目标实体 → 可解析创建者/被指派者的模型
 _TARGET_CREATED_BY = {
@@ -109,7 +111,7 @@ def notify_activity(db: Session, activity: Activity) -> None:
     """activity 落地后为相关成员生成通知(不 commit,随调用方事务一起提交)。"""
     if activity.actor_id is None:
         return
-    recipients = _relevant_member_ids(db, activity)
+    recipients = _filter_by_preferences(db, activity, _relevant_member_ids(db, activity))
     for user_id in recipients:
         db.add(
             Notification(
@@ -176,3 +178,120 @@ def mark_all_read(db: Session, user: User) -> None:
     for n in rows:
         n.read_at = now
     db.commit()
+
+
+# ---- 通知偏好与实体级关注(REQ 023b607e) ----
+
+NOTIFICATION_DOMAINS = ("requirement", "task", "document", "project")
+NOTIFICATION_ACTIONS = (
+    "create", "update", "status", "comment", "reference",
+    "assign", "claim", "delete", "restore", "move",
+)
+
+
+def get_preferences(db: Session, user: User) -> dict:
+    """返回三段偏好状态:域与动作缺省全开,仅显式关闭的为 False。"""
+    rows = db.scalars(
+        select(NotificationPreference).where(NotificationPreference.user_id == user.id)
+    ).all()
+    domains = {key: True for key in NOTIFICATION_DOMAINS}
+    actions = {key: True for key in NOTIFICATION_ACTIONS}
+    for row in rows:
+        if row.scope_type == "domain" and row.scope_key in domains:
+            domains[row.scope_key] = row.enabled
+        elif row.scope_type == "action" and row.scope_key in actions:
+            actions[row.scope_key] = row.enabled
+    return {"domains": domains, "actions": actions}
+
+
+def update_preferences(db: Session, user: User, domains: dict[str, bool], actions: dict[str, bool]) -> dict:
+    """整体替换式更新:未知键拒绝;键缺失视为保持开启(删除该行)。"""
+    unknown = (set(domains) - set(NOTIFICATION_DOMAINS)) | (set(actions) - set(NOTIFICATION_ACTIONS))
+    if unknown:
+        from ..errors import invalid_request
+
+        raise invalid_request(f"未知的偏好项: {sorted(unknown)}")
+    rows = db.scalars(
+        select(NotificationPreference).where(NotificationPreference.user_id == user.id)
+    ).all()
+    by_key = {(r.scope_type, r.scope_key): r for r in rows}
+    desired: list[tuple[str, str, bool]] = [
+        ("domain", key, enabled) for key, enabled in domains.items()
+    ] + [
+        ("action", key, enabled) for key, enabled in actions.items()
+    ]
+    for scope_type, key, enabled in desired:
+        row = by_key.get((scope_type, key))
+        if enabled:
+            if row is not None:
+                db.delete(row)
+            continue
+        if row is not None:
+            row.enabled = False
+            continue
+        db.add(NotificationPreference(user_id=user.id, scope_type=scope_type, scope_key=key, enabled=False))
+    db.commit()
+    return get_preferences(db, user)
+
+
+def is_watching(db: Session, user: User, target_type: str, target_id: uuid.UUID) -> bool:
+    return (
+        db.scalar(
+            select(EntityWatch.id).where(
+                EntityWatch.user_id == user.id,
+                EntityWatch.target_type == target_type,
+                EntityWatch.target_id == target_id,
+            )
+        )
+        is not None
+    )
+
+
+def watch_entity(db: Session, user: User, target_type: str, target_id: uuid.UUID) -> None:
+    from .polymorphic import resolve_target
+
+    project = resolve_target(db, target_type, target_id)
+    require_project_role(db, user.id, project.id, min_level="viewer")
+    if not is_watching(db, user, target_type, target_id):
+        db.add(EntityWatch(project_id=project.id, user_id=user.id, target_type=target_type, target_id=target_id))
+        db.commit()
+
+
+def unwatch_entity(db: Session, user: User, target_type: str, target_id: uuid.UUID) -> None:
+    db.execute(
+        sa_delete(EntityWatch).where(
+            EntityWatch.user_id == user.id,
+            EntityWatch.target_type == target_type,
+            EntityWatch.target_id == target_id,
+        )
+    )
+    db.commit()
+
+
+def _filter_by_preferences(
+    db: Session, activity: Activity, recipients: set[uuid.UUID]
+) -> set[uuid.UUID]:
+    """偏好只收窄:关闭了该域/动作的成员不再接收;实体级关注突破收窄。"""
+    if not recipients:
+        return recipients
+    watchers = set(
+        db.scalars(
+            select(EntityWatch.user_id).where(
+                EntityWatch.target_type == activity.target_type,
+                EntityWatch.target_id == activity.target_id,
+            )
+        ).all()
+    )
+    rows = db.scalars(
+        select(NotificationPreference).where(
+            NotificationPreference.user_id.in_(recipients),
+            NotificationPreference.enabled.is_(False),
+        )
+    ).all()
+    disabled: set[uuid.UUID] = set()
+    for row in rows:
+        if row.scope_type == "domain" and row.scope_key == activity.target_type:
+            disabled.add(row.user_id)
+        elif row.scope_type == "action" and row.scope_key == activity.action:
+            disabled.add(row.user_id)
+    return {user_id for user_id in recipients if user_id in watchers or user_id not in disabled}

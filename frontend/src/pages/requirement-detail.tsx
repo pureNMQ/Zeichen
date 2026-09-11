@@ -12,6 +12,7 @@ import { StatusSelect } from '@/components/status-select'
 import { Badge } from '@/components/ui/badge'
 import { UserAvatar } from '@/components/user-avatar'
 import { Button } from '@/components/ui/button'
+import { WatchButton } from '@/components/watch-button'
 import { ErrorNotification } from '@/components/ui/notification'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -142,6 +143,7 @@ export function RequirementDetailPage() {
           {req.description && <p className="mt-2 text-sm text-muted-foreground">{req.description}</p>}
         </div>
         <div className="flex shrink-0 gap-2">
+          <WatchButton targetType="requirement" targetId={req.id} />
           {canEdit && isPending && (
             <Button onClick={() => void setStatus('backlog')}>
               <Check className="mr-2 h-4 w-4" />

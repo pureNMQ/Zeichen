@@ -13,6 +13,7 @@ import { UserProfileDialog } from '@/components/user-profile-dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NotificationBell } from '@/components/notification-bell'
+import { NotificationPreferencesDialog } from '@/components/notification-preferences-dialog'
 import {
   Dialog,
   DialogContent,
@@ -293,6 +294,7 @@ export function AppShell() {
   const { role } = useCurrentProject()
   const navigate = useNavigate()
   const [pwdOpen, setPwdOpen] = useState(false)
+  const [prefsOpen, setPrefsOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
 
   const isAdmin = user?.workspace_role === 'admin'
@@ -336,6 +338,9 @@ export function AppShell() {
                 <KeyRound className="mr-2 h-4 w-4" />
                 修改密码
               </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setPrefsOpen(true)}>
+                通知偏好
+              </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={async () => {
                   await logout()
@@ -355,6 +360,7 @@ export function AppShell() {
         <Outlet />
       </main>
       <ChangePasswordDialog open={pwdOpen} onOpenChange={setPwdOpen} />
+      <NotificationPreferencesDialog open={prefsOpen} onOpenChange={setPrefsOpen} />
       {user && (
         <UserProfileDialog
           user={user}

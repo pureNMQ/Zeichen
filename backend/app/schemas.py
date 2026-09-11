@@ -264,3 +264,8 @@ class ReferenceCreate(BaseModel):
     to_type: Literal["requirement", "task", "document", "repository", "project"]
     to_id: uuid.UUID
     type: Literal["derives", "documents", "implements", "mentions"]
+
+
+class NotificationPreferencesUpdate(BaseModel):
+    domains: dict[str, bool] = {}
+    actions: dict[str, bool] = {}
