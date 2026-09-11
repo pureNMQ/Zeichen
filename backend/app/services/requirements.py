@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from ..errors import conflict, invalid_request, not_found
 from ..models import Requirement, Task, User
+from .labels import STATUS_CN
 from .pagination import page_result
 from .permissions import get_accessible_project, require_project_role
 from .polymorphic import record_activity
@@ -155,7 +156,7 @@ def set_requirement_status(
         "requirement",
         requirement.id,
         "status",
-        f"{old} → {target}",
+        f"{STATUS_CN[old]} → {STATUS_CN[target]}",
     )
     db.commit()
     return requirement

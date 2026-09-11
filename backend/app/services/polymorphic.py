@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from ..errors import conflict, invalid_request, not_found, permission_denied
 from ..models import Activity, Comment, Document, Project, Reference, Repository, Requirement, Task, User
+from .labels import TARGET_TYPE_CN
 from .pagination import page_result
 from .permissions import get_accessible_project, get_project_role, is_admin, require_project_role
 from .user_profiles import avatar_url, display_name
@@ -226,11 +227,26 @@ def create_reference(
         created_by=actor.id,
     )
     db.add(ref)
-    record_activity(
-        db, from_project.id, actor.id, from_type, from_id, "reference", f"引用 {to_type}:{to_id}"
-    )
+    to_label = TARGET_TYPE_CN.get(to_type, to_type)
+    to_title = _target_title(db, to_type, to_id)
+    summary = f"引用 {to_label}《{to_title}》" if to_title else f"引用 {to_label}(已删除)"
+    record_activity(db, from_project.id, actor.id, from_type, from_id, "reference", summary)
     db.commit()
     return ref
+
+
+def _target_title(db: Session, target_type: str, target_id: uuid.UUID) -> str | None:
+    """引用目标的当前可读标题;目标不存在或无标题字段时返回 None。"""
+    model = _TARGET_MODELS.get(target_type)
+    if model is None:
+        if target_type == "project":
+            target = db.get(Project, target_id)
+            return target.name if target else None
+        return None
+    target = db.get(model, target_id)
+    if target is None:
+        return None
+    return getattr(target, "title", None) or getattr(target, "name", None)
 
 
 def _ref_dict(db: Session, r: Reference) -> dict:

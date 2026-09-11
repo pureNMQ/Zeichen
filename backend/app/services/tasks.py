@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from ..errors import conflict, invalid_request, not_found, permission_denied
 from ..models import ProjectMember, Requirement, Task, User
 from . import task_blockers
+from .labels import STATUS_CN
 from .pagination import page_result
 from .permissions import get_accessible_project, get_project_role, is_admin, require_project_role
 from .polymorphic import record_activity
@@ -251,7 +252,7 @@ def set_task_status(
         "task",
         task.id,
         "status",
-        f"{old} → {target}",
+        f"{STATUS_CN[old]} → {STATUS_CN[target]}",
     )
     db.commit()
     return task
