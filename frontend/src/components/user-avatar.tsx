@@ -41,8 +41,13 @@ export function UserIdentityLabel({ user, showUsername = false }: { user: Identi
       <UserAvatar user={user} />
       <span className="min-w-0">
         <span className="block truncate">{name}</span>
-        {showUsername && name !== user.username && (
-          <span className="block truncate text-xs font-normal text-muted-foreground">@{user.username}</span>
+        {showUsername && (
+          <span
+            className={cn('block truncate text-xs font-normal text-muted-foreground', name === user.username && 'invisible')}
+            aria-hidden={name === user.username || undefined}
+          >
+            @{user.username}
+          </span>
         )}
       </span>
     </span>
