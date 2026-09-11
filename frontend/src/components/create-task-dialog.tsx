@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { api, ApiError, type RequirementRow } from '@/lib/api'
+import { clearDraft, readDraft, writeDraft } from '@/lib/form-draft'
 import { useCurrentProject } from '@/lib/current-project'
 
 export function CreateTaskDialog({
@@ -41,14 +42,44 @@ export function CreateTaskDialog({
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
+  const draftKey = projectId ? `zeichen.draft.task:${projectId}` : null
+
   useEffect(() => {
     if (open) {
+      setError(null)
+      if (draftKey) {
+        const draft = readDraft<{ title: string; description: string; requirementId: string | null }>(draftKey)
+        if (draft) {
+          setTitle(draft.title ?? '')
+          setDescription(draft.description ?? '')
+          // 从需求详情派生创建时,预设需求优先于草稿
+          setRequirementId(presetRequirementId ?? draft.requirementId ?? null)
+          return
+        }
+      }
       setTitle('')
       setDescription('')
       setRequirementId(presetRequirementId)
-      setError(null)
     }
-  }, [open, presetRequirementId])
+  }, [open, presetRequirementId, draftKey])
+
+  useEffect(() => {
+    if (!open || !draftKey) return
+    // 全空内容不持久化,并清掉既有草稿(手动清空后重开即为空白表单)
+    if (!title && !description && !requirementId) {
+      clearDraft(draftKey)
+      return
+    }
+    writeDraft(draftKey, { title, description, requirementId })
+  }, [open, draftKey, title, description, requirementId])
+
+  function clearFormDraft() {
+    if (draftKey) clearDraft(draftKey)
+    setTitle('')
+    setDescription('')
+    setRequirementId(presetRequirementId)
+    setError(null)
+  }
 
   const { data: requirements } = useQuery({
     queryKey: ['requirements', projectId],
@@ -70,6 +101,7 @@ export function CreateTaskDialog({
         description: description.trim() || null,
         requirement_id: requirementId,
       })
+      if (draftKey) clearDraft(draftKey)
       onOpenChange(false)
       await qc.invalidateQueries({ queryKey: ['tasks', projectId] })
       await qc.invalidateQueries({ queryKey: ['requirements', projectId] })
@@ -115,6 +147,9 @@ export function CreateTaskDialog({
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
           <DialogFooter>
+            <Button type="button" variant="outline" onClick={clearFormDraft}>
+              清空草稿
+            </Button>
             <Button type="submit" disabled={submitting}>
               {submitting ? '创建中…' : '创建'}
             </Button>

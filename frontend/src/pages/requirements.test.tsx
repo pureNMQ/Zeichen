@@ -205,6 +205,22 @@ describe('需求列表页(当前项目)', () => {
     expect(api.get).toHaveBeenCalledWith('/projects/p1/filter-views?entity_type=requirement')
   })
 
+  it('新建需求表单草稿:输入自动暂存,清空草稿重置(REQ ff7a0aa2;重开恢复由任务对话框用例覆盖)', async () => {
+    const user = (await import('@testing-library/user-event')).default
+    renderRequirements([projects[1]])
+    await user.click(await screen.findByRole('button', { name: /新建需求/ }))
+    await user.type(screen.getByLabelText('标题'), '未提交的需求草稿')
+    await user.type(screen.getByLabelText('描述'), '草稿描述')
+    await waitFor(() => {
+      expect(JSON.parse(localStorage.getItem('zeichen.draft.requirement:p2')!)).toEqual({ title: '未提交的需求草稿', description: '草稿描述' })
+    })
+
+    // 清空草稿:存储清除 + 表单重置
+    await user.click(screen.getByRole('button', { name: '清空草稿' }))
+    expect(localStorage.getItem('zeichen.draft.requirement:p2')).toBeNull()
+    expect(screen.getByLabelText('标题')).toHaveValue('')
+  })
+
   it('viewer 不可见新建/删除按钮', async () => {
     renderRequirements()
     expect(await screen.findByText('登录功能')).toBeInTheDocument()

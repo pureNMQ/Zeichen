@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query'
 import { FolderOpen, LayoutGrid, List, Plus } from 'lucide-react'
@@ -32,6 +32,7 @@ import {
   type RequirementStatus,
 } from '@/lib/api'
 import { useCurrentProject, useProjectRole } from '@/lib/current-project'
+import { clearDraft, readDraft, writeDraft } from '@/lib/form-draft'
 
 const TIME_WINDOWS = [
   { value: '', label: '不限' },
@@ -378,12 +379,40 @@ function CreateRequirementDialog({ open, onOpenChange }: { open: boolean; onOpen
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
+  const draftKey = projectId ? `zeichen.draft.requirement:${projectId}` : null
+
+  useEffect(() => {
+    if (!open) return
+    setError(null)
+    const draft = draftKey ? readDraft<{ title: string; description: string }>(draftKey) : null
+    setTitle(draft?.title ?? '')
+    setDescription(draft?.description ?? '')
+  }, [open, draftKey])
+
+  useEffect(() => {
+    if (!open || !draftKey) return
+    // 全空内容不持久化,并清掉既有草稿
+    if (!title && !description) {
+      clearDraft(draftKey)
+      return
+    }
+    writeDraft(draftKey, { title, description })
+  }, [open, draftKey, title, description])
+
+  function clearFormDraft() {
+    if (draftKey) clearDraft(draftKey)
+    setTitle('')
+    setDescription('')
+    setError(null)
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
     setError(null)
     setSubmitting(true)
     try {
       await api.post(`/projects/${projectId}/requirements`, { title: title.trim(), description: description.trim() || null })
+      if (draftKey) clearDraft(draftKey)
       setTitle('')
       setDescription('')
       onOpenChange(false)
@@ -413,6 +442,9 @@ function CreateRequirementDialog({ open, onOpenChange }: { open: boolean; onOpen
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
           <DialogFooter>
+            <Button type="button" variant="outline" onClick={clearFormDraft}>
+              清空草稿
+            </Button>
             <Button type="submit" disabled={submitting}>
               {submitting ? '创建中…' : '创建'}
             </Button>
