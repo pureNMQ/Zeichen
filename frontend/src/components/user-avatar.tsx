@@ -1,4 +1,5 @@
 import Avatar from 'boring-avatars'
+import { Bot } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
 import type { UserIdentity } from '@/lib/api'
@@ -50,6 +51,20 @@ export function UserIdentityLabel({ user, showUsername = false }: { user: Identi
           </span>
         )}
       </span>
+    </span>
+  )
+}
+
+export function MemberAccountLabel({ user, isAgent }: { user: Identity; isAgent: boolean }) {
+  return (
+    <span className="inline-flex min-w-0 items-center gap-1.5">
+      <UserIdentityLabel user={user} showUsername />
+      {isAgent && (
+        <span className="inline-flex shrink-0" title="Agent">
+          <Bot className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+          <span className="sr-only">Agent</span>
+        </span>
+      )}
     </span>
   )
 }

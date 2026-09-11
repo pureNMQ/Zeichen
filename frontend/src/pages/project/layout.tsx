@@ -1,9 +1,9 @@
 import { useState, type FormEvent } from 'react'
 import { useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Bot, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Pencil, Plus, Trash2 } from 'lucide-react'
 import { api, ApiError, type ProjectMemberRow, type ProjectRole } from '@/lib/api'
-import { UserIdentityLabel } from '@/components/user-avatar'
+import { MemberAccountLabel } from '@/components/user-avatar'
 import { identityName } from '@/lib/user-identity'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -402,13 +402,7 @@ export function ProjectLayout() {
                   {members.map((m) => (
                     <TableRow key={m.id}>
                       <TableCell className="font-medium">
-                        <UserIdentityLabel user={m} showUsername />
-                        {m.is_agent && (
-                          <span className="ml-1 inline-flex align-text-bottom" title="Agent">
-                            <Bot className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-                            <span className="sr-only">Agent</span>
-                          </span>
-                        )}
+                        <MemberAccountLabel user={m} isAgent={m.is_agent} />
                       </TableCell>
                       <TableCell>
                         {isOwner && m.role === 'owner' ? (
