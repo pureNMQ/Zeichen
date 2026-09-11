@@ -2,9 +2,12 @@ import { expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
-vi.mock(import('@/lib/api'), async (importOriginal) => {
+vi.mock('@/lib/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/api')>()
-  return { ...actual, api: { get: vi.fn(), post: vi.fn(), delete: vi.fn() } }
+  return {
+    ...actual,
+    api: { get: vi.fn(), post: actual.api.post, delete: actual.api.delete },
+  } as unknown as typeof actual
 })
 
 import { ActivityStream } from '@/components/activity-stream'
