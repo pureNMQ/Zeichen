@@ -42,7 +42,7 @@ vi.mock('@/lib/auth', () => ({
 import { api, type ProjectRow, type RequirementRow, type TaskRow } from '@/lib/api'
 import { CurrentProjectProvider } from '@/lib/current-project'
 import { RequirementDetailPage } from '@/pages/requirement-detail'
-import { TaskDetailPage } from '@/pages/task-detail'
+import { TaskDetailDialog } from '@/components/task-detail-dialog'
 
 const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 
@@ -74,7 +74,7 @@ const task: TaskRow = {
   description: legacyTaskDescription,
   status: 'backlog',
   project_id: 'p2',
-  requirement_id: null,
+  requirement_id: 'r1',
   assignee_id: null,
   assignee: null,
   created_by: 'u1',
@@ -83,13 +83,23 @@ const task: TaskRow = {
 }
 
 function renderPage(path: string) {
+  if (path === '/tasks/t1') {
+    return render(
+      <QueryClientProvider client={qc}>
+        <CurrentProjectProvider>
+          <MemoryRouter>
+            <TaskDetailDialog task={task} open onOpenChange={vi.fn()} />
+          </MemoryRouter>
+        </CurrentProjectProvider>
+      </QueryClientProvider>,
+    )
+  }
   return render(
     <QueryClientProvider client={qc}>
       <CurrentProjectProvider>
         <MemoryRouter initialEntries={[path]}>
           <Routes>
             <Route path="/requirements/:id" element={<RequirementDetailPage />} />
-            <Route path="/tasks/:id" element={<TaskDetailPage />} />
           </Routes>
         </MemoryRouter>
       </CurrentProjectProvider>
@@ -118,7 +128,7 @@ describe('需求/任务描述按纯文本展示(REQ-2)', () => {
     expect(description.textContent).toBe(legacyRequirementDescription)
   })
 
-  it('任务详情把存量 Markdown 描述按纯文本展示,不渲染任何 Markdown 元素', async () => {
+  it('任务详情弹窗把存量 Markdown 描述按纯文本展示,不渲染任何 Markdown 元素', async () => {
     renderPage('/tasks/t1')
     const description = await screen.findByText(legacyTaskDescription)
     expect(description.closest('strong,em,del,code,pre,h1,h2,h3,ul,ol,li,a,img')).toBeNull()

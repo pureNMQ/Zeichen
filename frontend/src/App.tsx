@@ -13,10 +13,8 @@ import { MembersPage } from '@/pages/members'
 import { ProjectsPage } from '@/pages/projects'
 import { ProjectLayout } from '@/pages/project/layout'
 import { RequirementsPage } from '@/pages/requirements'
-import { TasksPage } from '@/pages/tasks'
 import { RequirementDetailPage } from '@/pages/requirement-detail'
 import { SetPasswordPage } from '@/pages/set-password'
-import { TaskDetailPage } from '@/pages/task-detail'
 import { DocumentWorkbenchPage } from '@/pages/documents'
 import { MemoryPage, MemorySessionsPage } from '@/pages/memory'
 import { CogneePage } from '@/pages/cognee'
@@ -109,9 +107,7 @@ export function App() {
         <Route path="projects" element={<ProjectsPage />} />
         <Route path="projects/:projectId" element={<ProjectLayout />} />
         <Route path="requirements" element={<RequirementsPage />} />
-        <Route path="tasks" element={<TasksPage />} />
         <Route path="requirements/:id" element={<RequirementDetailPage />} />
-        <Route path="tasks/:id" element={<TaskDetailPage />} />
         <Route path="documents/wiki" element={<DocumentWorkbenchPage module="wiki" />} />
         <Route path="documents/wiki/:id" element={<DocumentWorkbenchPage module="wiki" />} />
         <Route path="documents/glossary" element={<DocumentWorkbenchPage module="glossary" />} />

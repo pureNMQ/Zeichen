@@ -37,6 +37,15 @@ def _requirement_dict(db: Session, r: Requirement) -> dict:
             .select_from(Task)
             .where(Task.requirement_id == r.id, Task.deleted_at.is_(None))
         ),
+        "done_task_count": db.scalar(
+            select(func.count())
+            .select_from(Task)
+            .where(
+                Task.requirement_id == r.id,
+                Task.deleted_at.is_(None),
+                Task.status == "done",
+            )
+        ),
     }
 
 

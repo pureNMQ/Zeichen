@@ -100,6 +100,10 @@ export function CreateTaskDialog({
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
     if (!projectId) return
+    if (!requirementId) {
+      setError('请选择关联需求')
+      return
+    }
     setError(null)
     setSubmitting(true)
     try {
@@ -146,7 +150,7 @@ export function CreateTaskDialog({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>新建任务</DialogTitle>
-          <DialogDescription>任务可挂到需求下(承接拆解),也可作为独立任务。</DialogDescription>
+          <DialogDescription>任务必须挂到已确认的需求下,承接需求拆解。</DialogDescription>
         </DialogHeader>
         <form onSubmit={onSubmit} className="space-y-4">
           <div className="space-y-1.5">
@@ -159,12 +163,11 @@ export function CreateTaskDialog({
           </div>
           <div className="space-y-1.5">
             <Label>关联需求</Label>
-            <Select value={requirementId ?? 'none'} onValueChange={(v) => setRequirementId(v === 'none' ? null : v)}>
+            <Select value={requirementId ?? ''} onValueChange={setRequirementId}>
               <SelectTrigger aria-label="关联需求" className="w-full justify-between">
-                <SelectValue placeholder="独立任务(不关联)" />
+                <SelectValue placeholder="选择需求(必选)" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">独立任务(不关联)</SelectItem>
                 {(requirements?.items ?? []).filter((r) => r.status !== 'pending').map((r) => (
                   <SelectItem key={r.id} value={r.id}>
                     {r.title}

@@ -193,7 +193,7 @@ describe('需求列表页(当前项目)', () => {
     }
     expect(screen.getByText('等待产品确认')).toBeInTheDocument()
     expect(screen.getByText(/当前项目:demo/)).toBeInTheDocument()
-    expect(screen.getByText('2 任务')).toBeInTheDocument()
+    expect(screen.getByText('0/2 任务')).toBeInTheDocument()
     // 视图切换器:全部 / 近期活跃
     expect(screen.getByRole('button', { name: /全部/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /近期活跃/ })).toBeInTheDocument()

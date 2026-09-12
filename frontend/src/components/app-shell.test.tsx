@@ -71,7 +71,9 @@ describe('AppShell 侧边栏', () => {
     renderShell('admin')
     expect(await screen.findByText('团队功能')).toBeInTheDocument()
     expect(screen.getByText('工作区')).toBeInTheDocument()
-    for (const label of ['项目', '成员', 'Agent', '需求', '任务']) {
+    // 任务入口已随独立任务面板移除(ADR 0003)
+    expect(screen.queryByRole('link', { name: '任务' })).not.toBeInTheDocument()
+    for (const label of ['项目', '成员', 'Agent', '需求']) {
       expect(screen.getByRole('link', { name: label })).toBeInTheDocument()
     }
   })

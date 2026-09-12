@@ -118,13 +118,13 @@ export interface CogneeRuntimeStatus {
 }
 
 export type WorkflowStatus = 'pending' | 'backlog' | 'in_progress' | 'verifying' | 'done' | 'cancelled'
-// 需求五态(含待确认,无验收中);任务保留原五态(无待确认)
-export type RequirementStatus = Exclude<WorkflowStatus, 'verifying'>
-export type TaskStatus = Exclude<WorkflowStatus, 'pending'>
+// 需求六态(含待确认/验收中,验收上移需求);任务四态(无待确认/验收中,ADR 0003)
+export type RequirementStatus = Exclude<WorkflowStatus, never>
+export type TaskStatus = Exclude<WorkflowStatus, 'pending' | 'verifying'>
 
-export const REQUIREMENT_STATUSES: RequirementStatus[] = ['pending', 'backlog', 'in_progress', 'done', 'cancelled']
-export const EXECUTION_REQUIREMENT_STATUSES: RequirementStatus[] = ['backlog', 'in_progress', 'done', 'cancelled']
-export const TASK_STATUSES: TaskStatus[] = ['backlog', 'in_progress', 'verifying', 'done', 'cancelled']
+export const REQUIREMENT_STATUSES: RequirementStatus[] = ['pending', 'backlog', 'in_progress', 'verifying', 'done', 'cancelled']
+export const EXECUTION_REQUIREMENT_STATUSES: RequirementStatus[] = ['backlog', 'in_progress', 'verifying', 'done', 'cancelled']
+export const TASK_STATUSES: TaskStatus[] = ['backlog', 'in_progress', 'done', 'cancelled']
 
 export interface RequirementRow {
   id: string
@@ -136,6 +136,7 @@ export interface RequirementRow {
   created_at: string
   updated_at: string
   task_count: number
+  done_task_count?: number
 }
 
 export interface TaskBlockerSummary {
@@ -151,7 +152,7 @@ export interface TaskRow {
   description: string | null
   status: TaskStatus
   project_id: string
-  requirement_id: string | null
+  requirement_id: string | null // 必挂需求(ADR 0003);旧数据直查可为空,UI 仍容忍
   assignee_id: string | null
   assignee: string | null
   assignee_username?: string | null

@@ -78,12 +78,12 @@ describe('全局搜索页域过滤', () => {
     const user = userEvent.setup()
     mockAllDomains()
     renderSearch()
-    expect(await screen.findByRole('link', { name: /实现登录/ })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /实现登录/ })).toBeInTheDocument()
 
     await user.click(screen.getByRole('tab', { name: '需求' }))
     await waitFor(() => expect(api.get).toHaveBeenCalledWith(expect.stringContaining('domain=requirement')))
     expect(await screen.findByRole('link', { name: /登录功能/ })).toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: /实现登录/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /实现登录/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /登录设计文档/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /记忆/ })).not.toBeInTheDocument()
 
@@ -92,7 +92,7 @@ describe('全局搜索页域过滤', () => {
       const last = vi.mocked(api.get).mock.calls.at(-1)?.[0] ?? ''
       expect(last).not.toContain('domain=')
     })
-    expect(await screen.findByRole('link', { name: /实现登录/ })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /实现登录/ })).toBeInTheDocument()
   })
 })
 

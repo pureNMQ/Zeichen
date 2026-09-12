@@ -62,7 +62,8 @@ describe('全局搜索页', () => {
     expect(screen.getByRole('heading', { name: /记忆/ })).toBeInTheDocument()
 
     expect(screen.getByRole('link', { name: /登录功能/ })).toHaveAttribute('href', '/requirements/r1')
-    expect(screen.getByRole('link', { name: /实现登录/ })).toHaveAttribute('href', '/tasks/t1')
+    // 任务结果为按钮:点击后解析所属需求再跳转(ADR 0003 任务无独立页面)
+    expect(screen.getByRole('button', { name: /实现登录/ })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /登录设计文档/ })).toHaveAttribute('href', '/documents/wiki/d1')
 
     expect(screen.getAllByText('demo').length).toBeGreaterThan(0)

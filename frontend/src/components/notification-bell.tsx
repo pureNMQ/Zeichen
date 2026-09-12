@@ -44,13 +44,22 @@ function targetHref(targetType: string, targetId: string): string {
   switch (targetType) {
     case 'requirement':
       return `/requirements/${targetId}`
-    case 'task':
-      return `/tasks/${targetId}`
     case 'document':
       return `/documents/wiki/${targetId}`
     default:
       return '/projects'
   }
+}
+
+// 任务无独立页面(ADR 0003):先查任务拿所属需求,再定位需求详情页任务弹窗
+async function taskHref(taskId: string): Promise<string> {
+  try {
+    const t = await api.get<{ requirement_id: string | null }>(`/tasks/${taskId}`)
+    if (t.requirement_id) return `/requirements/${t.requirement_id}?task=${taskId}`
+  } catch {
+    // 任务不存在/无权限时回退项目页
+  }
+  return '/projects'
 }
 
 export function NotificationBell() {
@@ -81,7 +90,11 @@ export function NotificationBell() {
         }
       }
       setOpen(false)
-      navigate(targetHref(n.target_type, n.target_id))
+      const href =
+        n.target_type === 'task'
+          ? await taskHref(n.target_id)
+          : targetHref(n.target_type, n.target_id)
+      navigate(href)
     },
     [navigate, queryClient],
   )

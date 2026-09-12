@@ -1,12 +1,14 @@
-import { useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, FolderOpen, Link2, Plus } from 'lucide-react'
+import { Check, EyeOff, Eye, FolderOpen, Plus, Trash2, UserPlus } from 'lucide-react'
 
 import { ActivityStream } from '@/components/activity-stream'
 import { AttachmentList } from '@/components/attachment-list'
 import { CommentStream } from '@/components/comment-stream'
 import { CreateTaskDialog } from '@/components/create-task-dialog'
+import { TaskDetailDialog } from '@/components/task-detail-dialog'
+import { TaskRefLink } from '@/components/task-ref-link'
 import { StatusBadge } from '@/components/status-badge'
 import { StatusSelect } from '@/components/status-select'
 import { Badge } from '@/components/ui/badge'
@@ -27,15 +29,18 @@ import {
   api,
   ApiError,
   REQUIREMENT_STATUSES,
+  TASK_STATUSES,
   type ReferenceRow,
   type RequirementRow,
   type TaskRow,
 } from '@/lib/api'
+import { useAuth } from '@/lib/auth'
 import { useCurrentProject, useProjectRole } from '@/lib/current-project'
+import { canSetTaskStatus } from '@/lib/task-perms'
 
 function referenceHref(type: string, id: string, module?: string | null) {
   if (type === 'requirement') return `/requirements/${id}`
-  if (type === 'task') return `/tasks/${id}`
+  // task 引用走 TaskRefLink(任务无独立页面,ADR 0003)
   if (type === 'document' && module === 'wiki') return `/documents/wiki/${id}`
   if (type === 'document' && module === 'glossary') return `/documents/glossary/term/${id}`
   return null
@@ -52,14 +57,17 @@ function Guide({ children }: { children: React.ReactNode }) {
 
 export function RequirementDetailPage() {
   const { id = '' } = useParams()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const { user } = useAuth()
   const qc = useQueryClient()
   const role = useProjectRole()
   const { currentProject, isLoading: cpLoading, selectProject } = useCurrentProject()
   const canEdit = role === 'editor' || role === 'owner'
   const [actionError, setActionError] = useState<string | null>(null)
-  const [linkOpen, setLinkOpen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
-  const [linkError, setLinkError] = useState<string | null>(null)
+  const [showCancelled, setShowCancelled] = useState(false)
+  const [dialogTaskId, setDialogTaskId] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<TaskRow | null>(null)
 
   const { data: req, isLoading, error } = useQuery({
     queryKey: ['requirement', id],
@@ -70,16 +78,28 @@ export function RequirementDetailPage() {
     queryFn: () => api.get<{ items: TaskRow[] }>(`/projects/${req?.project_id}/tasks?requirement_id=${id}&limit=100`),
     enabled: !!req,
   })
-  const { data: allTasks } = useQuery({
-    queryKey: ['tasks', req?.project_id],
-    queryFn: () => api.get<{ items: TaskRow[]; next_cursor: string | null }>(`/projects/${req?.project_id}/tasks?limit=100`),
-    enabled: !!req,
-  })
   const { data: refs } = useQuery({
     queryKey: ['refs', 'requirement', id],
     queryFn: () => api.get<{ items: ReferenceRow[] }>(`/targets/requirement/${id}/references?limit=50`),
     enabled: !!req,
   })
+
+  // 通知/搜索跳转:/requirements/:rid?task=TID 定位任务弹窗
+  const deepLinkTask = searchParams.get('task')
+  useEffect(() => {
+    if (deepLinkTask) setDialogTaskId(deepLinkTask)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLinkTask])
+
+  function openTask(tid: string) {
+    setDialogTaskId(tid)
+    if (deepLinkTask !== tid) setSearchParams({ task: tid }, { replace: true })
+  }
+
+  function closeTaskDialog() {
+    setDialogTaskId(null)
+    if (deepLinkTask) setSearchParams({}, { replace: true })
+  }
 
   async function act(path: string, body?: unknown) {
     setActionError(null)
@@ -97,17 +117,39 @@ export function RequirementDetailPage() {
     await act(`/requirements/${id}/status`, { status })
   }
 
-  const isPending = req?.status === 'pending'
-
-  async function linkTask(task: TaskRow) {
-    setLinkError(null)
+  async function claimPanelTask(taskId: string) {
+    setActionError(null)
     try {
-      await api.patch(`/tasks/${task.id}`, { requirement_id: req?.id })
-      setLinkOpen(false)
-      await qc.invalidateQueries({ queryKey: ['tasks', req?.project_id] })
+      await api.post(`/tasks/${taskId}/claim`)
       await qc.invalidateQueries({ queryKey: ['requirement-tasks', id] })
+      await qc.invalidateQueries({ queryKey: ['tasks', req?.project_id] })
     } catch (err) {
-      setLinkError(err instanceof ApiError ? err.message : '关联失败')
+      setActionError(err instanceof ApiError ? err.message : '认领失败')
+    }
+  }
+
+  async function changeTaskStatus(t: TaskRow, status: string) {
+    if (status === t.status) return
+    setActionError(null)
+    try {
+      await api.post(`/tasks/${t.id}/status`, { status })
+      await qc.invalidateQueries({ queryKey: ['requirement-tasks', id] })
+      await qc.invalidateQueries({ queryKey: ['tasks', req?.project_id] })
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : '状态变更失败')
+    }
+  }
+
+  async function doDeleteTask() {
+    if (!deleteTarget) return
+    setActionError(null)
+    try {
+      await api.post(`/tasks/${deleteTarget.id}/delete`)
+      setDeleteTarget(null)
+      await qc.invalidateQueries({ queryKey: ['requirement-tasks', id] })
+      await qc.invalidateQueries({ queryKey: ['requirements', req?.project_id] })
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : '删除失败')
     }
   }
 
@@ -128,6 +170,13 @@ export function RequirementDetailPage() {
       </Guide>
     )
   }
+
+  const isPending = req.status === 'pending'
+  const allTasks = tasks?.items ?? []
+  const visibleTasks = showCancelled ? allTasks : allTasks.filter((t) => t.status !== 'cancelled')
+  const doneCount = allTasks.filter((t) => t.status === 'done').length
+  const totalCount = allTasks.length
+  const dialogTask = allTasks.find((t) => t.id === dialogTaskId) ?? null
 
   return (
     <div className="space-y-4">
@@ -160,59 +209,114 @@ export function RequirementDetailPage() {
       </div>
       <ErrorNotification message={actionError} />
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader className="flex-row items-center justify-between gap-2">
-            <CardTitle className="text-sm">关联任务</CardTitle>
+      <Card>
+        <CardHeader className="flex-row flex-wrap items-center justify-between gap-2">
+          <CardTitle className="text-sm">
+            任务({totalCount})
+            <span className="ml-2 font-normal text-muted-foreground">
+              完成 {doneCount}/{totalCount}
+            </span>
+          </CardTitle>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => setShowCancelled((v) => !v)}
+            >
+              {showCancelled ? <Eye className="mr-1 h-3 w-3" /> : <EyeOff className="mr-1 h-3 w-3" />}
+              {showCancelled ? '显示全部' : '隐藏已取消'}
+            </Button>
             {canEdit && !isPending && (
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setLinkOpen(true)}>
-                  <Link2 className="mr-1 h-3 w-3" />
-                  关联任务
-                </Button>
-                <Button size="sm" className="h-7 text-xs" onClick={() => setCreateOpen(true)}>
-                  <Plus className="mr-1 h-3 w-3" />
-                  新建任务
-                </Button>
-              </div>
+              <Button size="sm" className="h-7 text-xs" onClick={() => setCreateOpen(true)}>
+                <Plus className="mr-1 h-3 w-3" />
+                新建任务
+              </Button>
             )}
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {isPending && (
-              <p className="text-sm text-muted-foreground">需求确认后才能创建或关联任务。</p>
-            )}
-            {(tasks?.items ?? []).length === 0 && <p className="text-sm text-muted-foreground">暂无任务</p>}
-            {tasks?.items.map((t) => (
-              <Link key={t.id} to={`/tasks/${t.id}`} className="flex items-center justify-between rounded-md border p-2.5 text-sm hover:bg-muted/40">
-                <span>{t.title}</span>
-                <span className="flex items-center gap-2">
-                  {t.assignee && <Badge variant="outline" className="gap-1.5"><UserAvatar user={{ id: t.assignee_id, username: t.assignee, avatar: t.assignee_avatar }} className="h-4 w-4 text-[9px]" />{t.assignee}</Badge>}
-                  <StatusBadge status={t.status} />
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {isPending && (
+            <p className="text-sm text-muted-foreground">需求确认后才能创建任务。</p>
+          )}
+          {!isPending && visibleTasks.length === 0 && (
+            <p className="text-sm text-muted-foreground">
+              {showCancelled ? '暂无任务' : '暂无任务(已取消默认隐藏)'}
+            </p>
+          )}
+          {visibleTasks.map((t) => {
+            const canStatus = canSetTaskStatus(t, user, role)
+            return (
+              <div key={t.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-2.5 text-sm">
+                <button
+                  type="button"
+                  className="min-w-0 flex-1 truncate text-left hover:text-primary"
+                  onClick={() => openTask(t.id)}
+                  aria-label={`打开任务 ${t.title}`}
+                >
+                  {t.title}
+                </button>
+                <span className="flex flex-wrap items-center gap-1.5">
+                  {t.blocked && <Badge variant="destructive">受阻</Badge>}
+                  {t.assignee && (
+                    <Badge variant="outline" className="gap-1.5">
+                      <UserAvatar user={{ id: t.assignee_id, username: t.assignee, avatar: t.assignee_avatar }} className="h-4 w-4 text-[9px]" />
+                      {t.assignee}
+                    </Badge>
+                  )}
+                  <StatusSelect
+                    value={t.status}
+                    statuses={TASK_STATUSES}
+                    onSelect={(s) => void changeTaskStatus(t, s)}
+                    disabled={!canStatus}
+                  />
+                  {canEdit && !t.assignee_id && t.status !== 'done' && t.status !== 'cancelled' && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-6 px-2 text-xs"
+                      onClick={() => void claimPanelTask(t.id)}
+                    >
+                      <UserPlus className="mr-1 h-3 w-3" />
+                      认领
+                    </Button>
+                  )}
+                  {canEdit && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 text-xs text-muted-foreground hover:text-destructive"
+                      onClick={() => setDeleteTarget(t)}
+                    >
+                      <Trash2 className="mr-1 h-3 w-3" />
+                      删除
+                    </Button>
+                  )}
                 </span>
-              </Link>
-            ))}
-          </CardContent>
-        </Card>
+              </div>
+            )
+          })}
+        </CardContent>
+      </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">引用</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {(refs?.items ?? []).length === 0 && <p className="text-sm text-muted-foreground">暂无引用</p>}
-            {refs?.items.map((r) => (
-              <div key={r.id} className="flex items-center gap-2 rounded-md border p-2.5 text-sm">
-                <Badge variant="outline">{r.type}</Badge>
-                <span className="text-xs text-muted-foreground">
-                  {(() => { const href = referenceHref(r.from_type, r.from_id, r.from_module); return href ? <Link to={href} className="hover:text-primary hover:underline">{r.from_title ?? r.from_id.slice(0, 8)}</Link> : (r.from_title ?? r.from_id.slice(0, 8)) })()}
-                  {' → '}
-                  {(() => { const href = referenceHref(r.to_type, r.to_id, r.to_module); return href ? <Link to={href} className="hover:text-primary hover:underline">{r.to_title ?? r.to_id.slice(0, 8)}</Link> : (r.to_title ?? r.to_id.slice(0, 8)) })()}
-                </span>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">引用</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {(refs?.items ?? []).length === 0 && <p className="text-sm text-muted-foreground">暂无引用</p>}
+          {refs?.items.map((r) => (
+            <div key={r.id} className="flex items-center gap-2 rounded-md border p-2.5 text-sm">
+              <Badge variant="outline">{r.type}</Badge>
+              <span className="text-xs text-muted-foreground">
+                {(() => { const href = referenceHref(r.from_type, r.from_id, r.from_module); if (href) return <Link to={href} className="hover:text-primary hover:underline">{r.from_title ?? r.from_id.slice(0, 8)}</Link>; if (r.from_type === 'task') return <TaskRefLink taskId={r.from_id}>{r.from_title ?? r.from_id.slice(0, 8)}</TaskRefLink>; return r.from_title ?? r.from_id.slice(0, 8) })()}
+                {' → '}
+                {(() => { const href = referenceHref(r.to_type, r.to_id, r.to_module); if (href) return <Link to={href} className="hover:text-primary hover:underline">{r.to_title ?? r.to_id.slice(0, 8)}</Link>; if (r.to_type === 'task') return <TaskRefLink taskId={r.to_id}>{r.to_title ?? r.to_id.slice(0, 8)}</TaskRefLink>; return r.to_title ?? r.to_id.slice(0, 8) })()}
+              </span>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardContent className="space-y-6 p-4">
@@ -226,43 +330,32 @@ export function RequirementDetailPage() {
         </CardContent>
       </Card>
 
-      <Dialog open={linkOpen} onOpenChange={setLinkOpen}>
+      <TaskDetailDialog
+        task={dialogTask}
+        open={dialogTaskId !== null && dialogTask !== null}
+        onOpenChange={(v) => !v && closeTaskDialog()}
+      />
+
+      <CreateTaskDialog open={createOpen} onOpenChange={setCreateOpen} presetRequirementId={req.id} onCreated={() => qc.invalidateQueries({ queryKey: ['requirement-tasks', id] })} />
+
+      <Dialog open={deleteTarget !== null} onOpenChange={(v) => !v && setDeleteTarget(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>关联任务</DialogTitle>
-            <DialogDescription>选择当前项目中未挂需求的任务,挂到本需求下。</DialogDescription>
+            <DialogTitle>删除任务</DialogTitle>
+            <DialogDescription>
+              确认删除任务「{deleteTarget?.title}」?删除为软删,可从恢复入口找回。
+            </DialogDescription>
           </DialogHeader>
-          <div className="max-h-72 space-y-2 overflow-y-auto">
-            {(allTasks?.items ?? []).filter((t) => !t.requirement_id).length === 0 && (
-              <p className="text-sm text-muted-foreground">暂无未关联需求的任务</p>
-            )}
-            {(allTasks?.items ?? [])
-              .filter((t) => !t.requirement_id)
-              .map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => void linkTask(t)}
-                  className="flex w-full items-center justify-between rounded-md border p-2.5 text-left text-sm hover:bg-muted/40"
-                >
-                  <span>{t.title}</span>
-                  <span className="flex items-center gap-2">
-                    {t.assignee && <Badge variant="outline" className="gap-1.5"><UserAvatar user={{ id: t.assignee_id, username: t.assignee, avatar: t.assignee_avatar }} className="h-4 w-4 text-[9px]" />{t.assignee}</Badge>}
-                    <StatusBadge status={t.status} />
-                  </span>
-                </button>
-              ))}
-          </div>
-          <ErrorNotification message={linkError} />
           <DialogFooter>
-            <Button variant="outline" onClick={() => setLinkOpen(false)}>
-              关闭
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>
+              取消
+            </Button>
+            <Button variant="destructive" onClick={() => void doDeleteTask()}>
+              确认删除
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <CreateTaskDialog open={createOpen} onOpenChange={setCreateOpen} presetRequirementId={req.id} onCreated={() => qc.invalidateQueries({ queryKey: ['requirement-tasks', id] })} />
     </div>
   )
 }

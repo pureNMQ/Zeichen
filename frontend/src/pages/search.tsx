@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useInfiniteQuery } from '@tanstack/react-query'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Loader2, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -41,12 +41,39 @@ function searchUrl(query: string, domain: DomainFilter, cursor?: string) {
   return `/search?${params.toString()}`
 }
 
+function SearchResultCard({ item }: { item: SearchItem }) {
+  return (
+    <Card className="transition-colors hover:bg-muted/50">
+      <CardContent className="space-y-1.5 py-3">
+        <div className="flex items-center gap-2">
+          <span className="font-medium">{item.title}</span>
+          {item.status && (
+            <Badge variant="secondary" className={cn('text-xs')}>
+              {STATUS_LABEL[item.status] ?? item.status}
+            </Badge>
+          )}
+          {item.doc_type && (
+            <Badge variant="outline" className="text-xs">
+              {item.doc_type === 'wiki' ? 'Wiki' : '词条'}
+            </Badge>
+          )}
+          {item.kind && (
+            <Badge variant="outline" className="text-xs">{item.kind}</Badge>
+          )}
+        </div>
+        {item.summary && (
+          <p className="line-clamp-2 text-sm text-muted-foreground">{item.summary}</p>
+        )}
+        <p className="text-xs text-muted-foreground/70">{item.project_name}</p>
+      </CardContent>
+    </Card>
+  )
+}
+
 function hrefOf(item: SearchItem): string {
   switch (item.domain) {
     case 'requirement':
       return `/requirements/${item.id}`
-    case 'task':
-      return `/tasks/${item.id}`
     case 'document':
       return `/documents/wiki/${item.id}`
     default:
@@ -54,7 +81,19 @@ function hrefOf(item: SearchItem): string {
   }
 }
 
+// 任务无独立页面(ADR 0003):跳所属需求详情页并定位任务弹窗
+async function taskHrefOf(item: SearchItem): Promise<string> {
+  try {
+    const t = await api.get<{ requirement_id: string | null }>(`/tasks/${item.id}`)
+    if (t.requirement_id) return `/requirements/${t.requirement_id}?task=${item.id}`
+  } catch {
+    // 任务不可见时回退项目页
+  }
+  return '/projects'
+}
+
 export function SearchPage() {
+  const navigate = useNavigate()
   const [params] = useSearchParams()
   const query = params.get('q') ?? ''
   const [domain, setDomain] = useState<DomainFilter>('all')
@@ -131,34 +170,22 @@ export function SearchPage() {
             <span className="ml-1 text-xs">({group.items.length})</span>
           </h2>
           <div className="space-y-2">
-            {group.items.map((item) => (
-              <Link key={`${item.domain}:${item.id}`} to={hrefOf(item)} className="block">
-                <Card className="transition-colors hover:bg-muted/50">
-                  <CardContent className="space-y-1.5 py-3">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium">{item.title}</span>
-                      {item.status && (
-                        <Badge variant="secondary" className={cn('text-xs')}>
-                          {STATUS_LABEL[item.status] ?? item.status}
-                        </Badge>
-                      )}
-                      {item.doc_type && (
-                        <Badge variant="outline" className="text-xs">
-                          {item.doc_type === 'wiki' ? 'Wiki' : '词条'}
-                        </Badge>
-                      )}
-                      {item.kind && (
-                        <Badge variant="outline" className="text-xs">{item.kind}</Badge>
-                      )}
-                    </div>
-                    {item.summary && (
-                      <p className="line-clamp-2 text-sm text-muted-foreground">{item.summary}</p>
-                    )}
-                    <p className="text-xs text-muted-foreground/70">{item.project_name}</p>
-                  </CardContent>
-                </Card>
-              </Link>
-            ))}
+            {group.items.map((item) =>
+              item.domain === 'task' ? (
+                <button
+                  key={`${item.domain}:${item.id}`}
+                  type="button"
+                  onClick={() => void taskHrefOf(item).then(navigate)}
+                  className="block w-full text-left"
+                >
+                  <SearchResultCard item={item} />
+                </button>
+              ) : (
+                <Link key={`${item.domain}:${item.id}`} to={hrefOf(item)} className="block">
+                  <SearchResultCard item={item} />
+                </Link>
+              ),
+            )}
           </div>
         </section>
       ))}

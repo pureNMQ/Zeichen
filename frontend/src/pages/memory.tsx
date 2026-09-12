@@ -3,6 +3,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronRight, ExternalLink, Loader2, Sparkles, Trash2 } from 'lucide-react'
 import { Link, NavLink, Navigate } from 'react-router-dom'
 
+import { TaskRefLink } from '@/components/task-ref-link'
+
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -42,7 +44,7 @@ function parseSession(projectId: string, session: MemorySession) {
 function anchorHref(item: MemoryItem) {
   const metadata = item.external_metadata
   if (!metadata?.entity_id) return null
-  if (metadata.entity_type === 'task') return `/tasks/${metadata.entity_id}`
+  // task 锚点走 TaskRefLink(任务无独立页面,ADR 0003)
   if (metadata.entity_type === 'requirement') return `/requirements/${metadata.entity_id}`
   return null
 }
@@ -52,8 +54,23 @@ function AnchorLabel({ item }: { item: MemoryItem }) {
   if (!metadata?.entity_type || !metadata.entity_id) return <span>未关联业务实体</span>
   const label = `${metadata.entity_type} / ${metadata.entity_id}`
   const href = anchorHref(item)
-  if (!href) return <span>{label}</span>
-  return <Link to={href} className="inline-flex items-center gap-1 hover:underline" onClick={(event) => event.stopPropagation()}>{label}<ExternalLink className="h-3 w-3" /></Link>
+  if (href) {
+    return (
+      <Link to={href} className="inline-flex items-center gap-1 hover:underline" onClick={(event) => event.stopPropagation()}>
+        {label}
+        <ExternalLink className="h-3 w-3" />
+      </Link>
+    )
+  }
+  if (metadata.entity_type === 'task') {
+    return (
+      <span className="inline-flex items-center gap-1" onClick={(event) => event.stopPropagation()}>
+        <TaskRefLink taskId={metadata.entity_id}>{label}</TaskRefLink>
+        <ExternalLink className="h-3 w-3" />
+      </span>
+    )
+  }
+  return <span>{label}</span>
 }
 
 function NoProjectGuide() {

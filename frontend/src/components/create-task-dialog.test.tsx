@@ -42,6 +42,8 @@ describe('任务创建表单引用与附件回填(REQ ee290fae)', () => {
     renderDialog(true)
 
     await user.type(await screen.findByLabelText('标题'), '带关联的任务')
+    await user.click(screen.getByRole('combobox', { name: '关联需求' }))
+    await user.click(await screen.findByRole('option', { name: '目标需求' }))
     await user.click(screen.getByRole('combobox', { name: '引用目标' }))
     await user.click(await screen.findByRole('option', { name: '目标需求' }))
     await user.click(screen.getByRole('button', { name: '添加引用' }))
@@ -67,7 +69,7 @@ describe('任务创建表单草稿暂存(REQ ff7a0aa2)', () => {
     localStorage.clear()
     vi.mocked(api.get).mockImplementation((path: string) => {
       if (path === '/projects') return Promise.resolve([{ id: 'p1', name: 'P', created_at: '2026-08-01T00:00:00Z', my_role: 'owner' }])
-      if (path.startsWith('/projects/p1/requirements')) return Promise.resolve({ items: [], next_cursor: null })
+      if (path.startsWith('/projects/p1/requirements')) return Promise.resolve({ items: [{ id: 'r9', title: '挂载需求', status: 'backlog', project_id: 'p1', created_by: 'u1', created_at: '2026-08-01T00:00:00Z', updated_at: '2026-08-01T00:00:00Z', task_count: 0 }], next_cursor: null })
       return Promise.resolve({ items: [], next_cursor: null })
     })
     localStorage.setItem('zeichen.currentProjectId', 'p1')
@@ -116,6 +118,8 @@ describe('任务创建表单草稿暂存(REQ ff7a0aa2)', () => {
     vi.mocked(api.post).mockResolvedValue({ id: 't1' })
     renderDialog(true)
     await user.type(await screen.findByLabelText('标题'), '将提交的标题')
+    await user.click(screen.getByRole('combobox', { name: '关联需求' }))
+    await user.click(await screen.findByRole('option', { name: '挂载需求' }))
     await user.click(screen.getByRole('button', { name: /创建/ }))
     await waitFor(() => expect(api.post).toHaveBeenCalled())
     await waitFor(() => expect(localStorage.getItem('zeichen.draft.task:p1')).toBeNull())

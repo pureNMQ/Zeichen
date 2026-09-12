@@ -72,7 +72,9 @@ function RequirementCard({
             onSelect={(s) => onStatus(r, s)}
             disabled={!canEdit}
           />
-          <Badge variant="outline">{r.task_count} 任务</Badge>
+          <Badge variant="outline" title="已完成任务数/总任务数">
+            {r.done_task_count ?? 0}/{r.task_count} 任务
+          </Badge>
         </div>
         {canDelete && (
           <Button
