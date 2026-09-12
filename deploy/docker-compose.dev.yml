@@ -1,0 +1,71 @@
+# 贼船 Zeichen — 服务器端开发热更新 override(叠加在根 compose 之上)。
+#
+# 用途:在服务器上直接改代码、秒级生效,无需每次打包同步:
+#   * api / mcp:挂载 backend 源码 + uvicorn --reload,改 Python 代码即重载
+#   * worker:挂载源码(无 reload,改代码后 `docker compose restart worker`)
+#   * web:开发态不用静态镜像,改用 frontend-dev 容器跑 vite dev(HMR)
+#   * postgres / cognee:保持现有生产实例(同库热更新,注意误操作风险)
+#
+# 用法(仓库根目录,依赖 .env 已配好):
+#   docker compose -f docker-compose.yml -f deploy/docker-compose.ip.yml -f deploy/docker-compose.dev.yml up -d
+#   # 前端 HMR 地址:http://<IP>:5173(首次启动容器内 npm install 需几分钟)
+#
+# 新增 Python 依赖(backend/pyproject.toml 变更)时需重新构建镜像:
+#   docker compose -f docker-compose.yml -f deploy/docker-compose.ip.yml -f deploy/docker-compose.dev.yml up -d --build api mcp worker
+name: zeichen
+
+services:
+  api:
+    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"]
+    volumes:
+      - ./backend/app:/srv/zeichen/app
+      - ./backend/alembic:/srv/zeichen/alembic
+      - ./backend/alembic.ini:/srv/zeichen/alembic.ini
+      - attachments:/srv/zeichen/storage/attachments
+
+  mcp:
+    command: ["uvicorn", "app.mcp_server.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    volumes:
+      - ./backend/app:/srv/zeichen/app
+      - attachments:/srv/zeichen/storage/attachments
+
+  worker:
+    volumes:
+      - ./backend/app:/srv/zeichen/app
+
+  frontend-dev:
+    image: node:24-alpine
+    command: ["sh", "-c", "npm install && npm run dev -- --host 0.0.0.0"]
+    environment:
+      # 容器内 /api 直连 api 容器(不经 nginx),与浏览器同源 5173
+      VITE_API_PROXY: http://api:8000
+      # 受限网络下用腾讯云 npm 镜像
+      NPM_CONFIG_REGISTRY: https://mirrors.tencentyun.com/npm
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+      - frontend_dev_modules:/app/node_modules
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 1G
+
+  # restart-worker 与 worker 使用同一套环境覆盖:根 compose 中 DATABASE_URL
+  # 为本地默认值(zeichen:zeichen),部署环境必须引用 .env 变量,否则容器内
+  # PostgreSQL 认证失败、崩溃重启,Cognee 重启队列无人消费。
+  restart-worker:
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://zeichen:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/zeichen
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env}
+      COGNEE_SERVICE_API_KEY: ${COGNEE_SERVICE_API_KEY:-}
+      # 本机 4 文件组合(根+prod+ip+dev):通道按此顺序逐个 -f 叠加重建 cognee
+      COGNEE_COMPOSE_FILES: docker-compose.yml,deploy/docker-compose.prod.yml,deploy/docker-compose.ip.yml,deploy/docker-compose.dev.yml
+
+volumes:
+  frontend_dev_modules:

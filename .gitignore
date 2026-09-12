@@ -56,3 +56,4 @@ Thumbs.db
 # 生产 TLS 证书(部署机上传,勿提交)
 certs/
 
+backups/
