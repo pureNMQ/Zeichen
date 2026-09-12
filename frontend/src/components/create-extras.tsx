@@ -72,44 +72,48 @@ export function CreateExtras({
     <div className="space-y-4">
       <div className="space-y-1.5">
         <Label>引用(可选)</Label>
-        <div className="flex items-center gap-1.5">
-          <Select value={refType} onValueChange={setRefType}>
-            <SelectTrigger size="sm" aria-label="引用类型" className="w-28">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {Object.entries(REFERENCE_TYPE_LABELS).map(([value, label]) => (
-                <SelectItem key={value} value={value}>{label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={targetType} onValueChange={(v) => { setTargetType(v as 'requirement' | 'document'); setTargetId('') }}>
-            <SelectTrigger size="sm" aria-label="引用目标类型" className="w-28">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="requirement">需求</SelectItem>
-              <SelectItem value="document">Wiki 文档</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={targetId} onValueChange={setTargetId}>
-            <SelectTrigger size="sm" aria-label="引用目标" className="min-w-0 flex-1 justify-between">
-              <SelectValue placeholder="选择目标" />
-            </SelectTrigger>
-            <SelectContent>
-              {options.map((o) => (
-                <SelectItem key={o.id} value={o.id}>{o.title}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button type="button" variant="outline" size="sm" onClick={addReference} disabled={!targetId}>
-            添加引用
-          </Button>
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-1.5">
+            <Select value={refType} onValueChange={setRefType}>
+              <SelectTrigger aria-label="引用类型" className="min-w-0 flex-1 justify-between">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.entries(REFERENCE_TYPE_LABELS).map(([value, label]) => (
+                  <SelectItem key={value} value={value}>{label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={targetType} onValueChange={(v) => { setTargetType(v as 'requirement' | 'document'); setTargetId('') }}>
+              <SelectTrigger aria-label="引用目标类型" className="min-w-0 flex-1 justify-between">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="requirement">需求</SelectItem>
+                <SelectItem value="document">Wiki 文档</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Select value={targetId} onValueChange={setTargetId}>
+              <SelectTrigger aria-label="引用目标" className="min-w-0 flex-1 justify-between">
+                <SelectValue placeholder="选择目标" />
+              </SelectTrigger>
+              <SelectContent>
+                {options.map((o) => (
+                  <SelectItem key={o.id} value={o.id}>{o.title}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button type="button" variant="outline" className="shrink-0" onClick={addReference} disabled={!targetId}>
+              添加引用
+            </Button>
+          </div>
         </div>
         {refs.length > 0 && (
           <ul className="space-y-1" aria-label="已添加引用">
             {refs.map((r, index) => (
-              <li key={`${r.toType}:${r.toId}:${r.type}`} className="flex items-center justify-between gap-2 rounded border px-2 py-1 text-xs">
+              <li key={`${r.toType}:${r.toId}:${r.type}`} className="flex items-center justify-between gap-2 rounded-lg border px-2 py-1 text-xs">
                 <span className="truncate">
                   {REFERENCE_TYPE_LABELS[r.type]} · {r.toType === 'requirement' ? '需求' : 'Wiki 文档'}《{r.label}》
                 </span>
@@ -139,7 +143,7 @@ export function CreateExtras({
         {files.length > 0 && (
           <ul className="space-y-1" aria-label="待上传附件">
             {files.map((f, index) => (
-              <li key={`${f.name}:${index}`} className="flex items-center justify-between gap-2 rounded border px-2 py-1 text-xs">
+              <li key={`${f.name}:${index}`} className="flex items-center justify-between gap-2 rounded-lg border px-2 py-1 text-xs">
                 <span className="truncate">{f.name}</span>
                 <Button
                   type="button"

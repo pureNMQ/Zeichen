@@ -453,7 +453,7 @@ function CreateRequirementDialog({ open, onOpenChange }: { open: boolean; onOpen
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>新建需求</DialogTitle>
           <DialogDescription>需求是项目内的可验收变更单元,可用任务承接拆解。</DialogDescription>

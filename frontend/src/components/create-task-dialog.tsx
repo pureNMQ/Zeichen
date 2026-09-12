@@ -143,7 +143,7 @@ export function CreateTaskDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>新建任务</DialogTitle>
           <DialogDescription>任务可挂到需求下(承接拆解),也可作为独立任务。</DialogDescription>
@@ -160,7 +160,7 @@ export function CreateTaskDialog({
           <div className="space-y-1.5">
             <Label>关联需求</Label>
             <Select value={requirementId ?? 'none'} onValueChange={(v) => setRequirementId(v === 'none' ? null : v)}>
-              <SelectTrigger size="sm" aria-label="关联需求" className="w-full justify-between">
+              <SelectTrigger aria-label="关联需求" className="w-full justify-between">
                 <SelectValue placeholder="独立任务(不关联)" />
               </SelectTrigger>
               <SelectContent>
