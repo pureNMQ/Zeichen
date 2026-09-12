@@ -39,7 +39,17 @@ from app.models import Project, Task
 from app.services import tasks as task_svc
 
 
+def _confirmed_req(db: Session, world: dict, title="挂载需求"):
+    from app.services import requirements as req_svc
+
+    r = req_svc.create_requirement(db, world["admin"], world["project"].id, title)
+    req_svc.set_requirement_status(db, world["admin"], r.id, "backlog")
+    return r
+
+
 def make_task(db: Session, world: dict, title="任务", **kw) -> Task:
+    if "requirement_id" not in kw:
+        kw["requirement_id"] = _confirmed_req(db, world).id
     return task_svc.create_task(db, world["admin"], world["project"].id, title, **kw)
 
 
@@ -91,7 +101,7 @@ class TestBlockSemanticsPureFunction:
         assert is_blocked([]) is False
         assert is_blocked(["done"]) is False
         assert is_blocked(["done", "done"]) is False
-        for status in ("backlog", "in_progress", "verifying", "cancelled"):
+        for status in ("backlog", "in_progress", "cancelled"):
             assert is_blocked([status]) is True, status
         assert is_blocked(["done", "backlog"]) is True
 
@@ -126,9 +136,14 @@ class TestAddBlocker:
         other = Project(team_id=world["team"].id, name="其他项目")
         db.add(other)
         db.commit()
+        from app.services import requirements as req_svc
         from app.services import tasks as svc
 
-        foreign = svc.create_task(db, world["admin"], other.id, "别项目的任务")
+        foreign_req = req_svc.create_requirement(db, world["admin"], other.id, "别项目需求")
+        req_svc.set_requirement_status(db, world["admin"], foreign_req.id, "backlog")
+        foreign = svc.create_task(
+            db, world["admin"], other.id, "别项目的任务", requirement_id=foreign_req.id
+        )
         with pytest.raises(AppError) as e:
             add_blocker(db, world["admin"], a.id, foreign.id)
         assert e.value.code == "invalid_request"
@@ -293,7 +308,7 @@ class TestStateMachineIsolation:
         a = make_task(db, world, "任务A")
         b = make_task(db, world, "任务B")
         add_blocker(db, world["admin"], a.id, b.id)
-        for target in ("in_progress", "verifying", "backlog"):
+        for target in ("in_progress", "done", "backlog"):
             task_svc.set_task_status(db, world["admin"], a.id, target)
             state = list_blockers(db, world["admin"], a.id)
             assert [i["id"] for i in state["items"]] == [b.id]
@@ -327,8 +342,9 @@ class TestStateMachineIsolation:
 
 
 class TestTaskBlockerApi:
-    def _create(self, client, project_id, title, blocked_by=None):
-        payload: dict = {"title": title}
+    def _create(self, client, db, world, project_id, title, blocked_by=None):
+        rid = _confirmed_req(db, world, f"挂载:{title}").id
+        payload: dict = {"title": title, "requirement_id": str(rid)}
         if blocked_by is not None:
             payload["blocked_by"] = [str(x) for x in blocked_by]
         return client.post(f"/api/projects/{project_id}/tasks", json=payload)
@@ -340,8 +356,8 @@ class TestTaskBlockerApi:
 
         login(client, "admin", "admin-pass-1")
         pid = world["project"].id
-        blocker = self._create(client, pid, "前置任务").json()
-        resp = self._create(client, pid, "被阻塞任务", blocked_by=[blocker["id"]])
+        blocker = self._create(client, db, world, pid, "前置任务").json()
+        resp = self._create(client, db, world, pid, "被阻塞任务", blocked_by=[blocker["id"]])
         assert resp.status_code == 201, resp.text
         body = resp.json()
         assert body["blocked"] is True
@@ -352,9 +368,9 @@ class TestTaskBlockerApi:
 
         login(client, "admin", "admin-pass-1")
         pid = world["project"].id
-        b1 = self._create(client, pid, "前置一").json()
-        b2 = self._create(client, pid, "前置二").json()
-        task = self._create(client, pid, "主任务").json()
+        b1 = self._create(client, db, world, pid, "前置一").json()
+        b2 = self._create(client, db, world, pid, "前置二").json()
+        task = self._create(client, db, world, pid, "主任务").json()
 
         resp = client.patch(f"/api/tasks/{task['id']}", json={"blocked_by": [b1["id"]]})
         assert resp.status_code == 200, resp.text
@@ -371,8 +387,8 @@ class TestTaskBlockerApi:
 
         login(client, "admin", "admin-pass-1")
         pid = world["project"].id
-        blocker = self._create(client, pid, "前置任务").json()
-        task = self._create(client, pid, "主任务", blocked_by=[blocker["id"]]).json()
+        blocker = self._create(client, db, world, pid, "前置任务").json()
+        task = self._create(client, db, world, pid, "主任务", blocked_by=[blocker["id"]]).json()
         resp = client.get(f"/api/tasks/{task['id']}")
         assert resp.status_code == 200
         body = resp.json()
@@ -396,8 +412,8 @@ class TestTaskBlockerApi:
 
         login(client, "admin", "admin-pass-1")
         pid = world["project"].id
-        blocker = self._create(client, pid, "前置任务").json()
-        task = self._create(client, pid, "主任务", blocked_by=[blocker["id"]]).json()
+        blocker = self._create(client, db, world, pid, "前置任务").json()
+        task = self._create(client, db, world, pid, "主任务", blocked_by=[blocker["id"]]).json()
 
         client.post("/api/auth/logout")
         login(client, "viewer-v", "viewer-pass-1")

@@ -1,6 +1,6 @@
 """状态机全路径 + 所有权 + 并发(服务层,API 与 MCP 共用同一 seam)。
 
-- 需求五态 / 任务五态,完全自由流转(任意互转,直达终态,**无任何前置校验**)
+- 需求六态 / 任务四态,完全自由流转(任意互转,直达终态,**无任何前置校验**)
 - 自动流转已删除:任务状态变化不影响需求状态,需求状态全手动
 - 取消便捷封装;已指派任务所有权;删除与恢复
 """
@@ -13,7 +13,17 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.errors import AppError
-from app.models import Activity, Base, Project, ProjectMember, Task, Team, User, WorkspaceMember
+from app.models import (
+    Activity,
+    Base,
+    Project,
+    ProjectMember,
+    Requirement,
+    Task,
+    Team,
+    User,
+    WorkspaceMember,
+)
 from app.services import requirements as req_svc
 from app.services import tasks as task_svc
 
@@ -35,6 +45,10 @@ def make_requirement(db: Session, actor: User, project: Project, title="需求 A
     return req_svc._requirement_dict(db, r)
 
 
+def make_requirement_row(db: Session, actor: User, project: Project, title="挂载需求") -> Requirement:
+    return req_svc.create_requirement(db, actor, project.id, title)
+
+
 def make_task(
     db: Session,
     actor: User,
@@ -43,11 +57,17 @@ def make_task(
     requirement_id=None,
     assignee_id=None,
 ) -> dict:
-    if requirement_id is not None:
+    # 任务必须挂已确认需求(ADR 0003);测试默认自动建一个
+    if requirement_id is None:
+        requirement = make_requirement_row(db, actor, project)
+        req_svc.set_requirement_status(db, actor, requirement.id, "backlog")
+    else:
         requirement = req_svc.get_requirement(db, actor, _as_uuid(requirement_id))
         if requirement.status == "pending":
             req_svc.set_requirement_status(db, actor, requirement.id, "backlog")
-    t = task_svc.create_task(db, actor, project.id, title, None, requirement_id, assignee_id)
+    t = task_svc.create_task(
+        db, actor, project.id, title, None, requirement.id, assignee_id
+    )
     return task_svc._task_dict(db, t)
 
 
@@ -89,8 +109,8 @@ class TestRequirementLifecycle:
         assert e.value.code == "not_found"
 
     def test_free_transitions_all_pairs(self, db: Session, world: dict, proj: dict):
-        """需求五态完全自由互转:每个源态可直达任意目标态(含终态,无前置校验)。"""
-        statuses = ["pending", "backlog", "in_progress", "done", "cancelled"]
+        """需求六态完全自由互转:每个源态可直达任意目标态(含终态,无前置校验)。"""
+        statuses = ["pending", "backlog", "in_progress", "verifying", "done", "cancelled"]
         for current in statuses:
             r = make_requirement(db, world["admin"], world["project"], f"需求 {current}")
             rid = uuid.UUID(r["id"])
@@ -112,7 +132,7 @@ class TestRequirementLifecycle:
     def test_invalid_status_rejected(self, db: Session, world: dict, proj: dict):
         r = make_requirement(db, world["admin"], world["project"])
         with pytest.raises(AppError) as e:
-            set_req(db, world["admin"], uuid.UUID(r["id"]), "verifying")
+            set_req(db, world["admin"], uuid.UUID(r["id"]), "nonsense")
         assert e.value.code == "invalid_request"
 
     def test_pending_requirement_rejects_task_derivation(self, db: Session, world: dict, proj: dict):
@@ -191,8 +211,8 @@ class TestRequirementLifecycle:
 
 class TestTaskStateMachine:
     def test_free_transitions_all_pairs(self, db: Session, world: dict, proj: dict):
-        """任务五态完全自由互转(含直达 done/cancelled,无对话框语义)。"""
-        statuses = ["backlog", "in_progress", "verifying", "done", "cancelled"]
+        """任务四态完全自由互转(含直达 done/cancelled,无对话框语义)。"""
+        statuses = ["backlog", "in_progress", "done", "cancelled"]
         for current in statuses:
             t = make_task(db, world["admin"], world["project"], f"任务 {current}")
             tid = uuid.UUID(t["id"])
@@ -305,13 +325,22 @@ class TestConcurrency:
         project = Project(team_id=team.id, name="race")
         sess.add(project)
         sess.flush()
+        requirement = Requirement(project_id=project.id, title="race req", status="backlog")
+        sess.add(requirement)
+        sess.flush()
         sess.add_all(
             [
                 ProjectMember(project_id=project.id, user_id=a1.id, role="editor"),
                 ProjectMember(project_id=project.id, user_id=a2.id, role="editor"),
             ]
         )
-        task = Task(project_id=project.id, title="race task", status="backlog", created_by=admin.id)
+        task = Task(
+            project_id=project.id,
+            title="race task",
+            status="backlog",
+            created_by=admin.id,
+            requirement_id=requirement.id,
+        )
         sess.add(task)
         sess.commit()
         task_id = task.id

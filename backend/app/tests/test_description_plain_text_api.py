@@ -59,9 +59,15 @@ def test_requirement_description_markdown_over_limit_counted_after_stripping(cli
 
 def test_task_description_markdown_normalized_and_html_rejected_over_api(client, world):
     pid = _login_admin(client, world)
+    rid = client.post(f"/api/projects/{pid}/requirements", json={"title": "挂载需求"}).json()["id"]
+    client.post(f"/api/requirements/{rid}/status", json={"status": "backlog"})
     resp = client.post(
         f"/api/projects/{pid}/tasks",
-        json={"title": "写测试", "description": "覆盖 `normalize` 的 **红线** 用例"},
+        json={
+            "title": "写测试",
+            "description": "覆盖 `normalize` 的 **红线** 用例",
+            "requirement_id": rid,
+        },
     )
     assert resp.status_code == 201, resp.text
     assert resp.json()["description"] == "覆盖 normalize 的 红线 用例"

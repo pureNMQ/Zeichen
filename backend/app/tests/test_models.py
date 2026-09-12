@@ -74,21 +74,21 @@ def test_status_check_constraint(session: Session, world: tuple[User, Team, Proj
     session.rollback()
 
 
-def test_requirement_five_states_task_five_states(
+def test_requirement_six_states_task_four_states(
     session: Session, world: tuple[User, Team, Project]
 ) -> None:
-    """需求五态(含 pending,拒 verifying);任务五态(verifying 合法)。"""
+    """需求六态(verifying 合法,验收上移需求);任务四态(verifying 拒绝)。"""
     _, _, p = world
-    req = Requirement(project_id=p.id, title="验收中已删", status="verifying")
+    req = Requirement(project_id=p.id, title="验收中需求", status="verifying")
     session.add(req)
+    session.commit()
+    assert req.status == "verifying"
+
+    t = Task(project_id=p.id, title="非法验收态", status="verifying", requirement_id=req.id)
+    session.add(t)
     with pytest.raises(IntegrityError):
         session.commit()
     session.rollback()
-
-    t = Task(project_id=p.id, title="普通状态", status="verifying")
-    session.add(t)
-    session.commit()
-    assert t.status == "verifying"
 
 
 def test_polymorphic_target_check(session: Session, world: tuple[User, Team, Project]) -> None:

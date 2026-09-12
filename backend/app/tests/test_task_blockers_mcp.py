@@ -21,11 +21,18 @@ def mcp(mcp_server: dict) -> RawMcpClient:
     return client
 
 
+def _mount_requirement(mcp: RawMcpClient, pid: str, title="MCP 挂载需求") -> str:
+    r = mcp.call("requirements.create", project_id=pid, title=title)
+    mcp.call("requirements.set_status", id=r["id"], status="backlog")
+    return r["id"]
+
+
 def test_task_blockers_crud_over_mcp(mcp: RawMcpClient, mcp_server: dict):
     pid = mcp_server["project_id"]
-    a = mcp.call("tasks.create", project_id=pid, title="前置任务")
+    rid = _mount_requirement(mcp, pid)
+    a = mcp.call("tasks.create", project_id=pid, title="前置任务", requirement_id=rid)
     b = mcp.call(
-        "tasks.create", project_id=pid, title="被阻塞任务", blocked_by=[a["id"]]
+        "tasks.create", project_id=pid, title="被阻塞任务", requirement_id=rid, blocked_by=[a["id"]]
     )
     assert "error" not in b, b
     assert b["blocked"] is True
@@ -52,8 +59,9 @@ def test_task_blockers_crud_over_mcp(mcp: RawMcpClient, mcp_server: dict):
 
 def test_task_blocker_rules_over_mcp(mcp: RawMcpClient, mcp_server: dict):
     pid = mcp_server["project_id"]
-    a = mcp.call("tasks.create", project_id=pid, title="任务A")
-    b = mcp.call("tasks.create", project_id=pid, title="任务B")
+    rid = _mount_requirement(mcp, pid)
+    a = mcp.call("tasks.create", project_id=pid, title="任务A", requirement_id=rid)
+    b = mcp.call("tasks.create", project_id=pid, title="任务B", requirement_id=rid)
 
     self_dep = mcp.call("tasks.update", id=a["id"], blocked_by=[a["id"]])
     assert "error" in self_dep and "invalid_request" in self_dep["error"], self_dep

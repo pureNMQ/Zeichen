@@ -10,15 +10,24 @@ from app.services import requirements as req_svc
 from app.services import tasks as svc
 
 
+def make_requirement_row(db: Session, world: dict, title="挂载需求"):
+    r = req_svc.create_requirement(db, world["admin"], world["project"].id, title)
+    req_svc.set_requirement_status(db, world["admin"], r.id, "backlog")
+    return r
+
+
 def make_task(db: Session, world: dict, title="任务", **kw) -> dict:
+    if "requirement_id" not in kw:
+        kw["requirement_id"] = make_requirement_row(db, world).id
     task = svc.create_task(db, world["admin"], world["project"].id, title, **kw)
     return {"id": task.id, "node": task}
 
 
 class TestCreateAndGetEdges:
     def test_empty_title(self, db: Session, world: dict):
+        rid = make_requirement_row(db, world).id
         with pytest.raises(AppError) as e:
-            svc.create_task(db, world["admin"], world["project"].id, "   ")
+            svc.create_task(db, world["admin"], world["project"].id, "   ", requirement_id=rid)
         assert e.value.code == "invalid_request"
 
     def test_get_missing_task(self, db: Session, world: dict):
@@ -29,12 +38,19 @@ class TestCreateAndGetEdges:
     def test_assignee_must_exist_and_be_member(self, db: Session, world: dict):
         from app.tests.conftest import make_user
 
+        rid = make_requirement_row(db, world).id
         with pytest.raises(AppError) as e:
-            svc.create_task(db, world["admin"], world["project"].id, "t", assignee_id=uuid.uuid4())
+            svc.create_task(
+                db, world["admin"], world["project"].id, "t",
+                requirement_id=rid, assignee_id=uuid.uuid4(),
+            )
         assert e.value.code == "not_found"
         outsider = make_user(db, "outsider", role="member")
         with pytest.raises(AppError) as e:
-            svc.create_task(db, world["admin"], world["project"].id, "t", assignee_id=outsider.id)
+            svc.create_task(
+                db, world["admin"], world["project"].id, "t",
+                requirement_id=rid, assignee_id=outsider.id,
+            )
         assert e.value.code == "invalid_request"
         assert "项目成员" in e.value.message
 

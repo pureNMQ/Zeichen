@@ -24,7 +24,11 @@ def test_short_description_migration_normalizes_existing_data(tmp_path, monkeypa
         connection.execute("INSERT INTO team (id, name) VALUES ('00000000000000000000000000000001', 'team')")
         connection.execute("INSERT INTO project (id, team_id, name) VALUES ('00000000000000000000000000000002', '00000000000000000000000000000001', 'project')")
         connection.execute("INSERT INTO requirement (id, project_id, title, description, status) VALUES ('00000000000000000000000000000003', '00000000000000000000000000000002', 'requirement', ?, 'pending')", ("a" * 510 + "\r\nlong",))
-        connection.execute("INSERT INTO task (id, project_id, title, description, status) VALUES ('00000000000000000000000000000004', '00000000000000000000000000000002', 'task', ?, 'backlog')", ("first\nsecond",))
+        connection.execute(
+            "INSERT INTO task (id, project_id, title, description, status, requirement_id) "
+            "VALUES ('00000000000000000000000000000004', '00000000000000000000000000000002', 'task', ?, 'backlog', '00000000000000000000000000000003')",
+            ("first\nsecond",),
+        )
         connection.commit()
 
     command.upgrade(config, "head")

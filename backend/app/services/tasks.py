@@ -1,5 +1,6 @@
-"""任务服务:CRUD + 五态状态机 + 指派/认领/改派(规格书 §3.2 / §5.1,ticket 09)。
+"""任务服务:CRUD + 四态状态机 + 指派/认领/改派(规格书 §3.2 / §5.1;ADR 0003 任务收归需求)。
 
+任务必须挂同项目已确认需求;可改指向同项目其他需求,禁止置空解除。
 所有权规则(已指派任务):仅被指派者本人 / 工作区 admin / 项目 owner 可改状态/改派;
 未指派任务任何编辑权者可操作。状态流转走通用 set_task_status(任意目标态自由流转,
 无前置校验);任务状态变化不影响需求状态(自动流转已删除,需求状态全手动)。
@@ -114,14 +115,15 @@ def create_task(
     assignee_id: uuid.UUID | None = None,
     blocked_by: list[uuid.UUID] | None = None,
 ) -> Task:
+    """创建任务:必须挂同项目已确认需求(ADR 0003,无独立任务)。"""
     title = title.strip()
     if not title:
         raise invalid_request("标题不能为空")
+    if requirement_id is None:
+        raise invalid_request("任务必须挂需求,请指定 requirement_id")
     require_project_role(db, actor.id, project_id, min_level="editor")
     description = normalize_short_description(description)
-    requirement = None
-    if requirement_id is not None:
-        _check_requirement(db, project_id, requirement_id)
+    _check_requirement(db, project_id, requirement_id)
     if assignee_id is not None:
         _check_assignee(db, project_id, assignee_id)
     task = Task(
@@ -207,7 +209,7 @@ def update_task(
     requirement_id: object = _UNSET,
     blocked_by: object = _UNSET,
 ) -> Task:
-    """更新任务元数据;requirement_id / blocked_by 可设/可换/可解除(null/[]=解除/清空)。
+    """更新任务元数据;requirement_id 可换同项目其他需求但不可置空;blocked_by 可整体替换/清空。
 
     requirement_id 权限与改状态同规则(已指派仅本人/工作区 admin/项目 owner,
     未指派任意编辑权);校验需求同项目且未删除。blocked_by 整体替换前置集合。
@@ -223,12 +225,13 @@ def update_task(
     summary = "更新任务"
     if requirement_id is not _UNSET:
         _require_owner(db, actor, task)
-        rid = requirement_id if requirement_id is None else uuid.UUID(str(requirement_id))
+        if requirement_id is None:
+            raise invalid_request("任务必须挂需求,不能解除关联")
+        rid = uuid.UUID(str(requirement_id))
         if rid != task.requirement_id:
-            if rid is not None:
-                _check_requirement(db, task.project_id, rid)
+            _check_requirement(db, task.project_id, rid)
             task.requirement_id = rid
-            summary = "关联需求" if rid else "解除需求关联"
+            summary = "关联需求"
     if blocked_by is not _UNSET:
         task_blockers.set_blockers_core(db, actor, task, blocked_by)
     record_activity(db, task.project_id, actor.id, "task", task.id, "update", summary)

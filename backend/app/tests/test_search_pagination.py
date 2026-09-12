@@ -30,8 +30,12 @@ def seed_requirements(db: Session, world: dict, count: int) -> None:
 
 
 def seed_tasks(db: Session, world: dict, count: int) -> None:
+    r = req_svc.create_requirement(db, world["admin"], world["project"].id, f"{NEEDLE} 任务挂载")
+    req_svc.set_requirement_status(db, world["admin"], r.id, "backlog")
     for i in range(count):
-        task_svc.create_task(db, world["admin"], world["project"].id, f"{NEEDLE} 任务 {i:02d}", None)
+        task_svc.create_task(
+            db, world["admin"], world["project"].id, f"{NEEDLE} 任务 {i:02d}", None, r.id
+        )
 
 
 def _ids(page: dict) -> set:

@@ -109,7 +109,7 @@ def test_task_view_full_criteria_roundtrip(client: TestClient, world: dict):
     login(client, "admin", "admin-pass-1")
     pid = str(world["project"].id)
     criteria = {
-        "statuses": ["backlog", "in_progress", "verifying"],
+        "statuses": ["backlog", "in_progress", "done"],
         "updated_within_days": 30,
         "keyword": "搜索",
         "assignee_id": str(world["member"].id),
@@ -199,11 +199,13 @@ def test_filter_view_validation(client: TestClient, world: dict):
     # statuses 含非法状态
     resp = create(criteria={"statuses": ["nonsense"]})
     assert resp.status_code == 400
-    # requirement 视图出现 task 独有状态 verifying
-    resp = create(criteria={"statuses": ["verifying"]})
-    assert resp.status_code == 400
-    # task 视图出现 requirement 独有状态 pending
+    # verifying 现为需求合法状态(ADR 0003 六态)
+    resp = create(name="验收视图", criteria={"statuses": ["verifying"]})
+    assert resp.status_code == 201
+    # task 视图出现 requirement 独有状态(pending/verifying 均非法)
     resp = create(entity_type="task", criteria={"statuses": ["pending"]})
+    assert resp.status_code == 400
+    resp = create(entity_type="task", criteria={"statuses": ["verifying"]})
     assert resp.status_code == 400
     # statuses 不是列表
     resp = create(criteria={"statuses": "backlog"})

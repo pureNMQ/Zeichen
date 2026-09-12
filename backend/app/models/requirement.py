@@ -1,7 +1,7 @@
-"""requirement / task:状态机(需求五态、任务五态,完全自由流转)。
+"""requirement / task:状态机(需求六态、任务四态,完全自由流转)。
 
-需求五态:pending / backlog / in_progress / done / cancelled;
-任务五态:backlog / in_progress / verifying / done / cancelled。
+需求六态:pending / backlog / in_progress / verifying / done / cancelled(验收上移需求,ADR 0003);
+任务四态:backlog / in_progress / done / cancelled(verifying 已删)。
 check 约束保证状态值合法;流转规则在 service 层(workflow.py)。
 """
 
@@ -12,8 +12,15 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, CreatedByMixin, IdMixin, ProjectScopeMixin, SoftDeleteMixin, TimestampMixin
 
-REQUIREMENT_STATUS_VALUES = ("pending", "backlog", "in_progress", "done", "cancelled")
-TASK_STATUS_VALUES = ("backlog", "in_progress", "verifying", "done", "cancelled")
+REQUIREMENT_STATUS_VALUES = (
+    "pending",
+    "backlog",
+    "in_progress",
+    "verifying",
+    "done",
+    "cancelled",
+)
+TASK_STATUS_VALUES = ("backlog", "in_progress", "done", "cancelled")
 
 
 class Requirement(IdMixin, TimestampMixin, SoftDeleteMixin, CreatedByMixin, ProjectScopeMixin, Base):
@@ -51,12 +58,12 @@ class Task(IdMixin, TimestampMixin, SoftDeleteMixin, CreatedByMixin, ProjectScop
     assignee_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("user.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    # 派生任务溯源;独立任务可空(§2.3)
-    requirement_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid, ForeignKey("requirement.id", ondelete="SET NULL"), nullable=True, index=True
+    # 派生任务溯源;任务必须挂需求(ADR 0003,不再有独立任务)
+    requirement_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("requirement.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
-    requirement: Mapped[Requirement | None] = relationship(back_populates="tasks")
+    requirement: Mapped[Requirement] = relationship(back_populates="tasks")
 
 
 class TaskBlocker(IdMixin, TimestampMixin, CreatedByMixin, ProjectScopeMixin, Base):

@@ -54,7 +54,15 @@ def test_mcp_task_description_plain_text_semantics(mcp_server: dict):
     client = _client(mcp_server)
     pid = mcp_server["project_id"]
 
-    t = client.call("tasks.create", project_id=pid, title="MCP 任务", description="**红线** 用例")
+    r = client.call("requirements.create", project_id=pid, title="MCP 任务挂载需求")
+    client.call("requirements.set_status", id=r["id"], status="backlog")
+    t = client.call(
+        "tasks.create",
+        project_id=pid,
+        title="MCP 任务",
+        description="**红线** 用例",
+        requirement_id=r["id"],
+    )
     assert t["description"] == "红线 用例"
 
     html = client.call("tasks.update", id=t["id"], description="<b>加粗</b>")

@@ -270,7 +270,8 @@ def _register_all(mcp) -> None:
     @mcp.tool(name="requirements.set_status")
     @sessioned
     def requirements_set_status(id: str, status: str) -> dict:
-        """改状态:任意目标态自由流转(pending/backlog/in_progress/done/cancelled),无任何前置校验;pending→backlog 即确认。"""
+        """改状态:任意目标态自由流转(需求六态:pending/backlog/in_progress/verifying/done/cancelled),
+        无任何前置校验;pending→backlog 即确认,verifying=验收中(验收语义在需求层)。"""
         db, actor = dbc()
         r = req_svc.set_requirement_status(db, actor, uuid.UUID(id), status)
         return req_svc._requirement_dict(db, r)
@@ -309,8 +310,8 @@ def _register_all(mcp) -> None:
         assignee_id: str | None = None,
         blocked_by: list[str] | None = None,
     ) -> dict:
-        """创建任务(requirement_id 可空=独立任务;assignee_id 可空=待认领;
-        blocked_by=前置任务 id 列表,仅同项目)。"""
+        """创建任务(requirement_id 必填=同项目已确认需求,缺失返回 invalid_request;
+        assignee_id 可空=待认领;blocked_by=前置任务 id 列表,仅同项目)。"""
         db, actor = dbc()
         t = task_svc.create_task(
             db, actor, uuid.UUID(project_id), title, description,
@@ -357,8 +358,9 @@ def _register_all(mcp) -> None:
         requirement_id: str | None = _UNSET,
         blocked_by: list[str] | None = _UNSET,
     ) -> dict:
-        """更新任务元数据；省略 requirement_id/blocked_by 保留原值，requirement_id 传 null
-        或空字符串解除关联，blocked_by 传 null 或 [] 清空(整体替换)。"""
+        """更新任务元数据；省略 requirement_id/blocked_by 保留原值，requirement_id 仅可改指向
+        同项目其他需求(传 null/空字符串解除关联会被拒绝，任务必须挂需求)，blocked_by 传 null
+        或 [] 清空(整体替换)。"""
         db, actor = dbc()
         kwargs: dict = {}
         if requirement_id is not _UNSET:
@@ -373,7 +375,7 @@ def _register_all(mcp) -> None:
     @mcp.tool(name="tasks.set_status")
     @sessioned
     def tasks_set_status(id: str, status: str) -> dict:
-        """改状态:任意目标态自由流转(backlog/in_progress/verifying/done/cancelled);已指派仅本人/管理员。"""
+        """改状态:任意目标态自由流转(任务四态:backlog/in_progress/done/cancelled);已指派仅本人/管理员。"""
         db, actor = dbc()
         t = task_svc.set_task_status(db, actor, uuid.UUID(id), status)
         return task_svc._task_dict(db, t)
@@ -643,7 +645,7 @@ def _register_all(mcp) -> None:
     @mcp.tool(name="comment.create")
     @sessioned
     def comment_create(target_type: str, target_id: str, body: str) -> dict:
-        """在实体上添加评论(requirement/task/document/project)。"""
+        """在实体上添加评论(requirement/document/project;task 目标返回 invalid_request,任务无评论区)。"""
         db, actor = dbc()
         c = poly_svc.create_comment(db, actor, target_type, uuid.UUID(target_id), body)
         return {"id": str(c.id), "target_type": c.target_type, "target_id": str(c.target_id), "body": c.body}
@@ -651,7 +653,7 @@ def _register_all(mcp) -> None:
     @mcp.tool(name="comment.list")
     @sessioned
     def comment_list(target_type: str, target_id: str, cursor: str | None = None, limit: int | None = None) -> dict:
-        """实体的评论流(cursor 分页)。"""
+        """实体的评论流(cursor 分页;task 目标返回 invalid_request,任务无评论区)。"""
         db, actor = dbc()
         cursor, limit = _paged({"type": target_type, "id": target_id}, cursor, limit)
         return poly_svc.list_comments(db, actor, target_type, uuid.UUID(target_id), cursor, limit)

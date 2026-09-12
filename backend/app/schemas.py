@@ -168,6 +168,7 @@ class RequirementDeleteBody(BaseModel):
 class TaskCreate(BaseModel):
     title: str = Field(min_length=1, max_length=256)
     description: str | None = None
+    # 必填由服务层强制(缺失 → invalid_request,而非 422;ADR 0003)
     requirement_id: uuid.UUID | None = None
     assignee_id: uuid.UUID | None = None
     blocked_by: list[uuid.UUID] | None = None

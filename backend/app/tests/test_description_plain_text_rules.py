@@ -100,6 +100,14 @@ def test_markdown_length_counted_after_stripping():
 # ---------- a) 规范化与拒绝:需求/任务服务创建与更新 ----------
 
 
+def _confirmed_requirement(world, db) -> "uuid.UUID":
+    from app.services.requirements import set_requirement_status
+
+    r = create_requirement(db, world["admin"], world["project"].id, "挂载需求")
+    set_requirement_status(db, world["admin"], r.id, "backlog")
+    return r.id
+
+
 def test_create_requirement_markdown_normalized(world, db):
     r = create_requirement(
         db, world["admin"], world["project"].id, "统一登录",
@@ -115,10 +123,11 @@ def test_create_requirement_html_rejected(world, db):
 
 
 def test_create_task_markdown_normalized_and_html_rejected(world, db):
-    t = create_task(db, world["admin"], world["project"].id, "写测试", "覆盖 `normalize` 的 **红线** 用例")
+    rid = _confirmed_requirement(world, db)
+    t = create_task(db, world["admin"], world["project"].id, "写测试", "覆盖 `normalize` 的 **红线** 用例", rid)
     assert t.description == "覆盖 normalize 的 红线 用例"
     with pytest.raises(AppError) as e:
-        create_task(db, world["admin"], world["project"].id, "写测试", "<em>斜体</em>描述")
+        create_task(db, world["admin"], world["project"].id, "写测试", "<em>斜体</em>描述", rid)
     assert e.value.code == "invalid_request"
 
 
@@ -126,7 +135,8 @@ def test_update_requirement_and_task_apply_plain_text_rules(world, db):
     r = create_requirement(db, world["admin"], world["project"].id, "需求A", "原描述")
     updated = update_requirement(db, world["admin"], r.id, None, "**新描述**")
     assert updated.description == "新描述"
-    t = create_task(db, world["admin"], world["project"].id, "任务A", "原任务描述")
+    rid = _confirmed_requirement(world, db)
+    t = create_task(db, world["admin"], world["project"].id, "任务A", "原任务描述", rid)
     ut = update_task(db, world["admin"], t.id, description="`ls` [列表](https://example.com/ls)")
     assert ut.description == "ls 列表"
 
@@ -148,12 +158,14 @@ def _legacy_requirement(db, world, description: str) -> Requirement:
 
 
 def _legacy_task(db, world, description: str) -> Task:
+    rid = _confirmed_requirement(world, db)
     t = Task(
         project_id=world["project"].id,
         title="存量任务",
         description=description,
         status="backlog",
         created_by=world["admin"].id,
+        requirement_id=rid,
     )
     db.add(t)
     db.commit()

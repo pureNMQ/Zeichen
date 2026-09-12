@@ -268,11 +268,11 @@ def test_agent_claim_to_requirement_done(mcp_server: dict):
     )
     tid = task["id"]
 
-    # agent 认领 → set_status 自由流转:实现中 → 验收中
+    # agent 认领 → set_status 自由流转(任务四态,verifying 已删 → invalid_request)
     claimed = client.call("tasks.claim", id=tid)
     assert claimed["assignee_id"] == mcp_server["agent_id"]
     assert client.call("tasks.set_status", id=tid, status="in_progress")["status"] == "in_progress"
-    assert client.call("tasks.set_status", id=tid, status="verifying")["status"] == "verifying"
+    assert "invalid_request" in client.call("tasks.set_status", id=tid, status="verifying")["error"]
 
     # 需求带未决任务可直接置 done:无任何前置校验(方案 B 完全自由)
     assert client.call("requirements.set_status", id=rid, status="done")["status"] == "done"
@@ -316,7 +316,7 @@ def test_agent_claim_to_requirement_done(mcp_server: dict):
 
 
 def test_task_requirement_link_over_mcp(mcp_server: dict):
-    """tasks.update 经 MCP 同步支持 requirement_id(设置/更换/解除)。"""
+    """tasks.create 必挂需求;tasks.update 只可改指向同项目其他需求,不可解除。"""
     client = RawMcpClient(mcp_server["url"], mcp_server["token"])
     client.initialize()
 
@@ -324,20 +324,27 @@ def test_task_requirement_link_over_mcp(mcp_server: dict):
     r2 = client.call("requirements.create", project_id=mcp_server["project_id"], title="MCP 需求二")
     client.call("requirements.set_status", id=r1["id"], status="backlog")
     client.call("requirements.set_status", id=r2["id"], status="backlog")
-    t = client.call("tasks.create", project_id=mcp_server["project_id"], title="MCP 独立任务")
-    assert t["requirement_id"] is None
 
-    updated = client.call("tasks.update", id=t["id"], requirement_id=r1["id"])
-    assert updated["requirement_id"] == r1["id"]
+    # 缺 requirement_id → invalid_request
+    orphan = client.call("tasks.create", project_id=mcp_server["project_id"], title="MCP 无主任务")
+    assert "invalid_request" in orphan["error"]
+
+    t = client.call(
+        "tasks.create", project_id=mcp_server["project_id"], title="MCP 任务", requirement_id=r1["id"]
+    )
+    assert t["requirement_id"] == r1["id"]
     retitled = client.call("tasks.update", id=t["id"], title="MCP 已改标题")
     assert retitled["title"] == "MCP 已改标题"
     assert retitled["requirement_id"] == r1["id"]
     changed = client.call("tasks.update", id=t["id"], requirement_id=r2["id"])
     assert changed["requirement_id"] == r2["id"]
-    cleared = client.call("tasks.update", id=t["id"], requirement_id="")
-    assert cleared["requirement_id"] is None
 
-    # 关联后 tasks.list 可按 requirement_id 过滤
+    # 置空/空字符串解除 → invalid_request(任务必须挂需求)
+    for empty in (None, ""):
+        cleared = client.call("tasks.update", id=t["id"], requirement_id=empty)
+        assert "invalid_request" in cleared["error"]
+
+    # tasks.list 可按 requirement_id 过滤
     client.call("tasks.update", id=t["id"], requirement_id=r1["id"])
     page = client.call("tasks.list", project_id=mcp_server["project_id"], requirement_id=r1["id"])
     assert [i["id"] for i in page["items"]] == [t["id"]]
@@ -457,9 +464,15 @@ def test_list_filters_over_mcp(mcp_server: dict):
     )
     assert "invalid_request" in err["error"], err
 
-    # tasks.list 同样三件套
-    t1 = client.call("tasks.create", project_id=pid, title="MCP Form 任务")
-    t2 = client.call("tasks.create", project_id=pid, title="MCP Pay 任务")
+    # tasks.list 同样三件套(任务必挂需求)
+    t_mount = client.call("requirements.create", project_id=pid, title="MCP 任务挂载需求")
+    client.call("requirements.set_status", id=t_mount["id"], status="backlog")
+    t1 = client.call(
+        "tasks.create", project_id=pid, title="MCP Form 任务", requirement_id=t_mount["id"]
+    )
+    t2 = client.call(
+        "tasks.create", project_id=pid, title="MCP Pay 任务", requirement_id=t_mount["id"]
+    )
     client.call("tasks.set_status", id=t2["id"], status="in_progress")
     page = client.call("tasks.list", project_id=pid, keyword="FORM")
     assert [i["id"] for i in page["items"]] == [t1["id"]], page
@@ -471,7 +484,7 @@ def test_list_filters_over_mcp(mcp_server: dict):
     # 清理本测试建的实体(恢复列表基线)
     client.call("tasks.delete", id=t1["id"])
     client.call("tasks.delete", id=t2["id"])
-    for rid in (r1["id"], r2["id"], r3["id"]):
+    for rid in (r1["id"], r2["id"], r3["id"], t_mount["id"]):
         client.call("requirements.delete", id=rid, confirm_task_count=0)
 
 

@@ -167,8 +167,17 @@ def _make_soft_deleted(db, project, admin, kind: str, *, now: datetime, age_days
             project_id=project.id, title="待清理需求", status="backlog", deleted_at=deleted_at
         )
     elif kind == "task":
+        _r = Requirement(
+            project_id=project.id, title="待清理任务挂载", status="backlog", deleted_at=deleted_at
+        )
+        db.add(_r)
+        db.flush()
         entity = Task(
-            project_id=project.id, title="待清理任务", status="backlog", deleted_at=deleted_at
+            project_id=project.id,
+            title="待清理任务",
+            status="backlog",
+            deleted_at=deleted_at,
+            requirement_id=_r.id,
         )
     elif kind == "document":
         entity = Document(
@@ -331,7 +340,9 @@ def test_attachment_purge_deletes_physical_file_and_frees_quota(
 def test_tombstone_rows_retained_and_target_shows_deleted(db, world, now):
     project, admin = world["project"], world["admin"]
     r = requirements_svc.create_requirement(db, admin, project.id, "被引用的需求")
-    t = tasks_svc.create_task(db, admin, project.id, "引用方任务")
+    r2 = requirements_svc.create_requirement(db, admin, project.id, "引用方任务挂载需求")
+    requirements_svc.set_requirement_status(db, admin, r2.id, "backlog")
+    t = tasks_svc.create_task(db, admin, project.id, "引用方任务", requirement_id=r2.id)
     polymorphic_svc.create_reference(db, admin, "task", t.id, "requirement", r.id, "mentions")
     polymorphic_svc.create_comment(db, admin, "requirement", r.id, "留下评论")
     requirements_svc.delete_requirement(db, admin, r.id, confirm_task_count=0)
@@ -411,7 +422,10 @@ def test_live_entities_never_purged(db, world, now):
     r = Requirement(project_id=project.id, title="活跃需求", status="in_progress")
     db.add(r)
     db.flush()
-    t = Task(project_id=project.id, title="活跃任务", status="backlog")
+    r2 = Requirement(project_id=project.id, title="活跃任务挂载", status="backlog")
+    db.add(r2)
+    db.flush()
+    t = Task(project_id=project.id, title="活跃任务", status="backlog", requirement_id=r2.id)
     d = Document(project_id=project.id, title="活跃文档", doc_type="wiki")
     c = Comment(
         project_id=project.id,

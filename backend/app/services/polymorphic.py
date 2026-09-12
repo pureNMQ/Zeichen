@@ -1,7 +1,8 @@
-"""多态服务:comment / activity / reference(规格书 §2.3 / §3.3)。
+"""多态服务:comment / activity / reference(规格书 §2.3 / §3.3;ADR 0003 任务取消评论区)。
 
 - 目标解析:requirement / task / document / project;user 目标暂不支持
   (comment/activity 的 project_id NOT NULL,工作区级实体无处挂载,ticket 02 已知缺口)
+- 评论目标:task 拒绝(invalid_request);任务的活动/引用/附件/关注保留
 - 评论删除:editor 仅自己的,owner/admin 任意(§5.1)
 - reference 双向列表(from/to 任一命中);from 与 to 必须在同一项目
 - activity 只追加不可变(CreatedAtMixin)
@@ -119,6 +120,8 @@ def create_comment(
     body = body.strip()
     if not body:
         raise invalid_request("评论内容不能为空")
+    if target_type == "task":
+        raise invalid_request("任务已取消评论区,请在关联需求下评论")
     project = resolve_target(db, target_type, target_id)
     require_project_role(db, actor.id, project.id, min_level="editor")
     comment = Comment(
@@ -138,6 +141,8 @@ def create_comment(
 def list_comments(
     db: Session, user: User, target_type: str, target_id: uuid.UUID, cursor: str | None, limit: int
 ) -> dict:
+    if target_type == "task":
+        raise invalid_request("任务已取消评论区,请在关联需求下评论")
     project = resolve_target(db, target_type, target_id)
     get_accessible_project(db, user.id, project.id, min_level="viewer")
     offset = _decode_offset({"type": target_type, "id": str(target_id)}, cursor, limit)

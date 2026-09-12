@@ -54,7 +54,12 @@ def _mk_req(client: TestClient, pid: str, title: str, description=None, status=N
 
 
 def _mk_task(client: TestClient, pid: str, title: str, description=None, status=None) -> dict:
-    resp = client.post(f"/api/projects/{pid}/tasks", json={"title": title, "description": description})
+    rid = client.post(f"/api/projects/{pid}/requirements", json={"title": f"挂载:{title}"}).json()["id"]
+    client.post(f"/api/requirements/{rid}/status", json={"status": "backlog"})
+    resp = client.post(
+        f"/api/projects/{pid}/tasks",
+        json={"title": title, "description": description, "requirement_id": rid},
+    )
     assert resp.status_code == 201, resp.text
     item = resp.json()
     if status is not None:
@@ -202,10 +207,9 @@ def test_task_filters_over_http(client: TestClient, world: dict, db: Session):
     t1 = _mk_task(client, pid, "Form Task", description="input validation")
     t2 = _mk_task(client, pid, "Payment Task", status="in_progress")
     t3 = _mk_task(client, pid, "Old Task")
-    t4 = client.post(
-        f"/api/projects/{pid}/tasks",
-        json={"title": "Assigned Task", "assignee_id": str(world["agent"].id)},
-    ).json()
+    t4 = _mk_task(client, pid, "Assigned Task")
+    resp = client.post(f"/api/tasks/{t4['id']}/assign", json={"assignee_id": str(world["agent"].id)})
+    assert resp.status_code == 200, resp.text
     _backdate(db, Task, uuid.UUID(t3["id"]), 5)
 
     # 多状态(重复参数)
@@ -307,15 +311,17 @@ def test_service_list_tasks_new_filters(db: Session, world: dict):
         requirement_id=req.id, assignee_id=world["agent"].id,
     )
     task_svc.set_task_status(db, world["agent"], t1.id, "in_progress")
-    t2 = task_svc.create_task(db, world["admin"], pid, "Payment Task", description="wechat pay")
-    task_svc.set_task_status(db, world["agent"], t2.id, "verifying")
-    old = task_svc.create_task(db, world["admin"], pid, "Old Task")
+    t2 = task_svc.create_task(
+        db, world["admin"], pid, "Payment Task", description="wechat pay", requirement_id=req.id
+    )
+    task_svc.set_task_status(db, world["agent"], t2.id, "done")
+    old = task_svc.create_task(db, world["admin"], pid, "Old Task", requirement_id=req.id)
     _backdate(db, Task, old.id, 5)
 
     # 多状态
     page = task_svc.list_tasks(
         db=db, user=world["member"], project_id=pid, requirement_id=None, assignee_id=None,
-        status=["in_progress", "verifying"], cursor=None, limit=20,
+        status=["in_progress", "done"], cursor=None, limit=20,
         updated_within_days=None, keyword=None,
     )
     assert {i["id"] for i in page["items"]} == {str(t1.id), str(t2.id)}
@@ -403,9 +409,11 @@ def test_service_order_requirements_updated_at_desc(db: Session, world: dict):
 
 def test_service_order_tasks_updated_at_desc_tiebreak_id(db: Session, world: dict):
     pid = world["project"].id
-    t1 = task_svc.create_task(db, world["admin"], pid, "任务一")
-    t2 = task_svc.create_task(db, world["admin"], pid, "任务二")
-    t3 = task_svc.create_task(db, world["admin"], pid, "任务三")
+    _req = req_svc.create_requirement(db, world["admin"], pid, "排序需求")
+    req_svc.set_requirement_status(db, world["admin"], _req.id, "backlog")
+    t1 = task_svc.create_task(db, world["admin"], pid, "任务一", requirement_id=_req.id)
+    t2 = task_svc.create_task(db, world["admin"], pid, "任务二", requirement_id=_req.id)
+    t3 = task_svc.create_task(db, world["admin"], pid, "任务三", requirement_id=_req.id)
     now = datetime.now(timezone.utc)
     db.get(Task, t1.id).updated_at = now - timedelta(hours=1)
     db.get(Task, t2.id).updated_at = now - timedelta(hours=2)
@@ -424,8 +432,10 @@ def test_service_order_tasks_updated_at_desc_tiebreak_id(db: Session, world: dic
 
 def test_large_pagination_tasks_service(db: Session, world: dict):
     pid = world["project"].id
+    _req = req_svc.create_requirement(db, world["admin"], pid, "分页需求")
+    req_svc.set_requirement_status(db, world["admin"], _req.id, "backlog")
     for i in range(105):
-        task_svc.create_task(db, world["admin"], pid, f"任务 {i}")
+        task_svc.create_task(db, world["admin"], pid, f"任务 {i}", requirement_id=_req.id)
     page1 = task_svc.list_tasks(
         db=db, user=world["member"], project_id=pid, requirement_id=None, assignee_id=None,
         status=None, cursor=None, limit=100, updated_within_days=None, keyword=None,
