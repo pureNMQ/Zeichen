@@ -39,6 +39,7 @@ __all__ = [
     "CogneeConfiguration",
     "CogneeRestartJob",
     "EntityWatch",
+    "ShortCodeCounter",
     "Notification",
     "NotificationPreference",
     "ProjectFilterView",
