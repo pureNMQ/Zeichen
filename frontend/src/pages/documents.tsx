@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { DndContext, PointerSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
-import { ChevronDown, ChevronRight, History, MoreHorizontal, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react'
+import { DndContext, PointerSensor, pointerWithin, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
+import { ArrowUpToLine, ChevronDown, ChevronRight, History, MoreHorizontal, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react'
 import { VditorIrEditor, VditorMarkdownViewer } from '@/components/vditor-ir-editor'
 import { AttachmentList } from '@/components/attachment-list'
 import { Button } from '@/components/ui/button'
@@ -65,7 +65,7 @@ function treeKey(projectId: string, module: DocumentType, parentId: string | nul
   return ['document-tree', projectId, module, parentId]
 }
 
-function TreeChildren({ projectId, module, parentId, filter, expanded, onToggle, onNavigate, selectedId, canEdit, onRename, onDelete }: {
+function TreeChildren({ projectId, module, parentId, filter, expanded, onToggle, onNavigate, selectedId, canEdit, onMoveToRoot, onRename, onDelete }: {
   projectId: string
   module: DocumentType
   parentId: string | null
@@ -75,6 +75,7 @@ function TreeChildren({ projectId, module, parentId, filter, expanded, onToggle,
   onNavigate: (url: string) => void
   selectedId?: string
   canEdit: boolean
+  onMoveToRoot?: (node: DocumentNode) => void
   onRename: (node: DocumentNode) => void
   onDelete: (node: DocumentNode) => void
 }) {
@@ -87,13 +88,13 @@ function TreeChildren({ projectId, module, parentId, filter, expanded, onToggle,
   const visibleNodes = filterNodesByTitle(data.items, filter)
   return <div className={parentId ? 'ml-3 border-l pl-1.5' : 'space-y-0.5'}>{visibleNodes.map((node) => {
     const open = expanded.has(node.id)
-    return <TreeRow key={node.id} node={node} module={module} dragEnabled={canEdit} canDrag={canEdit} open={open} selectedId={selectedId} onToggle={onToggle} onNavigate={onNavigate} onRename={onRename} onDelete={onDelete}>
-      {node.has_children && open && <TreeChildren projectId={projectId} module={module} parentId={node.id} filter={filter} expanded={expanded} onToggle={onToggle} onNavigate={onNavigate} selectedId={selectedId} canEdit={canEdit} onRename={onRename} onDelete={onDelete} />}
+    return <TreeRow key={node.id} node={node} module={module} dragEnabled={canEdit} canDrag={canEdit} open={open} selectedId={selectedId} onToggle={onToggle} onNavigate={onNavigate} onRename={onRename} onDelete={onDelete} onMoveToRoot={onMoveToRoot} atRoot={!parentId}>
+      {node.has_children && open && <TreeChildren projectId={projectId} module={module} parentId={node.id} filter={filter} expanded={expanded} onToggle={onToggle} onNavigate={onNavigate} selectedId={selectedId} canEdit={canEdit} onMoveToRoot={onMoveToRoot} onRename={onRename} onDelete={onDelete} />}
     </TreeRow>
   })}</div>
 }
 
-function TreeRow({ node, module, dragEnabled, canDrag, open, selectedId, onToggle, onNavigate, onRename, onDelete, children }: {
+function TreeRow({ node, module, dragEnabled, canDrag, open, selectedId, onToggle, onNavigate, onRename, onDelete, onMoveToRoot, atRoot, children }: {
   node: DocumentNode
   module: DocumentType
   dragEnabled: boolean
@@ -104,6 +105,8 @@ function TreeRow({ node, module, dragEnabled, canDrag, open, selectedId, onToggl
   onNavigate: (url: string) => void
   onRename: (node: DocumentNode) => void
   onDelete: (node: DocumentNode) => void
+  onMoveToRoot?: (node: DocumentNode) => void
+  atRoot?: boolean
   children?: ReactNode
 }) {
   const kind: DragKind = node.node_kind === 'directory' ? 'directory' : 'document'
@@ -120,19 +123,21 @@ function TreeRow({ node, module, dragEnabled, canDrag, open, selectedId, onToggl
       >
         {node.has_children ? <button type="button" onClick={() => onToggle(node.id)} aria-label={`${open ? '收起' : '展开'}${node.title}`} className="flex h-7 w-5 shrink-0 items-center justify-center" aria-expanded={open}>{open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}</button> : <span className="w-5 shrink-0" />}
         <button type="button" onClick={() => onNavigate(nodeUrl(module, node))} className="min-w-0 flex-1 truncate py-1.5 text-left text-sm" title={node.title}>{node.title}</button>
-        {canDrag && <DropdownMenu><DropdownMenuTrigger asChild><Button type="button" size="icon-xs" variant="ghost" aria-label={`${node.title}更多操作`}><MoreHorizontal className="h-3.5 w-3.5" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={() => onRename(node)}><Pencil />重命名</DropdownMenuItem><DropdownMenuItem variant="destructive" onClick={() => onDelete(node)}><Trash2 />删除</DropdownMenuItem></DropdownMenuContent></DropdownMenu>}
+        {canDrag && <DropdownMenu><DropdownMenuTrigger asChild><Button type="button" size="icon-xs" variant="ghost" aria-label={`${node.title}更多操作`}><MoreHorizontal className="h-3.5 w-3.5" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end">{!atRoot && onMoveToRoot && <DropdownMenuItem onClick={() => onMoveToRoot(node)}><ArrowUpToLine />移到根级</DropdownMenuItem>}<DropdownMenuItem onClick={() => onRename(node)}><Pencil />重命名</DropdownMenuItem><DropdownMenuItem variant="destructive" onClick={() => onDelete(node)}><Trash2 />删除</DropdownMenuItem></DropdownMenuContent></DropdownMenu>}
       </div>
       {children}
     </div>
 }
 
-function RootDropZone() {
+function RootDropZone({ dragActive }: { dragActive: boolean }) {
   const { setNodeRef, isOver } = useDroppable({ id: 'drop:root', data: { kind: 'root', id: null } })
+  const highlight = isOver || (dragActive && true)
   return (
     <div
       ref={setNodeRef}
       data-testid="tree-root-dropzone"
-      className={`mt-2 rounded-md border border-dashed px-2 py-1.5 text-center text-xs ${isOver ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground'}`}
+      aria-label="移到根级投放区"
+      className={`sticky top-0 z-10 mb-1 rounded-md border border-dashed px-2 py-2 text-center text-xs ${highlight ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground'} ${dragActive ? 'min-h-10 border-solid' : ''}`}
     >
       拖到此处移到根级
     </div>
@@ -184,6 +189,20 @@ function ModuleTreeSidebar({ module, selected, selectedNode, onNavigate }: { mod
   const [actionNode, setActionNode] = useState<DocumentNode | null>(null)
   const [deleteImpact, setDeleteImpact] = useState<{ documents: number; directories: number } | null>(null)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
+  const [dragActive, setDragActive] = useState(false)
+
+  async function moveToRoot(node: DocumentNode) {
+    const kind: DragKind = node.node_kind === 'directory' ? 'directory' : 'document'
+    const plan = planDocumentMove(module, kind, node.id, 'root', null)
+    if (!plan) return
+    setActionError(null)
+    try {
+      await api.post(plan.path, plan.body)
+      await invalidate()
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : '移动失败')
+    }
+  }
 
   async function handleMoveEnd(event: DragEndEvent) {
     if (!projectId) return
@@ -221,7 +240,7 @@ function ModuleTreeSidebar({ module, selected, selectedNode, onNavigate }: { mod
     try { const path = actionNode.node_kind === 'directory' ? `/directories/${module}/${actionNode.id}/delete` : `/documents/${module}/${actionNode.id}/delete`; await api.post(path); setDeleteOpen(false); await invalidate(); navigate(moduleBase(module)) } catch (err) { setActionError(err instanceof ApiError ? err.message : '删除失败') }
   }
   if (!projectId || !currentProject) return null
-  return <aside className="flex h-full min-h-0 w-64 shrink-0 flex-col border-r bg-background" aria-label={`${documentLabel(module)}文件组织`}><div className="border-b px-4 py-4"><p className="font-semibold">{documentLabel(module)}</p><p className="mt-1 truncate text-xs text-muted-foreground">{currentProject.name}</p></div><div className="border-b p-3"><Input aria-label="搜索文档" autoComplete="off" placeholder="搜索文档" value={titleFilter} onChange={(event) => setTitleFilter(event.target.value)} /></div>{canEdit && <div className="flex justify-end border-b p-3"><DropdownMenu><DropdownMenuTrigger asChild><Button type="button" size="icon-sm" aria-label="新建"><Plus className="h-4 w-4" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end">{module === 'wiki' ? <><DropdownMenuItem onClick={() => createDocument(null)}>新建 Wiki</DropdownMenuItem>{selected?.kind === 'document' && <DropdownMenuItem onClick={() => createDocument(selected.id)}>新建子 Wiki</DropdownMenuItem>}</> : <><DropdownMenuItem onClick={() => createDocument()}>新建词条</DropdownMenuItem><DropdownMenuItem onClick={() => setDirectoryOpen(true)}>新建目录</DropdownMenuItem></>}</DropdownMenuContent></DropdownMenu></div>}<div className="min-h-0 flex-1 overflow-y-auto p-3"><DndContext sensors={sensors} onDragEnd={handleMoveEnd}><TreeChildren projectId={projectId} module={module} parentId={null} filter={titleFilter} expanded={expanded} onToggle={(id) => setExpanded((current) => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next })} onNavigate={onNavigate} selectedId={selected?.id} canEdit={canEdit} onRename={(node) => { setActionNode(node); setRenameOpen(true) }} onDelete={(node) => void beginDelete(node)} />{canEdit && <RootDropZone />}</DndContext></div><ErrorNotification message={actionError} /><RenameDialog node={actionNode} module={module} open={renameOpen} onOpenChange={setRenameOpen} onSaved={invalidate} />{module === 'glossary' && <CreateDirectoryDialog projectId={projectId} parentId={selected?.kind === 'directory' ? selected.id : null} open={directoryOpen} onOpenChange={setDirectoryOpen} onCreated={invalidate} />}<Dialog open={deleteOpen} onOpenChange={setDeleteOpen}><DialogContent><DialogHeader><DialogTitle>确认删除</DialogTitle><DialogDescription>将软删除 {deleteImpact?.documents ?? 0} 篇文档和 {deleteImpact?.directories ?? 0} 个目录。</DialogDescription></DialogHeader><DialogFooter><Button variant="outline" onClick={() => setDeleteOpen(false)}>取消</Button><Button variant="destructive" onClick={() => void confirmDelete()}>删除</Button></DialogFooter></DialogContent></Dialog></aside>
+  return <aside className="flex h-full min-h-0 w-64 shrink-0 flex-col border-r bg-background" aria-label={`${documentLabel(module)}文件组织`}><div className="border-b px-4 py-4"><p className="font-semibold">{documentLabel(module)}</p><p className="mt-1 truncate text-xs text-muted-foreground">{currentProject.name}</p></div><div className="border-b p-3"><Input aria-label="搜索文档" autoComplete="off" placeholder="搜索文档" value={titleFilter} onChange={(event) => setTitleFilter(event.target.value)} /></div>{canEdit && <div className="flex justify-end border-b p-3"><DropdownMenu><DropdownMenuTrigger asChild><Button type="button" size="icon-sm" aria-label="新建"><Plus className="h-4 w-4" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end">{module === 'wiki' ? <><DropdownMenuItem onClick={() => createDocument(null)}>新建 Wiki</DropdownMenuItem>{selected?.kind === 'document' && <DropdownMenuItem onClick={() => createDocument(selected.id)}>新建子 Wiki</DropdownMenuItem>}</> : <><DropdownMenuItem onClick={() => createDocument()}>新建词条</DropdownMenuItem><DropdownMenuItem onClick={() => setDirectoryOpen(true)}>新建目录</DropdownMenuItem></>}</DropdownMenuContent></DropdownMenu></div>}<div className="min-h-0 flex-1 overflow-y-auto p-3"><DndContext sensors={sensors} collisionDetection={pointerWithin} onDragStart={() => setDragActive(true)} onDragCancel={() => setDragActive(false)} onDragEnd={(event) => { setDragActive(false); void handleMoveEnd(event) }}><div className="sticky top-0 z-10 -mx-3 mb-1 bg-background px-3 pt-1">{canEdit && <RootDropZone dragActive={dragActive} />}</div><TreeChildren projectId={projectId} module={module} parentId={null} filter={titleFilter} expanded={expanded} onToggle={(id) => setExpanded((current) => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next })} onNavigate={onNavigate} selectedId={selected?.id} canEdit={canEdit} onMoveToRoot={moveToRoot} onRename={(node) => { setActionNode(node); setRenameOpen(true) }} onDelete={(node) => void beginDelete(node)} /></DndContext></div><ErrorNotification message={actionError} /><RenameDialog node={actionNode} module={module} open={renameOpen} onOpenChange={setRenameOpen} onSaved={invalidate} />{module === 'glossary' && <CreateDirectoryDialog projectId={projectId} parentId={selected?.kind === 'directory' ? selected.id : null} open={directoryOpen} onOpenChange={setDirectoryOpen} onCreated={invalidate} />}<Dialog open={deleteOpen} onOpenChange={setDeleteOpen}><DialogContent><DialogHeader><DialogTitle>确认删除</DialogTitle><DialogDescription>将软删除 {deleteImpact?.documents ?? 0} 篇文档和 {deleteImpact?.directories ?? 0} 个目录。</DialogDescription></DialogHeader><DialogFooter><Button variant="outline" onClick={() => setDeleteOpen(false)}>取消</Button><Button variant="destructive" onClick={() => void confirmDelete()}>删除</Button></DialogFooter></DialogContent></Dialog></aside>
 }
 
 function DocumentEditor({ module, document, containerId, onDirtyChange, onRegisterSave, onSaved, onCancel }: { module: DocumentType; document?: DocumentRow; containerId: string | null; onDirtyChange: (dirty: boolean) => void; onRegisterSave: (save: () => Promise<boolean>) => void; onSaved: (document: DocumentRow) => void; onCancel: () => void }) {
