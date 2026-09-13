@@ -63,20 +63,30 @@ def _paged(filters: dict, cursor: str | None, limit: int | None) -> tuple[str | 
     return cursor, limit
 
 
-def _req_id(requirement_id: str | None) -> uuid.UUID | None:
-    return uuid.UUID(requirement_id) if requirement_id else None
+def _req_id(requirement_id: str | None) -> str | None:
+    """需求短码透传(REQ-n);格式非法 → invalid_request(ADR 0002)。"""
+    if requirement_id is None or requirement_id == "":
+        return requirement_id or None
+    from app.services.short_codes import require_valid_code
+
+    try:
+        return require_valid_code("requirement", requirement_id)
+    except AppError as exc:
+        raise ToolError(f"{exc.code}: {exc.message}") from None
 
 
-def _uuid_list(values: list[str] | None) -> list[uuid.UUID] | None:
-    """MCP 字符串 id 列表 → UUID 列表;None/[] 原样传递(None/[]=解除/清空语义)。"""
+def _uuid_list(values: list[str] | None) -> list[str] | None:
+    """MCP blocked_by:任务短码列表(TASK-n);None/[] 原样传递(None/[]=清空语义)。"""
     if values is None:
         return None
-    result: list[uuid.UUID] = []
+    from app.services.short_codes import require_valid_code
+
+    result: list[str] = []
     for value in values:
         try:
-            result.append(uuid.UUID(value))
-        except (AttributeError, TypeError, ValueError):
-            raise ToolError(f"invalid_request: blocked_by 必须是合法 UUID 列表") from None
+            result.append(require_valid_code("task", value))
+        except AppError:
+            raise ToolError("invalid_request: blocked_by 必须是合法任务短码(TASK-n)列表") from None
     return result
 
 
@@ -238,7 +248,7 @@ def _register_all(mcp) -> None:
     def requirements_get(id: str) -> dict:
         """需求详情(含任务数)。"""
         db, actor = dbc()
-        return req_svc._requirement_dict(db, req_svc.get_requirement(db, actor, uuid.UUID(id)))
+        return req_svc._requirement_dict(db, req_svc.get_requirement(db, actor, id))
 
     @mcp.tool(name="requirements.list")
     @sessioned
@@ -264,7 +274,7 @@ def _register_all(mcp) -> None:
     def requirements_update(id: str, title: str | None = None, description: str | None = None) -> dict:
         """更新需求元数据(标题/描述,不涉状态)。"""
         db, actor = dbc()
-        r = req_svc.update_requirement(db, actor, uuid.UUID(id), title, description)
+        r = req_svc.update_requirement(db, actor, id, title, description)
         return req_svc._requirement_dict(db, r)
 
     @mcp.tool(name="requirements.set_status")
@@ -273,7 +283,7 @@ def _register_all(mcp) -> None:
         """改状态:任意目标态自由流转(需求六态:pending/backlog/in_progress/verifying/done/cancelled),
         无任何前置校验;pending→backlog 即确认,verifying=验收中(验收语义在需求层)。"""
         db, actor = dbc()
-        r = req_svc.set_requirement_status(db, actor, uuid.UUID(id), status)
+        r = req_svc.set_requirement_status(db, actor, id, status)
         return req_svc._requirement_dict(db, r)
 
     @mcp.tool(name="requirements.cancel")
@@ -281,7 +291,7 @@ def _register_all(mcp) -> None:
     def requirements_cancel(id: str) -> dict:
         """取消需求:set_status('cancelled') 便捷封装。"""
         db, actor = dbc()
-        r = req_svc.cancel_requirement(db, actor, uuid.UUID(id))
+        r = req_svc.cancel_requirement(db, actor, id)
         return req_svc._requirement_dict(db, r)
 
     @mcp.tool(name="requirements.delete")
@@ -289,7 +299,7 @@ def _register_all(mcp) -> None:
     def requirements_delete(id: str, confirm_task_count: int | None = None) -> dict:
         """软删需求;下有任务时须传 confirm_task_count=任务数 二次确认。"""
         db, actor = dbc()
-        req_svc.delete_requirement(db, actor, uuid.UUID(id), confirm_task_count)
+        req_svc.delete_requirement(db, actor, id, confirm_task_count)
         return {"deleted": True, "id": id}
 
     @mcp.tool(name="requirements.restore")
@@ -297,7 +307,7 @@ def _register_all(mcp) -> None:
     def requirements_restore(id: str) -> dict:
         """恢复已软删需求。"""
         db, actor = dbc()
-        return req_svc._requirement_dict(db, req_svc.restore_requirement(db, actor, uuid.UUID(id)))
+        return req_svc._requirement_dict(db, req_svc.restore_requirement(db, actor, id))
 
     # ---------- tasks.* ----------
     @mcp.tool(name="tasks.create")
@@ -315,7 +325,8 @@ def _register_all(mcp) -> None:
         db, actor = dbc()
         t = task_svc.create_task(
             db, actor, uuid.UUID(project_id), title, description,
-            _req_id(requirement_id), _req_id(assignee_id),
+            _req_id(requirement_id),
+            uuid.UUID(assignee_id) if assignee_id else None,
             _uuid_list(blocked_by),
         )
         return task_svc._task_dict(db, t)
@@ -325,7 +336,7 @@ def _register_all(mcp) -> None:
     def tasks_get(id: str) -> dict:
         """任务详情。"""
         db, actor = dbc()
-        return task_svc._task_dict(db, task_svc.get_task(db, actor, uuid.UUID(id)))
+        return task_svc._task_dict(db, task_svc.get_task(db, actor, id))
 
     @mcp.tool(name="tasks.list")
     @sessioned
@@ -345,7 +356,8 @@ def _register_all(mcp) -> None:
         cursor, limit = _paged({}, cursor, limit)
         return task_svc.list_tasks(
             db, actor, uuid.UUID(project_id), _req_id(requirement_id),
-            _req_id(assignee_id), _split_statuses(status), cursor, limit,
+            uuid.UUID(assignee_id) if assignee_id else None,
+            _split_statuses(status), cursor, limit,
             updated_within_days=updated_within_days, keyword=keyword,
         )
 
@@ -367,9 +379,7 @@ def _register_all(mcp) -> None:
             kwargs["requirement_id"] = _req_id(requirement_id)
         if blocked_by is not _UNSET:
             kwargs["blocked_by"] = _uuid_list(blocked_by)
-        t = task_svc.update_task(
-            db, actor, uuid.UUID(id), title, description, **kwargs
-        )
+        t = task_svc.update_task(db, actor, id, title, description, **kwargs)
         return task_svc._task_dict(db, t)
 
     @mcp.tool(name="tasks.set_status")
@@ -377,7 +387,7 @@ def _register_all(mcp) -> None:
     def tasks_set_status(id: str, status: str) -> dict:
         """改状态:任意目标态自由流转(任务四态:backlog/in_progress/done/cancelled);已指派仅本人/管理员。"""
         db, actor = dbc()
-        t = task_svc.set_task_status(db, actor, uuid.UUID(id), status)
+        t = task_svc.set_task_status(db, actor, id, status)
         return task_svc._task_dict(db, t)
 
     @mcp.tool(name="tasks.assign")
@@ -385,35 +395,35 @@ def _register_all(mcp) -> None:
     def tasks_assign(id: str, assignee_id: str) -> dict:
         """指派(未指派任意编辑权者可指派;已指派仅本人/管理员可改派)。"""
         db, actor = dbc()
-        return task_svc._task_dict(db, task_svc.assign_task(db, actor, uuid.UUID(id), uuid.UUID(assignee_id)))
+        return task_svc._task_dict(db, task_svc.assign_task(db, actor, id, uuid.UUID(assignee_id)))
 
     @mcp.tool(name="tasks.claim")
     @sessioned
     def tasks_claim(id: str) -> dict:
         """认领未指派任务(并发安全,失败得 conflict)。"""
         db, actor = dbc()
-        return task_svc._task_dict(db, task_svc.claim_task(db, actor, uuid.UUID(id)))
+        return task_svc._task_dict(db, task_svc.claim_task(db, actor, id))
 
     @mcp.tool(name="tasks.unassign")
     @sessioned
     def tasks_unassign(id: str) -> dict:
         """解除指派(仅本人/管理员)。"""
         db, actor = dbc()
-        return task_svc._task_dict(db, task_svc.unassign_task(db, actor, uuid.UUID(id)))
+        return task_svc._task_dict(db, task_svc.unassign_task(db, actor, id))
 
     @mcp.tool(name="tasks.cancel")
     @sessioned
     def tasks_cancel(id: str) -> dict:
         """取消任务:set_status('cancelled') 便捷封装。"""
         db, actor = dbc()
-        return task_svc._task_dict(db, task_svc.cancel_task(db, actor, uuid.UUID(id)))
+        return task_svc._task_dict(db, task_svc.cancel_task(db, actor, id))
 
     @mcp.tool(name="tasks.delete")
     @sessioned
     def tasks_delete(id: str) -> dict:
         """软删任务(已指派仅本人/管理员)。"""
         db, actor = dbc()
-        task_svc.delete_task(db, actor, uuid.UUID(id))
+        task_svc.delete_task(db, actor, id)
         return {"deleted": True, "id": id}
 
     @mcp.tool(name="tasks.restore")
@@ -421,59 +431,59 @@ def _register_all(mcp) -> None:
     def tasks_restore(id: str) -> dict:
         """恢复已软删任务。"""
         db, actor = dbc()
-        return task_svc._task_dict(db, task_svc.restore_task(db, actor, uuid.UUID(id)))
+        return task_svc._task_dict(db, task_svc.restore_task(db, actor, id))
 
     # ---------- docs.wiki.* / docs.glossary.* ----------
     def _doc_create(project_id: str, title: str, module: str, content: str, metadata: dict | None, parent_id: str | None = None, directory_id: str | None = None) -> dict:
         db, actor = dbc()
         document = document_svc.create_document(
             db, actor, uuid.UUID(project_id), title, module, content, metadata,
-            _optional_uuid(parent_id, "parent_id"), _optional_uuid(directory_id, "directory_id"),
+            parent_id or None, directory_id or None,
         )
         return document_svc._document_dict(db, document)
 
     def _doc_get(id: str, module: str) -> dict:
         db, actor = dbc()
-        return document_svc._document_dict(db, document_svc.get_document(db, actor, uuid.UUID(id), module))
+        return document_svc._document_dict(db, document_svc.get_document(db, actor, id, module))
 
     def _doc_children(project_id: str, module: str, parent_id: str | None, cursor: str | None, limit: int | None) -> dict:
         db, actor = dbc()
         cursor, limit = _paged({"project_id": project_id, "module": module, "parent_id": parent_id}, cursor, limit)
-        return document_svc.list_module_children(db, actor, uuid.UUID(project_id), module, _optional_uuid(parent_id, "parent_id"), cursor, limit)
+        return document_svc.list_module_children(db, actor, uuid.UUID(project_id), module, parent_id or None, cursor, limit)
 
     def _doc_update(id: str, module: str, title: str | None, content: str | None, metadata: dict | None = None) -> dict:
         db, actor = dbc()
-        document = document_svc.get_document(db, actor, uuid.UUID(id), module)
+        document = document_svc.get_document(db, actor, id, module)
         saved, warning = document_svc.update_document(
-            db, actor, document.id, title, content, metadata if metadata is not None else document_svc._UNSET,
+            db, actor, document.code, title, content, metadata if metadata is not None else document_svc._UNSET,
         )
         return document_svc._document_dict(db, saved, warning)
 
     def _doc_move(id: str, module: str, parent_id: str = "", directory_id: str = "") -> dict:
         db, actor = dbc()
-        document = document_svc.get_document(db, actor, uuid.UUID(id), module)
+        document = document_svc.get_document(db, actor, id, module)
         moved = document_svc.move_document(
-            db, actor, document.id, _optional_uuid(parent_id, "parent_id"), _optional_uuid(directory_id, "directory_id")
+            db, actor, document.code, parent_id or None, directory_id or None
         )
         return document_svc._document_dict(db, moved)
 
     def _doc_delete(id: str, module: str) -> dict:
         db, actor = dbc()
-        document = document_svc.get_document(db, actor, uuid.UUID(id), module)
-        impact = document_svc.delete_impact_document(db, actor, document.id)
-        document_svc.delete_document(db, actor, document.id)
+        document = document_svc.get_document(db, actor, id, module)
+        impact = document_svc.delete_impact_document(db, actor, document.code)
+        document_svc.delete_document(db, actor, document.code)
         return {"deleted": True, "id": id, "impact": impact}
 
     def _doc_restore(id: str, module: str) -> dict:
         db, actor = dbc()
-        document = document_svc._visible_document(db, actor, uuid.UUID(id), include_deleted=True)
+        document = document_svc._visible_document(db, actor, id, include_deleted=True)
         if document.doc_type != module:
             raise ToolError("not_found: 文档不存在")
-        return document_svc._document_dict(db, document_svc.restore_document(db, actor, document.id))
+        return document_svc._document_dict(db, document_svc.restore_document(db, actor, document.code))
 
     def _doc_path(project_id: str, module: str, node_kind: str, id: str) -> dict:
         db, actor = dbc()
-        return document_svc.ancestor_path(db, actor, uuid.UUID(project_id), module, node_kind, uuid.UUID(id))
+        return document_svc.ancestor_path(db, actor, uuid.UUID(project_id), module, node_kind, id)
 
     def _doc_deleted(project_id: str, module: str, cursor: str | None, limit: int | None) -> dict:
         db, actor = dbc()
@@ -523,13 +533,13 @@ def _register_all(mcp) -> None:
     @sessioned
     def docs_wiki_versions(id: str) -> dict:
         db, actor = dbc()
-        return {"items": document_svc.list_versions(db, actor, uuid.UUID(id), "wiki")}
+        return {"items": document_svc.list_versions(db, actor, id, "wiki")}
 
     @mcp.tool(name="docs.wiki.rollback")
     @sessioned
     def docs_wiki_rollback(id: str, version_no: int) -> dict:
         db, actor = dbc()
-        return document_svc._document_dict(db, document_svc.rollback_document(db, actor, uuid.UUID(id), version_no, "wiki"))
+        return document_svc._document_dict(db, document_svc.rollback_document(db, actor, id, version_no, "wiki"))
 
     @mcp.tool(name="docs.wiki.delete")
     @sessioned
@@ -546,7 +556,7 @@ def _register_all(mcp) -> None:
         @sessioned
         def directory_create(project_id: str, name: str, parent_id: str | None = None) -> dict:
             db, actor = dbc()
-            directory = document_svc.create_directory(db, actor, uuid.UUID(project_id), module, name, _optional_uuid(parent_id, "parent_id"))
+            directory = document_svc.create_directory(db, actor, uuid.UUID(project_id), module, name, parent_id or None)
             return document_svc._directory_dict(db, directory)
 
         @mcp.tool(name=f"docs.{module}.directory_move")
@@ -554,34 +564,34 @@ def _register_all(mcp) -> None:
         def directory_move(id: str, parent_id: str = "") -> dict:
             """移动目录；省略 parent_id 或传空字符串移动到根节点。"""
             db, actor = dbc()
-            directory = document_svc.get_directory(db, actor, uuid.UUID(id), module)
-            moved = document_svc.move_directory(db, actor, directory.id, _optional_uuid(parent_id, "parent_id"))
+            directory = document_svc.get_directory(db, actor, id, module)
+            moved = document_svc.move_directory(db, actor, directory.code, parent_id or None)
             return document_svc._directory_dict(db, moved)
 
         @mcp.tool(name=f"docs.{module}.directory_rename")
         @sessioned
         def directory_rename(id: str, name: str) -> dict:
             db, actor = dbc()
-            directory = document_svc.get_directory(db, actor, uuid.UUID(id), module)
-            return document_svc._directory_dict(db, document_svc.rename_directory(db, actor, directory.id, name))
+            directory = document_svc.get_directory(db, actor, id, module)
+            return document_svc._directory_dict(db, document_svc.rename_directory(db, actor, directory.code, name))
 
         @mcp.tool(name=f"docs.{module}.directory_delete")
         @sessioned
         def directory_delete(id: str) -> dict:
             db, actor = dbc()
-            directory = document_svc.get_directory(db, actor, uuid.UUID(id), module)
-            impact = document_svc.delete_impact_directory(db, actor, directory.id)
-            document_svc.delete_directory(db, actor, directory.id)
+            directory = document_svc.get_directory(db, actor, id, module)
+            impact = document_svc.delete_impact_directory(db, actor, directory.code)
+            document_svc.delete_directory(db, actor, directory.code)
             return {"deleted": True, "id": id, "impact": impact}
 
         @mcp.tool(name=f"docs.{module}.directory_restore")
         @sessioned
         def directory_restore(id: str) -> dict:
             db, actor = dbc()
-            directory = document_svc._get_directory_raw(db, uuid.UUID(id))
+            directory = document_svc.restore_directory(db, actor, id)
             if directory.module_type != module:
                 raise ToolError("not_found: 目录不存在")
-            return document_svc._directory_dict(db, document_svc.restore_directory(db, actor, directory.id))
+            return document_svc._directory_dict(db, directory)
 
     @mcp.tool(name="docs.glossary.create")
     @sessioned
@@ -647,7 +657,7 @@ def _register_all(mcp) -> None:
     def comment_create(target_type: str, target_id: str, body: str) -> dict:
         """在实体上添加评论(requirement/document/project;task 目标返回 invalid_request,任务无评论区)。"""
         db, actor = dbc()
-        c = poly_svc.create_comment(db, actor, target_type, uuid.UUID(target_id), body)
+        c = poly_svc.create_comment(db, actor, target_type, target_id, body)
         return {"id": str(c.id), "target_type": c.target_type, "target_id": str(c.target_id), "body": c.body}
 
     @mcp.tool(name="comment.list")
@@ -656,7 +666,7 @@ def _register_all(mcp) -> None:
         """实体的评论流(cursor 分页;task 目标返回 invalid_request,任务无评论区)。"""
         db, actor = dbc()
         cursor, limit = _paged({"type": target_type, "id": target_id}, cursor, limit)
-        return poly_svc.list_comments(db, actor, target_type, uuid.UUID(target_id), cursor, limit)
+        return poly_svc.list_comments(db, actor, target_type, target_id, cursor, limit)
 
     @mcp.tool(name="comment.delete")
     @sessioned
@@ -672,12 +682,10 @@ def _register_all(mcp) -> None:
     def ref_create(from_type: str, from_id: str, to_type: str, to_id: str, type: str) -> dict:
         """建立实体间引用(type: derives/documents/implements/mentions;双方须同项目)。"""
         db, actor = dbc()
-        r = poly_svc.create_reference(
-            db, actor, from_type, uuid.UUID(from_id), to_type, uuid.UUID(to_id), type
-        )
+        r = poly_svc.create_reference(db, actor, from_type, from_id, to_type, to_id, type)
         return {
-            "id": str(r.id), "from_type": r.from_type, "from_id": str(r.from_id),
-            "to_type": r.to_type, "to_id": str(r.to_id), "type": r.type,
+            "id": str(r.id), "from_type": r.from_type, "from_id": r.from_id,
+            "to_type": r.to_type, "to_id": r.to_id, "type": r.type,
         }
 
     @mcp.tool(name="ref.list")
@@ -686,7 +694,7 @@ def _register_all(mcp) -> None:
         """实体的引用(双向:from/to 任一命中)。"""
         db, actor = dbc()
         cursor, limit = _paged({"type": target_type, "id": target_id}, cursor, limit)
-        return poly_svc.list_references(db, actor, target_type, uuid.UUID(target_id), cursor, limit)
+        return poly_svc.list_references(db, actor, target_type, target_id, cursor, limit)
 
     @mcp.tool(name="ref.delete")
     @sessioned
@@ -754,7 +762,7 @@ def _register_all(mcp) -> None:
         except (ValueError, TypeError) as exc:
             raise ToolError("invalid_request: data 必须是合法 base64") from exc
         a = attachment_svc.upload(
-            db, actor, uuid.UUID(project_id), target_type, uuid.UUID(target_id), file_name, payload
+            db, actor, uuid.UUID(project_id), target_type, target_id, file_name, payload
         )
         return attachment_svc._attachment_dict(db, a)
 

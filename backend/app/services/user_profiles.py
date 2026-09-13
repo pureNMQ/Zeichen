@@ -60,7 +60,7 @@ def _attachment(db: Session, user: User) -> Attachment | None:
         select(Attachment).where(
             Attachment.id == user.avatar,
             Attachment.target_type == "user",
-            Attachment.target_id == user.id,
+            Attachment.target_id == str(user.id),
             Attachment.deleted_at.is_(None),
         )
     )
@@ -104,7 +104,7 @@ async def set_avatar(db: Session, actor: User, target_id: uuid.UUID, upload: Upl
         created_by=actor.id,
         project_id=None,
         target_type="user",
-        target_id=target.id,
+        target_id=str(target.id),
     )
     db.add(attachment)
     target.avatar = attachment_id

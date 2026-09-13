@@ -35,7 +35,7 @@ class FakeCognee:
 
 def test_remember_namespaces_session_and_records_source(db, world):
     client = FakeCognee()
-    result = memory.remember(db, world["agent"], world["project"].id, "work-42", "note", {"entity_type": "task", "entity_id": "a"}, client)
+    result = memory.remember(db, world["agent"], world["project"].id, "work-42", "note", {"entity_type": "task", "entity_id": "TASK-1"}, client)
     assert result["data_id"] == "data-1"
     call = next(payload for name, payload in client.calls if name == "remember")
     assert call["dataset_name"] == f"zeichen:{world['project'].id}"

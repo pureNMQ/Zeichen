@@ -12,33 +12,33 @@ from app.services import tasks as svc
 
 def make_requirement_row(db: Session, world: dict, title="挂载需求"):
     r = req_svc.create_requirement(db, world["admin"], world["project"].id, title)
-    req_svc.set_requirement_status(db, world["admin"], r.id, "backlog")
+    req_svc.set_requirement_status(db, world["admin"], r.code, "backlog")
     return r
 
 
 def make_task(db: Session, world: dict, title="任务", **kw) -> dict:
     if "requirement_id" not in kw:
-        kw["requirement_id"] = make_requirement_row(db, world).id
+        kw["requirement_id"] = make_requirement_row(db, world).code
     task = svc.create_task(db, world["admin"], world["project"].id, title, **kw)
-    return {"id": task.id, "node": task}
+    return {"id": task.code, "node": task}
 
 
 class TestCreateAndGetEdges:
     def test_empty_title(self, db: Session, world: dict):
-        rid = make_requirement_row(db, world).id
+        rid = make_requirement_row(db, world).code
         with pytest.raises(AppError) as e:
             svc.create_task(db, world["admin"], world["project"].id, "   ", requirement_id=rid)
         assert e.value.code == "invalid_request"
 
     def test_get_missing_task(self, db: Session, world: dict):
         with pytest.raises(AppError) as e:
-            svc.get_task(db, world["member"], uuid.uuid4())
+            svc.get_task(db, world["member"], "TASK-999")
         assert e.value.code == "not_found"
 
     def test_assignee_must_exist_and_be_member(self, db: Session, world: dict):
         from app.tests.conftest import make_user
 
-        rid = make_requirement_row(db, world).id
+        rid = make_requirement_row(db, world).code
         with pytest.raises(AppError) as e:
             svc.create_task(
                 db, world["admin"], world["project"].id, "t",
@@ -68,8 +68,8 @@ class TestUpdateEdges:
 class TestListFilters:
     def test_filter_by_status_and_assignee_and_pagination(self, db: Session, world: dict):
         req = req_svc.create_requirement(db, world["admin"], world["project"].id, "需求")
-        req_svc.set_requirement_status(db, world["admin"], req.id, "backlog")
-        make_task(db, world, "任务一", requirement_id=req.id, assignee_id=world["agent"].id)
+        req_svc.set_requirement_status(db, world["admin"], req.code, "backlog")
+        make_task(db, world, "任务一", requirement_id=req.code, assignee_id=world["agent"].id)
         svc.set_task_status(db, world["agent"], make_task(db, world, "任务二")["id"], "in_progress")
         make_task(db, world, "任务三")
 
@@ -94,7 +94,7 @@ class TestListFilters:
         )
         assert [i["title"] for i in by_agent["items"]] == ["任务一"]
         by_req = svc.list_tasks(
-            db=db, user=world["member"], project_id=pid, requirement_id=req.id,
+            db=db, user=world["member"], project_id=pid, requirement_id=req.code,
             assignee_id=None, status=None, cursor=None, limit=20,
             updated_within_days=None, keyword=None,
         )
@@ -147,9 +147,13 @@ class TestAssignAndClaimEdges:
         task = make_task(db, world)["id"]
         from sqlalchemy.exc import OperationalError
 
-        def boom(*args, **kwargs):
-            raise OperationalError("UPDATE", {}, Exception("locked"))
+        def boom(statement, *args, **kwargs):
+            # 仅模拟认领 UPDATE 遇锁;SELECT(短码寻址)放行
+            if "UPDATE TASK" in str(statement).upper():
+                raise OperationalError("UPDATE", {}, Exception("locked"))
+            return real_execute(statement, *args, **kwargs)
 
+        real_execute = db.execute
         monkeypatch.setattr(db, "execute", boom)
         with pytest.raises(AppError) as e:
             svc.claim_task(db, world["agent"], task)
@@ -159,7 +163,7 @@ class TestAssignAndClaimEdges:
 class TestRestoreEdges:
     def test_restore_missing_or_alive_task(self, db: Session, world: dict):
         with pytest.raises(AppError) as e:
-            svc.restore_task(db, world["admin"], uuid.uuid4())
+            svc.restore_task(db, world["admin"], "TASK-999")
         assert e.value.code == "not_found"
         task = make_task(db, world)["id"]
         with pytest.raises(AppError) as e:

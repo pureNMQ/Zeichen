@@ -42,12 +42,13 @@ def test_create_task_cross_project_requirement_rejected(client: TestClient, worl
     r_other = _req(client, str(other.id), "他项目需求")
 
     pid = str(world["project"].id)
+    # ADR 0002:需求短码按任务所在项目寻址;他项目同码在本项目不存在 → not_found
     resp = client.post(
         f"/api/projects/{pid}/tasks",
         json={"title": "跨项目任务", "requirement_id": r_other["id"]},
     )
-    assert resp.status_code == 400
-    assert resp.json()["code"] == "invalid_request"
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "not_found"
 
 
 def test_create_task_pending_requirement_rejected(client: TestClient, world: dict):

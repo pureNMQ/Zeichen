@@ -12,6 +12,7 @@ from .cognee_configuration import CogneeConfiguration
 from .cognee_restart_job import CogneeRestartJob
 from .notification import EntityWatch, Notification, NotificationPreference
 from .filter_view import ProjectFilterView
+from ..services.short_codes import ShortCodeCounter
 
 __all__ = [
     "Base",
@@ -39,6 +40,7 @@ __all__ = [
     "CogneeConfiguration",
     "CogneeRestartJob",
     "EntityWatch",
+    "ShortCodeCounter",
     "Notification",
     "NotificationPreference",
     "ProjectFilterView",
