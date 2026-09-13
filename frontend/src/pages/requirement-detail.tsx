@@ -46,6 +46,9 @@ function referenceHref(type: string, id: string, module?: string | null) {
   return null
 }
 
+// 旧 UUID 标识(迁移前书签/引用)→ 引导提示(ADR 0002 §6:不做跳转)
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 function Guide({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex flex-col items-center gap-3 py-16 text-muted-foreground">
@@ -161,7 +164,19 @@ export function RequirementDetailPage() {
       </Guide>
     )
   }
-  if (error || !req) return <ErrorNotification message={(error as Error)?.message ?? '需求不存在'} />
+  if (error || !req) {
+    if (UUID_PATTERN.test(id)) {
+      return (
+        <Guide>
+          <p className="text-sm">
+            实体标识已全面改用短码(如 REQ-1)。该 UUID 链接已失效,请从需求列表重新进入。
+          </p>
+          <Button onClick={() => (window.location.href = '/requirements')}>前往需求列表</Button>
+        </Guide>
+      )
+    }
+    return <ErrorNotification message={(error as Error)?.message ?? '需求不存在'} />
+  }
   if (req.project_id !== currentProject.id) {
     return (
       <Guide>
@@ -186,7 +201,10 @@ export function RequirementDetailPage() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-xl font-semibold">{req.title}</h1>
+            <h1 className="text-xl font-semibold">
+              <span className="mr-2 rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">{req.id}</span>
+              {req.title}
+            </h1>
             <StatusBadge status={req.status} />
           </div>
           {req.description && <p className="mt-2 text-sm text-muted-foreground">{req.description}</p>}
@@ -254,6 +272,7 @@ export function RequirementDetailPage() {
                   onClick={() => openTask(t.id)}
                   aria-label={`打开任务 ${t.title}`}
                 >
+                  <span className="mr-1.5 rounded bg-muted px-1 py-0.5 font-mono text-[10px] text-muted-foreground">{t.id}</span>
                   {t.title}
                 </button>
                 <span className="flex flex-wrap items-center gap-1.5">
@@ -309,9 +328,9 @@ export function RequirementDetailPage() {
             <div key={r.id} className="flex items-center gap-2 rounded-md border p-2.5 text-sm">
               <Badge variant="outline">{r.type}</Badge>
               <span className="text-xs text-muted-foreground">
-                {(() => { const href = referenceHref(r.from_type, r.from_id, r.from_module); if (href) return <Link to={href} className="hover:text-primary hover:underline">{r.from_title ?? r.from_id.slice(0, 8)}</Link>; if (r.from_type === 'task') return <TaskRefLink taskId={r.from_id}>{r.from_title ?? r.from_id.slice(0, 8)}</TaskRefLink>; return r.from_title ?? r.from_id.slice(0, 8) })()}
+                {(() => { const href = referenceHref(r.from_type, r.from_id, r.from_module); if (href) return <Link to={href} className="hover:text-primary hover:underline">{r.from_title ?? r.from_id}</Link>; if (r.from_type === 'task') return <TaskRefLink taskId={r.from_id}>{r.from_title ?? r.from_id}</TaskRefLink>; return r.from_title ?? r.from_id })()}
                 {' → '}
-                {(() => { const href = referenceHref(r.to_type, r.to_id, r.to_module); if (href) return <Link to={href} className="hover:text-primary hover:underline">{r.to_title ?? r.to_id.slice(0, 8)}</Link>; if (r.to_type === 'task') return <TaskRefLink taskId={r.to_id}>{r.to_title ?? r.to_id.slice(0, 8)}</TaskRefLink>; return r.to_title ?? r.to_id.slice(0, 8) })()}
+                {(() => { const href = referenceHref(r.to_type, r.to_id, r.to_module); if (href) return <Link to={href} className="hover:text-primary hover:underline">{r.to_title ?? r.to_id}</Link>; if (r.to_type === 'task') return <TaskRefLink taskId={r.to_id}>{r.to_title ?? r.to_id}</TaskRefLink>; return r.to_title ?? r.to_id })()}
               </span>
             </div>
           ))}

@@ -147,6 +147,7 @@ export function TaskDetailDialog({
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 pr-8">
+            <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">{t.id}</span>
             <span className="truncate">{t.title}</span>
             <StatusBadge status={t.status} />
           </DialogTitle>

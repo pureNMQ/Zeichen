@@ -63,6 +63,7 @@ function RequirementCard({
     <Card>
       <CardContent className="space-y-2 p-3">
         <Link to={`/requirements/${r.id}`} className="block text-sm font-medium hover:text-primary">
+          <span className="mr-1.5 rounded bg-muted px-1 py-0.5 font-mono text-[10px] text-muted-foreground">{r.id}</span>
           {r.title}
         </Link>
         <div className="flex items-center gap-2">

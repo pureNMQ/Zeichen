@@ -127,6 +127,7 @@ export const EXECUTION_REQUIREMENT_STATUSES: RequirementStatus[] = ['backlog', '
 export const TASK_STATUSES: TaskStatus[] = ['backlog', 'in_progress', 'done', 'cancelled']
 
 export interface RequirementRow {
+  /** 实体短码(ADR 0002):REQ-n */
   id: string
   title: string
   description: string | null
@@ -147,6 +148,7 @@ export interface TaskBlockerSummary {
 }
 
 export interface TaskRow {
+  /** 实体短码(ADR 0002):TASK-n */
   id: string
   title: string
   description: string | null

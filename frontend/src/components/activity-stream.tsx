@@ -34,6 +34,11 @@ function localizeSummary(summary: string): string {
   if (statusChange && STATUS_LABEL[statusChange[1] as keyof typeof STATUS_LABEL] && STATUS_LABEL[statusChange[2] as keyof typeof STATUS_LABEL]) {
     return `${STATUS_LABEL[statusChange[1] as keyof typeof STATUS_LABEL]} → ${STATUS_LABEL[statusChange[2] as keyof typeof STATUS_LABEL]}`
   }
+  // 短码(ADR 0002):REQ-1 等直接展示;旧 UUID 文本(死文本)保留前 8 位省略显示
+  const shortCode = summary.match(/^引用 ([a-z_]+):((?:REQ|TASK|DOC|TERM|DIR)-[1-9][0-9]*)$/)
+  if (shortCode && TARGET_TYPE_LABEL[shortCode[1]]) {
+    return `引用 ${TARGET_TYPE_LABEL[shortCode[1]]}:${shortCode[2]}`
+  }
   const reference = summary.match(/^引用 ([a-z_]+):([0-9a-f-]{36})$/)
   if (reference && TARGET_TYPE_LABEL[reference[1]]) {
     return `引用 ${TARGET_TYPE_LABEL[reference[1]]}:${reference[2].slice(0, 8)}…`
