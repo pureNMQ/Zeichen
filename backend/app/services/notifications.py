@@ -41,7 +41,7 @@ def _notification_dict(n: Notification) -> dict:
     return {
         "id": str(n.id),
         "target_type": n.target_type,
-        "target_id": str(n.target_id),
+        "target_id": n.target_id,
         "action": n.action,
         "summary": n.summary,
         "actor_id": str(n.actor_id) if n.actor_id else None,
@@ -72,10 +72,14 @@ def _relevant_member_ids(db: Session, activity: Activity) -> set[uuid.UUID]:
     ).all()
     recipients.update(admins)
 
-    # 3) 目标实体相关者
+    # 3) 目标实体相关者(ADR 0002:实体目标按 (project, code) 寻址)
     if activity.target_type in ("requirement", "task"):
         model = _TARGET_CREATED_BY[activity.target_type]
-        obj = db.get(model, activity.target_id)
+        obj = db.scalar(
+            select(model).where(
+                model.project_id == activity.project_id, model.code == activity.target_id
+            )
+        )
         if obj is not None:
             if obj.created_by:
                 recipients.add(obj.created_by)
@@ -84,17 +88,21 @@ def _relevant_member_ids(db: Session, activity: Activity) -> set[uuid.UUID]:
     elif activity.target_type == "project":
         # 项目级活动(记忆)仅 owner/admin 接收,已在上面
         pass
-    else:
-        # document:创建者来自基类 created_by 列
+    elif activity.target_type == "document":
         from ..models import Document
 
-        obj = db.get(Document, activity.target_id)
+        obj = db.scalar(
+            select(Document).where(
+                Document.project_id == activity.project_id, Document.code == activity.target_id
+            )
+        )
         if obj is not None and obj.created_by:
             recipients.add(obj.created_by)
 
     # 4) 参与评论者
     commenters = db.scalars(
         select(Comment.author_id).where(
+            Comment.project_id == activity.project_id,
             Comment.target_type == activity.target_type,
             Comment.target_id == activity.target_id,
             Comment.deleted_at.is_(None),
@@ -234,7 +242,7 @@ def update_preferences(db: Session, user: User, domains: dict[str, bool], action
     return get_preferences(db, user)
 
 
-def is_watching(db: Session, user: User, target_type: str, target_id: uuid.UUID) -> bool:
+def is_watching(db: Session, user: User, target_type: str, target_id) -> bool:
     return (
         db.scalar(
             select(EntityWatch.id).where(
@@ -247,17 +255,24 @@ def is_watching(db: Session, user: User, target_type: str, target_id: uuid.UUID)
     )
 
 
-def watch_entity(db: Session, user: User, target_type: str, target_id: uuid.UUID) -> None:
+def watch_entity(db: Session, user: User, target_type: str, target_id) -> None:
     from .polymorphic import resolve_target
 
-    project = resolve_target(db, target_type, target_id)
+    project = resolve_target(db, target_type, target_id, user=user)
     require_project_role(db, user.id, project.id, min_level="viewer")
     if not is_watching(db, user, target_type, target_id):
-        db.add(EntityWatch(project_id=project.id, user_id=user.id, target_type=target_type, target_id=target_id))
+        db.add(
+            EntityWatch(
+                project_id=project.id,
+                user_id=user.id,
+                target_type=target_type,
+                target_id=str(target_id),
+            )
+        )
         db.commit()
 
 
-def unwatch_entity(db: Session, user: User, target_type: str, target_id: uuid.UUID) -> None:
+def unwatch_entity(db: Session, user: User, target_type: str, target_id) -> None:
     db.execute(
         sa_delete(EntityWatch).where(
             EntityWatch.user_id == user.id,

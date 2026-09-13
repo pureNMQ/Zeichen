@@ -54,10 +54,10 @@ class ProjectScopeMixin:
 
 
 class PolymorphicTargetMixin:
-    """多态目标:target_type 枚举 + target_id,check 约束见各表。"""
+    """多态目标:target_type 枚举 + target_id(ADR 0002:五类实体目标存短码,project 目标存 UUID)。"""
 
     target_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    target_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    target_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
 
 
 __all__ = [

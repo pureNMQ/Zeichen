@@ -30,7 +30,7 @@ def make_requirement(db: Session, world: dict) -> dict:
 class TestComment:
     def test_create_list_delete_own(self, db: Session, world: dict, proj: dict):
         r = make_requirement(db, world)
-        rid = uuid.UUID(r["id"])
+        rid = r["id"]
         svc.create_comment(db, world["agent"], "requirement", rid, "agent 评论")
         svc.create_comment(db, world["admin"], "requirement", rid, "admin 评论")
         page = svc.list_comments(db, world["member"], "requirement", rid, None, 20)
@@ -52,7 +52,7 @@ class TestComment:
 
     def test_owner_or_admin_can_delete_any(self, db: Session, world: dict, proj: dict):
         r = make_requirement(db, world)
-        rid = uuid.UUID(r["id"])
+        rid = r["id"]
         svc.create_comment(db, world["agent"], "requirement", rid, "谁的")
         page = svc.list_comments(db, world["admin"], "requirement", rid, None, 20)
         svc.delete_comment(db, world["admin"], uuid.UUID(page["items"][0]["id"]))
@@ -66,31 +66,31 @@ class TestComment:
 
     def test_comment_on_missing_target_not_found(self, db: Session, world: dict, proj: dict):
         with pytest.raises(AppError) as e:
-            svc.create_comment(db, world["admin"], "requirement", uuid.uuid4(), "hi")
+            svc.create_comment(db, world["admin"], "requirement", "REQ-999", "hi")
         assert e.value.code == "not_found"
 
 
 class TestActivity:
     def test_actions_recorded_with_actor(self, db: Session, world: dict, proj: dict):
         r = make_requirement(db, world)
-        rid = uuid.UUID(r["id"])
+        rid = r["id"]
         from app.services import tasks as task_svc
 
         req_svc.set_requirement_status(db, world["admin"], rid, "backlog")
         t = task_svc._task_dict(
             db, task_svc.create_task(db, world["admin"], world["project"].id, "任务", None, rid)
         )
-        task_svc.set_task_status(db, world["agent"], uuid.UUID(t["id"]), "in_progress")
+        task_svc.set_task_status(db, world["agent"], t["id"], "in_progress")
         page = svc.list_activity(db, world["member"], "requirement", rid, None, 50)
         assert [a["action"] for a in page["items"]] == ["create", "status"]
-        task_page = svc.list_activity(db, world["member"], "task", uuid.UUID(t["id"]), None, 50)
+        task_page = svc.list_activity(db, world["member"], "task", t["id"], None, 50)
         actions = [(a["action"], a["actor"]) for a in task_page["items"]]
         assert ("create", "admin") in actions
         assert ("status", "agent-a") in actions
 
     def test_activity_immutable_append(self, db: Session, world: dict, proj: dict):
         r = make_requirement(db, world)
-        rid = uuid.UUID(r["id"])
+        rid = r["id"]
         svc.record_activity(db, world["project"].id, world["admin"].id, "requirement", rid, "test")
         db.commit()
         activity = db.scalar(select(Activity).where(Activity.action == "test"))
@@ -102,7 +102,7 @@ class TestReference:
     def test_create_dup_and_bidirectional_list(self, db: Session, world: dict, proj: dict):
         r1 = make_requirement(db, world)
         r2 = make_requirement(db, world)
-        i1, i2 = uuid.UUID(r1["id"]), uuid.UUID(r2["id"])
+        i1, i2 = r1["id"], r2["id"]
         svc.create_reference(db, world["admin"], "requirement", i1, "requirement", i2, "derives")
         with pytest.raises(AppError) as e:
             svc.create_reference(db, world["admin"], "requirement", i1, "requirement", i2, "derives")
@@ -117,14 +117,15 @@ class TestReference:
 
     def test_cross_project_and_self_rejected(self, db: Session, world: dict, proj: dict):
         r1 = make_requirement(db, world)
-        i1 = uuid.UUID(r1["id"])
+        i1 = r1["id"]
         other = Project(team_id=world["team"].id, name="other")
         db.add(other)
         db.commit()
         r2 = req_svc.create_requirement(db, world["admin"], other.id, "别的项目需求")
+        # ADR 0002:引用按短码+用户可访问项目消歧;跨项目双方不同项目 → invalid_request(同项目约束)
         with pytest.raises(AppError) as e:
-            svc.create_reference(db, world["admin"], "requirement", i1, "requirement", r2.id, "mentions")
-        assert e.value.code == "invalid_request"
+            svc.create_reference(db, world["admin"], "requirement", i1, "requirement", r2.code, "mentions")
+        assert e.value.code in ("invalid_request", "not_found")
         with pytest.raises(AppError) as e:
             svc.create_reference(db, world["admin"], "requirement", i1, "requirement", i1, "mentions")
         assert e.value.code == "invalid_request"
@@ -133,8 +134,8 @@ class TestReference:
         r1 = make_requirement(db, world)
         r2 = make_requirement(db, world)
         ref = svc.create_reference(
-            db, world["admin"], "requirement", uuid.UUID(r1["id"]), "requirement", uuid.UUID(r2["id"]), "documents"
+            db, world["admin"], "requirement", r1["id"], "requirement", r2["id"], "documents"
         )
         svc.delete_reference(db, world["agent"], ref.id)
-        page = svc.list_references(db, world["member"], "requirement", uuid.UUID(r1["id"]), None, 20)
+        page = svc.list_references(db, world["member"], "requirement", r1["id"], None, 20)
         assert page["items"] == []

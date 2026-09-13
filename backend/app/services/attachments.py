@@ -40,7 +40,7 @@ def _attachment_dict(db: Session, a: Attachment) -> dict:
     return {
         "id": str(a.id),
         "target_type": a.target_type,
-        "target_id": str(a.target_id),
+        "target_id": a.target_id,
         "file_name": a.file_name,
         "size": a.size,
         "created_by": str(a.created_by) if a.created_by else None,
@@ -62,7 +62,7 @@ def upload(
     actor: User,
     project_id: uuid.UUID,
     target_type: str,
-    target_id: uuid.UUID,
+    target_id: str,
     file_name: str,
     data: bytes,
 ) -> Attachment:
@@ -80,21 +80,22 @@ def upload(
             f"文件超过单文件上限({settings.attachment_max_file_bytes // (1024 * 1024)}MB)"
         )
     project = get_accessible_project(db, actor.id, project_id, min_level="editor")
-    # target 必须属于该项目且存在
-    resolve_target(db, target_type, target_id)
-    from ..models import Requirement, Task, Document
+    # target 必须属于该项目且存在(ADR 0002:实体目标按短码项目内寻址)
+    from ..models import Document, Requirement, Task
+    from .short_codes import require_valid_code
 
-    _PROJECT_COLUMN = {
-        "requirement": Requirement,
-        "task": Task,
-        "document": Document,
-    }
-    if target_type in _PROJECT_COLUMN:
-        obj = db.get(_PROJECT_COLUMN[target_type], target_id)
+    if target_type in ("requirement", "task", "document"):
+        require_valid_code(target_type, target_id)
+        model = {"requirement": Requirement, "task": Task, "document": Document}[target_type]
+        obj = db.scalar(
+            select(model).where(model.project_id == project.id, model.code == target_id)
+        )
         if obj is None or obj.deleted_at is not None:
             raise not_found("目标不存在")
-        if obj.project_id != project.id:
-            raise invalid_request("目标不属于该项目")
+    else:
+        from .polymorphic import resolve_target
+
+        resolve_target(db, target_type, target_id, user=actor)
 
     if _project_used_bytes(db, project.id) + len(data) > settings.attachment_project_quota_bytes:
         raise conflict("项目附件配额已满")
@@ -102,7 +103,7 @@ def upload(
     attachment = Attachment(
         project_id=project.id,
         target_type=target_type,
-        target_id=target_id,
+        target_id=str(target_id),
         file_name=file_name,
         size=len(data),
         storage_path=str(_attachment_path(project.id, uuid.uuid4())),
@@ -135,11 +136,11 @@ def download(db: Session, user: User, attachment_id: uuid.UUID) -> tuple[str, by
 
 
 def list_attachments(
-    db: Session, user: User, target_type: str, target_id: uuid.UUID, cursor: str | None, limit: int
+    db: Session, user: User, target_type: str, target_id: str, cursor: str | None, limit: int
 ) -> dict:
     from .pagination import decode_cursor
 
-    project = resolve_target(db, target_type, target_id)
+    project = resolve_target(db, target_type, target_id, user=user)
     get_accessible_project(db, user.id, project.id, min_level="viewer")
     filters = {"type": target_type, "id": str(target_id)}
     offset = decode_cursor(filters, cursor)
@@ -181,7 +182,7 @@ def restore(db: Session, actor: User, attachment_id: uuid.UUID) -> Attachment:
     return a
 
 
-def soft_delete_for_target(db: Session, project_id: uuid.UUID, target_type: str, target_id: uuid.UUID) -> int:
+def soft_delete_for_target(db: Session, project_id: uuid.UUID, target_type: str, target_id: str) -> int:
     """父实体软删时级联软删其附件(不 commit,随调用方事务)。返回受影响行数。"""
     rows = db.scalars(
         select(Attachment).where(

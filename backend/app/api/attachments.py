@@ -21,12 +21,12 @@ router = APIRouter(prefix="/api", tags=["attachments"])
 @router.post("/targets/{target_type}/{target_id}/attachments", status_code=201)
 def upload_attachment(
     target_type: str,
-    target_id: uuid.UUID,
+    target_id: str,
     file: UploadFile = File(...),
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    project_id = uuid.UUID(str(_target_project(db, target_type, target_id)))
+    project_id = _target_project(db, target_type, target_id, user)
     data = file.file.read()
     try:
         a = service.upload(
@@ -37,16 +37,16 @@ def upload_attachment(
     return service._attachment_dict(db, a)
 
 
-def _target_project(db, target_type: str, target_id: uuid.UUID):
+def _target_project(db, target_type: str, target_id: str, user):
     from ..services.polymorphic import resolve_target
 
-    return resolve_target(db, target_type, target_id).id
+    return resolve_target(db, target_type, target_id, user=user).id
 
 
 @router.get("/targets/{target_type}/{target_id}/attachments")
 def list_attachments(
     target_type: str,
-    target_id: uuid.UUID,
+    target_id: str,
     cursor: str | None = None,
     limit: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     user: User = Depends(current_user),

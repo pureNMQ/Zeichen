@@ -13,9 +13,9 @@ from app.tests.conftest import make_user
 
 def seed(db: Session, world: dict) -> None:
     r = req_svc.create_requirement(db, world["admin"], world["project"].id, "登录功能需求")
-    req_svc.set_requirement_status(db, world["admin"], r.id, "backlog")
+    req_svc.set_requirement_status(db, world["admin"], r.code, "backlog")
     task_svc.create_task(
-        db, world["admin"], world["project"].id, "实现登录校验", None, r.id
+        db, world["admin"], world["project"].id, "实现登录校验", None, r.code
     )
     doc_svc.create_document(
         db, world["admin"], world["project"].id, "登录设计文档", "wiki", "这是登录页面的设计说明", {}

@@ -1,8 +1,9 @@
-"""多态表:comment / activity / attachment / reference(§2.2)。
+"""多态表:comment / activity / attachment / reference(§2.2;ADR 0002:实体目标存短码)。
 
 - comment / activity / attachment 的 target 均受 check 约束(可扩展枚举,需迁移)
 - reference 的 from/to 同枚举;type 枚举:derives / documents / implements / mentions
-- activity 不可变(只记 created_at,无 updated_at / 软删)
+- 五类实体(requirement/task/document/directory)的 target_id 存短码(REQ/TASK/DOC/TERM/DIR-n);
+  repository/project 目标仍存 UUID;activity 不可变(只记 created_at,无 updated_at / 软删)
 """
 
 import uuid
@@ -85,7 +86,7 @@ class Reference(IdMixin, TimestampMixin, SoftDeleteMixin, CreatedByMixin, Projec
     )
 
     from_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    from_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    from_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     to_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    to_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    to_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     type: Mapped[str] = mapped_column(String(16), nullable=False)

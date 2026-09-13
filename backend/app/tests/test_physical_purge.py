@@ -62,6 +62,20 @@ from app.services import tasks as tasks_svc
 from app.services import physical_purge
 from app.services.physical_purge import purge_soft_deleted
 
+
+def db_scalar_entity(db, entity):
+    from sqlalchemy import select as _select
+
+    model = type(entity)
+    if hasattr(model, "code"):  # 五类实体:复合主键 (project_id, code)
+        return db.scalar(
+            _select(model).where(
+                model.project_id == entity.project_id, model.code == entity.code
+            )
+        )
+    return db.get(model, entity.id)
+
+
 DAY = timedelta(days=1)
 
 # ck_comment/ck_activity_target_type 枚举内、且属于本需求清理范围的类型
@@ -96,24 +110,25 @@ def _seed_soft_deleted_all(db, project, admin, *, now: datetime, age_days: int) 
     """按清理范围各造一条 age_days 天前软删的实体,返回 {类型: 实例}。"""
     deleted_at = now - age_days * DAY
     r = Requirement(
-        project_id=project.id, title="到期需求", status="in_progress", deleted_at=deleted_at
+        project_id=project.id, code="REQ-1", title="到期需求", status="in_progress", deleted_at=deleted_at
     )
     db.add(r)
     db.flush()
     t = Task(
         project_id=project.id,
+        code="TASK-1",
         title="到期任务",
         status="backlog",
         deleted_at=deleted_at,
-        requirement_id=r.id,
+        requirement_id=r.code,
     )
-    d = Document(project_id=project.id, title="到期文档", doc_type="wiki", deleted_at=deleted_at)
+    d = Document(project_id=project.id, code="DOC-1", title="到期文档", doc_type="wiki", deleted_at=deleted_at)
     db.add_all([t, d])
     db.flush()
     c = Comment(
         project_id=project.id,
         target_type="requirement",
-        target_id=r.id,
+        target_id=r.code,
         author_id=admin.id,
         body="到期评论",
         deleted_at=deleted_at,
@@ -121,9 +136,9 @@ def _seed_soft_deleted_all(db, project, admin, *, now: datetime, age_days: int) 
     ref = Reference(
         project_id=project.id,
         from_type="task",
-        from_id=t.id,
+        from_id=t.code,
         to_type="requirement",
-        to_id=r.id,
+        to_id=r.code,
         type="mentions",
         created_by=admin.id,
         deleted_at=deleted_at,
@@ -139,7 +154,7 @@ def _seed_soft_deleted_all(db, project, admin, *, now: datetime, age_days: int) 
     att = Attachment(
         project_id=project.id,
         target_type="requirement",
-        target_id=r.id,
+        target_id=r.code,
         file_name="old.txt",
         size=10,
         storage_path="seeded/old.bin",
@@ -164,24 +179,25 @@ def _make_soft_deleted(db, project, admin, kind: str, *, now: datetime, age_days
     deleted_at = now - age_days * DAY
     if kind == "requirement":
         entity = Requirement(
-            project_id=project.id, title="待清理需求", status="backlog", deleted_at=deleted_at
+            project_id=project.id, code="REQ-7", title="待清理需求", status="backlog", deleted_at=deleted_at
         )
     elif kind == "task":
         _r = Requirement(
-            project_id=project.id, title="待清理任务挂载", status="backlog", deleted_at=deleted_at
+            project_id=project.id, code="REQ-9", title="待清理任务挂载", status="backlog", deleted_at=deleted_at
         )
         db.add(_r)
         db.flush()
         entity = Task(
             project_id=project.id,
+            code="TASK-9",
             title="待清理任务",
             status="backlog",
             deleted_at=deleted_at,
-            requirement_id=_r.id,
+            requirement_id=_r.code,
         )
     elif kind == "document":
         entity = Document(
-            project_id=project.id, title="待清理文档", doc_type="wiki", deleted_at=deleted_at
+            project_id=project.id, code="DOC-9", title="待清理文档", doc_type="wiki", deleted_at=deleted_at
         )
     elif kind == "repository":
         entity = Repository(
@@ -196,7 +212,7 @@ def _make_soft_deleted(db, project, admin, kind: str, *, now: datetime, age_days
         entity = Attachment(
             project_id=project.id,
             target_type="project",
-            target_id=project.id,
+            target_id=str(project.id),
             file_name="f.bin",
             size=1,
             storage_path="seeded/f.bin",
@@ -237,7 +253,7 @@ def test_retention_89_days_not_purged(db, world, now):
     report = purge_soft_deleted(db, now=now, retention_days=90)
     db.expire_all()
     for kind, entity in seeded.items():
-        assert db.get(type(entity), entity.id) is not None, f"{kind} 未满保留期不应被清理"
+        assert db_scalar_entity(db, entity) is not None, f"{kind} 未满保留期不应被清理"
     assert not any(report.values()), "89 天时报告应为零删除"
 
 
@@ -246,7 +262,7 @@ def test_retention_90_days_purged(db, world, now):
     report = purge_soft_deleted(db, now=now, retention_days=90)
     db.expire_all()
     for kind, entity in seeded.items():
-        assert db.get(type(entity), entity.id) is None, f"{kind} 满 90 天应被物理清理"
+        assert db_scalar_entity(db, entity) is None, f"{kind} 满 90 天应被物理清理"
     for kind in seeded:
         assert report[kind] == 1, f"{kind} 报告计数应为 1"
     # 版本链随文档一并消失
@@ -254,7 +270,7 @@ def test_retention_90_days_purged(db, world, now):
         db.scalar(
             select(func.count())
             .select_from(DocumentVersion)
-            .where(DocumentVersion.document_id == seeded["document"].id)
+            .where(DocumentVersion.document_id == seeded["document"].code)
         )
         == 0
     )
@@ -270,7 +286,7 @@ def test_retention_days_env_configurable(db, world, now, monkeypatch, reset_sett
     purge_soft_deleted(db, now=now)
     db.expire_all()
     for kind, entity in seeded.items():
-        assert db.get(type(entity), entity.id) is None, f"{kind} 超环境变量保留期应被清理"
+        assert db_scalar_entity(db, entity) is None, f"{kind} 超环境变量保留期应被清理"
 
 
 # ---------- b) 实体类型覆盖 ----------
@@ -279,6 +295,7 @@ def test_retention_days_env_configurable(db, world, now, monkeypatch, reset_sett
 def test_document_purge_cascades_version_chain(db, world, now):
     d = Document(
         project_id=world["project"].id,
+        code="DOC-8",
         title="多版本文档",
         doc_type="wiki",
         deleted_at=now - 91 * DAY,
@@ -288,7 +305,11 @@ def test_document_purge_cascades_version_chain(db, world, now):
     db.add_all(
         [
             DocumentVersion(
-                document_id=d.id, title="多版本文档", content=f"第 {n} 版", version_no=n
+                project_id=world["project"].id,
+                document_id=d.code,
+                title="多版本文档",
+                content=f"第 {n} 版",
+                version_no=n,
             )
             for n in (1, 2, 3)
         ]
@@ -296,12 +317,12 @@ def test_document_purge_cascades_version_chain(db, world, now):
     db.flush()
     purge_soft_deleted(db, now=now, retention_days=90)
     db.expire_all()
-    assert db.get(Document, d.id) is None
+    assert db_scalar_entity(db, d) is None
     assert (
         db.scalar(
             select(func.count())
             .select_from(DocumentVersion)
-            .where(DocumentVersion.document_id == d.id)
+            .where(DocumentVersion.document_id == d.code)
         )
         == 0
     ), "文档物理清理应级联删除 document_version 版本链"
@@ -312,12 +333,12 @@ def test_attachment_purge_deletes_physical_file_and_frees_quota(
 ):
     project, admin, agent = world["project"], world["admin"], world["agent"]
     r = requirements_svc.create_requirement(db, admin, project.id, "带附件的需求")
-    a = attachments_svc.upload(db, agent, project.id, "requirement", r.id, "old.txt", b"hello")
+    a = attachments_svc.upload(db, agent, project.id, "requirement", r.code, "old.txt", b"hello")
     path = attachments_svc._attachment_path(project.id, a.id)
     assert path.is_file(), "前置:附件文件应真实落盘"
-    requirements_svc.delete_requirement(db, admin, r.id, confirm_task_count=0)
+    requirements_svc.delete_requirement(db, admin, r.code, confirm_task_count=0)
     # 时间流逝:需求与被级联软删的附件都超过保留期
-    db.get(Requirement, r.id).deleted_at = now - 91 * DAY
+    db_scalar_entity(db, r).deleted_at = now - 91 * DAY
     db.get(Attachment, a.id).deleted_at = now - 91 * DAY
     db.commit()
 
@@ -341,24 +362,24 @@ def test_tombstone_rows_retained_and_target_shows_deleted(db, world, now):
     project, admin = world["project"], world["admin"]
     r = requirements_svc.create_requirement(db, admin, project.id, "被引用的需求")
     r2 = requirements_svc.create_requirement(db, admin, project.id, "引用方任务挂载需求")
-    requirements_svc.set_requirement_status(db, admin, r2.id, "backlog")
-    t = tasks_svc.create_task(db, admin, project.id, "引用方任务", requirement_id=r2.id)
-    polymorphic_svc.create_reference(db, admin, "task", t.id, "requirement", r.id, "mentions")
-    polymorphic_svc.create_comment(db, admin, "requirement", r.id, "留下评论")
-    requirements_svc.delete_requirement(db, admin, r.id, confirm_task_count=0)
-    db.get(Requirement, r.id).deleted_at = now - 91 * DAY
+    requirements_svc.set_requirement_status(db, admin, r2.code, "backlog")
+    t = tasks_svc.create_task(db, admin, project.id, "引用方任务", requirement_id=r2.code)
+    polymorphic_svc.create_reference(db, admin, "task", t.code, "requirement", r.code, "mentions")
+    polymorphic_svc.create_comment(db, admin, "requirement", r.code, "留下评论")
+    requirements_svc.delete_requirement(db, admin, r.code, confirm_task_count=0)
+    db_scalar_entity(db, r).deleted_at = now - 91 * DAY
     db.commit()
 
     purge_soft_deleted(db, now=now, retention_days=90)
     db.expire_all()
 
-    assert db.get(Requirement, r.id) is None, "实体行应被物理清理"
+    assert db_scalar_entity(db, r) is None, "实体行应被物理清理"
     # 墓碑:指向被清理实体的评论/引用/活动行保留
     assert (
         db.scalar(
             select(func.count())
             .select_from(Comment)
-            .where(Comment.target_type == "requirement", Comment.target_id == r.id)
+            .where(Comment.target_type == "requirement", Comment.target_id == r.code)
         )
         >= 1
     ), "评论行应保留(墓碑)"
@@ -366,7 +387,7 @@ def test_tombstone_rows_retained_and_target_shows_deleted(db, world, now):
         db.scalar(
             select(func.count())
             .select_from(Reference)
-            .where(Reference.to_type == "requirement", Reference.to_id == r.id)
+            .where(Reference.to_type == "requirement", Reference.to_id == r.code)
         )
         >= 1
     ), "引用行应保留(墓碑)"
@@ -374,15 +395,15 @@ def test_tombstone_rows_retained_and_target_shows_deleted(db, world, now):
         db.scalar(
             select(func.count())
             .select_from(Activity)
-            .where(Activity.target_type == "requirement", Activity.target_id == r.id)
+            .where(Activity.target_type == "requirement", Activity.target_id == r.code)
         )
         >= 1
     ), "活动行应保留(墓碑)"
     # 展示层语义:目标不再解析(not_found),引用面板把目标渲染为「已删除」
     with pytest.raises(AppError) as e:
-        polymorphic_svc.resolve_target(db, "requirement", r.id)
+        polymorphic_svc.resolve_target(db, "requirement", r.code, user=admin)
     assert e.value.code == "not_found"
-    page = polymorphic_svc.list_references(db, admin, "task", t.id, None, 50)
+    page = polymorphic_svc.list_references(db, admin, "task", t.code, None, 50)
     assert page["items"], "前置:引用行仍出现在面板"
     assert page["items"][0]["to_title"] == "已删除", "清理后引用目标应展示墓碑「已删除」"
 
@@ -392,9 +413,9 @@ def test_restore_after_purge_is_not_found_not_500(db, world, now, kind):
     entity = _make_soft_deleted(db, world["project"], world["admin"], kind, now=now)
     purge_soft_deleted(db, now=now, retention_days=90)
     db.expire_all()
-    assert db.get(type(entity), entity.id) is None, "前置:实体已被物理清理"
+    assert db_scalar_entity(db, entity) is None, "前置:实体已被物理清理"
     with pytest.raises(AppError) as e:
-        _restore_entry(kind)(db, world["admin"], entity.id)
+        _restore_entry(kind)(db, world["admin"], getattr(entity, "code", None) or entity.id)
     assert e.value.code == "not_found", "物理清理后 restore 应与软删语义一致(not_found)"
 
 
@@ -406,12 +427,12 @@ def test_purge_is_idempotent_second_run_noop(db, world, now):
     purge_soft_deleted(db, now=now, retention_days=90)
     db.expire_all()
     for kind, entity in seeded.items():
-        assert db.get(type(entity), entity.id) is None
+        assert db_scalar_entity(db, entity) is None
     second = purge_soft_deleted(db, now=now, retention_days=90)
     assert not any(second.values()), "第二次执行应零删除"
     db.expire_all()
     for kind, entity in seeded.items():
-        assert db.get(type(entity), entity.id) is None
+        assert db_scalar_entity(db, entity) is None
 
 
 # ---------- e) 只清软删 ----------
@@ -419,18 +440,18 @@ def test_purge_is_idempotent_second_run_noop(db, world, now):
 
 def test_live_entities_never_purged(db, world, now):
     project, admin = world["project"], world["admin"]
-    r = Requirement(project_id=project.id, title="活跃需求", status="in_progress")
+    r = Requirement(project_id=project.id, code="REQ-3", title="活跃需求", status="in_progress")
     db.add(r)
     db.flush()
-    r2 = Requirement(project_id=project.id, title="活跃任务挂载", status="backlog")
+    r2 = Requirement(project_id=project.id, code="REQ-2", title="活跃任务挂载", status="backlog")
     db.add(r2)
     db.flush()
-    t = Task(project_id=project.id, title="活跃任务", status="backlog", requirement_id=r2.id)
-    d = Document(project_id=project.id, title="活跃文档", doc_type="wiki")
+    t = Task(project_id=project.id, code="TASK-2", title="活跃任务", status="backlog", requirement_id=r2.code)
+    d = Document(project_id=project.id, code="DOC-2", title="活跃文档", doc_type="wiki")
     c = Comment(
         project_id=project.id,
         target_type="requirement",
-        target_id=r.id,
+        target_id=r.code,
         author_id=admin.id,
         body="活跃评论",
     )
@@ -440,9 +461,9 @@ def test_live_entities_never_purged(db, world, now):
     ref = Reference(
         project_id=project.id,
         from_type="task",
-        from_id=t.id,
+        from_id=t.code,
         to_type="requirement",
-        to_id=r.id,
+        to_id=r.code,
         type="mentions",
         created_by=admin.id,
     )
@@ -456,7 +477,7 @@ def test_live_entities_never_purged(db, world, now):
     att = Attachment(
         project_id=project.id,
         target_type="requirement",
-        target_id=r.id,
+        target_id=r.code,
         file_name="live.txt",
         size=3,
         storage_path="seeded/live.bin",
@@ -465,7 +486,7 @@ def test_live_entities_never_purged(db, world, now):
     db.add_all([ref, repo, att])
     # 刚软删(0 天)的实体:保留期取极端值 0 时应被清理,证明清理逻辑真实生效
     dead = Requirement(
-        project_id=project.id, title="刚软删需求", status="backlog", deleted_at=now
+        project_id=project.id, code="REQ-8", title="刚软删需求", status="backlog", deleted_at=now
     )
     db.add(dead)
     db.flush()
@@ -474,8 +495,8 @@ def test_live_entities_never_purged(db, world, now):
     db.expire_all()
 
     for entity in (r, t, d, c, ref, repo, att):
-        assert db.get(type(entity), entity.id) is not None, "未软删实体永不被清理"
-    assert db.get(Requirement, dead.id) is None, "保留期 0 时软删行(即使刚删)应被清理"
+        assert db_scalar_entity(db, entity) is not None, "未软删实体永不被清理"
+    assert db_scalar_entity(db, dead) is None, "保留期 0 时软删行(即使刚删)应被清理"
 
 
 # ---------- g) activity 留痕 ----------
@@ -486,13 +507,16 @@ def test_purge_records_activity_for_targetable_types(db, world, now):
     ids = {}
     for kind in ACTIVITY_TARGETABLE:
         entity = _make_soft_deleted(db, project, admin, kind, now=now)
-        ids[kind] = entity.id
+        ids[kind] = getattr(entity, "code", None) or entity.id
     purge_soft_deleted(db, now=now, retention_days=90)
     db.expire_all()
     for etype, eid in ids.items():
         rows = db.scalars(
             select(Activity).where(
-                Activity.target_type == etype, Activity.target_id == eid, Activity.action == "purge"
+                Activity.project_id == project.id,
+                Activity.target_type == etype,
+                Activity.target_id == str(eid),
+                Activity.action == "purge",
             )
         ).all()
         assert rows, f"{etype} 物理清理应写 action=purge 的 activity 留痕"

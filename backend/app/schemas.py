@@ -168,17 +168,17 @@ class RequirementDeleteBody(BaseModel):
 class TaskCreate(BaseModel):
     title: str = Field(min_length=1, max_length=256)
     description: str | None = None
-    # 必填由服务层强制(缺失 → invalid_request,而非 422;ADR 0003)
-    requirement_id: uuid.UUID | None = None
+    # 必填由服务层强制(缺失 → invalid_request,而非 422;ADR 0003);值为需求短码 REQ-n(ADR 0002)
+    requirement_id: str | None = None
     assignee_id: uuid.UUID | None = None
-    blocked_by: list[uuid.UUID] | None = None
+    blocked_by: list[str] | None = None
 
 
 class TaskUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=256)
     description: str | None = None
-    requirement_id: uuid.UUID | None = None
-    blocked_by: list[uuid.UUID] | None = None
+    requirement_id: str | None = None
+    blocked_by: list[str] | None = None
 
 
 class TaskAssignBody(BaseModel):
@@ -190,8 +190,8 @@ class DocumentCreate(BaseModel):
     doc_type: Literal["wiki", "glossary"]
     content: str | None = None
     metadata: dict = {}
-    parent_id: uuid.UUID | None = None
-    directory_id: uuid.UUID | None = None
+    parent_id: str | None = None
+    directory_id: str | None = None
 
 
 class DocumentUpdate(BaseModel):
@@ -234,13 +234,13 @@ class RepositoryUpdate(BaseModel):
 
 
 class DocumentMove(BaseModel):
-    parent_id: uuid.UUID | None = None
-    directory_id: uuid.UUID | None = None
+    parent_id: str | None = None
+    directory_id: str | None = None
 
 
 class DirectoryCreate(BaseModel):
     name: str = Field(min_length=1, max_length=128)
-    parent_id: uuid.UUID | None = None
+    parent_id: str | None = None
 
 
 class DirectoryRename(BaseModel):
@@ -248,7 +248,7 @@ class DirectoryRename(BaseModel):
 
 
 class DirectoryMove(BaseModel):
-    parent_id: uuid.UUID | None = None
+    parent_id: str | None = None
 
 
 class RollbackBody(BaseModel):
@@ -260,10 +260,11 @@ class CommentCreate(BaseModel):
 
 
 class ReferenceCreate(BaseModel):
+    # 五类实体端点传短码(REQ/TASK/DOC/TERM/DIR-n);repository/project 端点传 UUID(ADR 0002)
     from_type: Literal["requirement", "task", "document", "repository", "project"]
-    from_id: uuid.UUID
+    from_id: str
     to_type: Literal["requirement", "task", "document", "repository", "project"]
-    to_id: uuid.UUID
+    to_id: str
     type: Literal["derives", "documents", "implements", "mentions"]
 
 

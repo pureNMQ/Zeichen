@@ -24,6 +24,8 @@ CODE_PREFIXES = {
 }
 
 _CODE_PATTERN = {t: re.compile(rf"^{p}-([1-9][0-9]*)$") for t, p in CODE_PREFIXES.items()}
+# document 泛型寻址同时接受 Wiki(DOC)与词条(TERM);分配用 doc_type 专属键
+_CODE_PATTERN["document"] = re.compile(r"^(DOC|TERM)-([1-9][0-9]*)$")
 
 
 def is_valid_code(entity_type: str, code: str) -> bool:

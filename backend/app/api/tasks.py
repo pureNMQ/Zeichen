@@ -23,7 +23,7 @@ router = APIRouter(prefix="/api", tags=["tasks"])
 @router.get("/projects/{project_id}/tasks")
 def list_tasks(
     project_id: uuid.UUID,
-    requirement_id: uuid.UUID | None = None,
+    requirement_id: str | None = None,
     assignee_id: uuid.UUID | None = None,
     status: list[str] | None = Query(None),
     updated_within_days: str | None = None,
@@ -61,7 +61,7 @@ def create_task(
 
 @router.get("/tasks/{task_id}")
 def get_task(
-    task_id: uuid.UUID,
+    task_id: str,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -70,7 +70,7 @@ def get_task(
 
 @router.patch("/tasks/{task_id}")
 def update_task(
-    task_id: uuid.UUID,
+    task_id: str,
     body: TaskUpdate,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
@@ -88,7 +88,7 @@ def update_task(
 
 @router.post("/tasks/{task_id}/status")
 def set_status(
-    task_id: uuid.UUID,
+    task_id: str,
     body: StatusBody,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
@@ -98,7 +98,7 @@ def set_status(
 
 @router.post("/tasks/{task_id}/assign")
 def assign_task(
-    task_id: uuid.UUID,
+    task_id: str,
     body: TaskAssignBody,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
@@ -108,7 +108,7 @@ def assign_task(
 
 @router.post("/tasks/{task_id}/claim")
 def claim_task(
-    task_id: uuid.UUID,
+    task_id: str,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -117,7 +117,7 @@ def claim_task(
 
 @router.post("/tasks/{task_id}/unassign")
 def unassign_task(
-    task_id: uuid.UUID,
+    task_id: str,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -126,7 +126,7 @@ def unassign_task(
 
 @router.post("/tasks/{task_id}/cancel")
 def cancel_task(
-    task_id: uuid.UUID,
+    task_id: str,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -135,7 +135,7 @@ def cancel_task(
 
 @router.post("/tasks/{task_id}/delete")
 def delete_task(
-    task_id: uuid.UUID,
+    task_id: str,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -145,7 +145,7 @@ def delete_task(
 
 @router.post("/tasks/{task_id}/restore")
 def restore_task(
-    task_id: uuid.UUID,
+    task_id: str,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:

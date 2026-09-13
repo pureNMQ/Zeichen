@@ -18,7 +18,7 @@ router = APIRouter(prefix="/api", tags=["polymorphic"])
 @router.get("/targets/{target_type}/{target_id}/comments")
 def list_comments(
     target_type: str,
-    target_id: uuid.UUID,
+    target_id: str,
     cursor: str | None = None,
     limit: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     user: User = Depends(current_user),
@@ -30,13 +30,13 @@ def list_comments(
 @router.post("/targets/{target_type}/{target_id}/comments", status_code=201)
 def create_comment(
     target_type: str,
-    target_id: uuid.UUID,
+    target_id: str,
     body: CommentCreate,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
     comment = service.create_comment(db, user, target_type, target_id, body.body)
-    return {"id": str(comment.id), "target_type": comment.target_type, "target_id": str(comment.target_id), "body": comment.body}
+    return {"id": str(comment.id), "target_type": comment.target_type, "target_id": comment.target_id, "body": comment.body}
 
 
 @router.delete("/comments/{comment_id}")
@@ -52,7 +52,7 @@ def delete_comment(
 @router.get("/targets/{target_type}/{target_id}/activity")
 def list_activity(
     target_type: str,
-    target_id: uuid.UUID,
+    target_id: str,
     cursor: str | None = None,
     limit: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     user: User = Depends(current_user),
@@ -64,7 +64,7 @@ def list_activity(
 @router.get("/targets/{target_type}/{target_id}/references")
 def list_references(
     target_type: str,
-    target_id: uuid.UUID,
+    target_id: str,
     cursor: str | None = None,
     limit: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     user: User = Depends(current_user),
@@ -76,7 +76,7 @@ def list_references(
 @router.post("/targets/{target_type}/{target_id}/references", status_code=201)
 def create_reference(
     target_type: str,
-    target_id: uuid.UUID,
+    target_id: str,
     body: ReferenceCreate,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
@@ -107,7 +107,7 @@ def delete_reference(
 @router.get("/targets/{target_type}/{target_id}/watch")
 def get_watch_state(
     target_type: str,
-    target_id: uuid.UUID,
+    target_id: str,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -117,7 +117,7 @@ def get_watch_state(
 @router.post("/targets/{target_type}/{target_id}/watch", status_code=201)
 def watch_target(
     target_type: str,
-    target_id: uuid.UUID,
+    target_id: str,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -128,7 +128,7 @@ def watch_target(
 @router.delete("/targets/{target_type}/{target_id}/watch")
 def unwatch_target(
     target_type: str,
-    target_id: uuid.UUID,
+    target_id: str,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
