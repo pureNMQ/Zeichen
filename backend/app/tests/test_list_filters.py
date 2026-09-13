@@ -22,8 +22,6 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from sqlalchemy import select
-
 from app.errors import AppError
 from app.models import Requirement, Task
 from app.services import requirements as req_svc
@@ -36,8 +34,8 @@ def _ids(page: dict) -> set:
 
 
 def _backdate(db: Session, model, entity_id, days: int) -> None:
-    """把实体 updated_at 回拨 days 天(直接改 DB 行;短码实体按 code 定位)。"""
-    row = db.scalar(select(model).where(model.code == entity_id).limit(1))
+    """把实体 updated_at 回拨 days 天(直接改 DB 行)。"""
+    row = db.get(model, entity_id)
     assert row is not None
     row.updated_at = datetime.now(timezone.utc) - timedelta(days=days)
     db.commit()
@@ -102,7 +100,7 @@ def test_requirement_updated_within_days_window(client: TestClient, world: dict,
     pid = str(world["project"].id)
     fresh = _mk_req(client, pid, "新需求")
     old = _mk_req(client, pid, "旧需求")
-    _backdate(db, Requirement, old["id"], 5)  # 回拨 5 天
+    _backdate(db, Requirement, uuid.UUID(old["id"]), 5)  # 回拨 5 天
 
     page = client.get(
         f"/api/projects/{pid}/requirements", params={"updated_within_days": 3}
@@ -139,7 +137,7 @@ def test_requirement_combined_filters(client: TestClient, world: dict, db: Sessi
     r1 = _mk_req(client, pid, "登录改造", status="backlog")
     r2 = _mk_req(client, pid, "支付改造", status="backlog")
     r3 = _mk_req(client, pid, "登录后台", status="in_progress")
-    _backdate(db, Requirement, r3["id"], 5)
+    _backdate(db, Requirement, uuid.UUID(r3["id"]), 5)
 
     # status + keyword
     page = client.get(
@@ -183,9 +181,9 @@ def test_requirement_order_updated_at_desc_then_id_desc(client: TestClient, worl
     b = _mk_req(client, pid, "新需求一")
     c = _mk_req(client, pid, "新需求二")
     now = datetime.now(timezone.utc)
-    db.scalar(select(Requirement).where(Requirement.code == a["id"]).limit(1)).updated_at = now - timedelta(hours=2)
-    db.scalar(select(Requirement).where(Requirement.code == b["id"]).limit(1)).updated_at = now - timedelta(hours=1)
-    db.scalar(select(Requirement).where(Requirement.code == c["id"]).limit(1)).updated_at = now - timedelta(hours=1)  # 与 b 相同 → id 倒序决胜
+    db.get(Requirement, uuid.UUID(a["id"])).updated_at = now - timedelta(hours=2)
+    db.get(Requirement, uuid.UUID(b["id"])).updated_at = now - timedelta(hours=1)
+    db.get(Requirement, uuid.UUID(c["id"])).updated_at = now - timedelta(hours=1)  # 与 b 相同 → id 倒序决胜
     db.commit()
 
     page = client.get(f"/api/projects/{pid}/requirements").json()
@@ -212,7 +210,7 @@ def test_task_filters_over_http(client: TestClient, world: dict, db: Session):
     t4 = _mk_task(client, pid, "Assigned Task")
     resp = client.post(f"/api/tasks/{t4['id']}/assign", json={"assignee_id": str(world["agent"].id)})
     assert resp.status_code == 200, resp.text
-    _backdate(db, Task, t3["id"], 5)
+    _backdate(db, Task, uuid.UUID(t3["id"]), 5)
 
     # 多状态(重复参数)
     page = client.get(
@@ -307,18 +305,18 @@ def test_large_pagination_over_100_no_dup_miss(client: TestClient, world: dict, 
 def test_service_list_tasks_new_filters(db: Session, world: dict):
     pid = world["project"].id
     req = req_svc.create_requirement(db, world["admin"], pid, "需求")
-    req_svc.set_requirement_status(db, world["admin"], req.code, "backlog")
+    req_svc.set_requirement_status(db, world["admin"], req.id, "backlog")
     t1 = task_svc.create_task(
         db, world["admin"], pid, "Form Task", description="input validation",
-        requirement_id=req.code, assignee_id=world["agent"].id,
+        requirement_id=req.id, assignee_id=world["agent"].id,
     )
-    task_svc.set_task_status(db, world["agent"], t1.code, "in_progress")
+    task_svc.set_task_status(db, world["agent"], t1.id, "in_progress")
     t2 = task_svc.create_task(
-        db, world["admin"], pid, "Payment Task", description="wechat pay", requirement_id=req.code
+        db, world["admin"], pid, "Payment Task", description="wechat pay", requirement_id=req.id
     )
-    task_svc.set_task_status(db, world["agent"], t2.code, "done")
-    old = task_svc.create_task(db, world["admin"], pid, "Old Task", requirement_id=req.code)
-    _backdate(db, Task, old.code, 5)
+    task_svc.set_task_status(db, world["agent"], t2.id, "done")
+    old = task_svc.create_task(db, world["admin"], pid, "Old Task", requirement_id=req.id)
+    _backdate(db, Task, old.id, 5)
 
     # 多状态
     page = task_svc.list_tasks(
@@ -326,56 +324,56 @@ def test_service_list_tasks_new_filters(db: Session, world: dict):
         status=["in_progress", "done"], cursor=None, limit=20,
         updated_within_days=None, keyword=None,
     )
-    assert {i["id"] for i in page["items"]} == {str(t1.code), str(t2.code)}
+    assert {i["id"] for i in page["items"]} == {str(t1.id), str(t2.id)}
     # keyword:标题命中 + 大小写不敏感
     page = task_svc.list_tasks(
         db=db, user=world["member"], project_id=pid, requirement_id=None, assignee_id=None,
         status=None, cursor=None, limit=20, updated_within_days=None, keyword="FORM",
     )
-    assert [i["id"] for i in page["items"]] == [str(t1.code)]
+    assert [i["id"] for i in page["items"]] == [str(t1.id)]
     # keyword:描述命中
     page = task_svc.list_tasks(
         db=db, user=world["member"], project_id=pid, requirement_id=None, assignee_id=None,
         status=None, cursor=None, limit=20, updated_within_days=None, keyword="wechat",
     )
-    assert [i["id"] for i in page["items"]] == [str(t2.code)]
+    assert [i["id"] for i in page["items"]] == [str(t2.id)]
     # 时间窗口:回拨的排除/大窗口包含
     page = task_svc.list_tasks(
         db=db, user=world["member"], project_id=pid, requirement_id=None, assignee_id=None,
         status=None, cursor=None, limit=20, updated_within_days=3, keyword=None,
     )
-    assert {i["id"] for i in page["items"]} == {str(t1.code), str(t2.code)}
+    assert {i["id"] for i in page["items"]} == {str(t1.id), str(t2.id)}
     page = task_svc.list_tasks(
         db=db, user=world["member"], project_id=pid, requirement_id=None, assignee_id=None,
         status=None, cursor=None, limit=20, updated_within_days=30, keyword=None,
     )
-    assert {i["id"] for i in page["items"]} == {str(t1.code), str(t2.code), str(old.code)}
+    assert {i["id"] for i in page["items"]} == {str(t1.id), str(t2.id), str(old.id)}
 
 
 def test_service_list_requirements_new_filters(db: Session, world: dict):
     pid = world["project"].id
     r1 = req_svc.create_requirement(db, world["admin"], pid, "Login 需求", description="form validation")
-    req_svc.set_requirement_status(db, world["admin"], r1.code, "backlog")
+    req_svc.set_requirement_status(db, world["admin"], r1.id, "backlog")
     r2 = req_svc.create_requirement(db, world["admin"], pid, "Pay 需求")
-    req_svc.set_requirement_status(db, world["admin"], r2.code, "in_progress")
+    req_svc.set_requirement_status(db, world["admin"], r2.id, "in_progress")
     old = req_svc.create_requirement(db, world["admin"], pid, "Old 需求")
-    _backdate(db, Requirement, old.code, 5)
+    _backdate(db, Requirement, old.id, 5)
 
     page = req_svc.list_requirements(
         db=db, user=world["member"], project_id=pid, status=["backlog", "in_progress"],
         cursor=None, limit=20, updated_within_days=None, keyword=None,
     )
-    assert {i["id"] for i in page["items"]} == {str(r1.code), str(r2.code)}
+    assert {i["id"] for i in page["items"]} == {str(r1.id), str(r2.id)}
     page = req_svc.list_requirements(
         db=db, user=world["member"], project_id=pid, status=None, cursor=None, limit=20,
         updated_within_days=None, keyword="LOGIN",
     )
-    assert [i["id"] for i in page["items"]] == [str(r1.code)]
+    assert [i["id"] for i in page["items"]] == [str(r1.id)]
     page = req_svc.list_requirements(
         db=db, user=world["member"], project_id=pid, status=None, cursor=None, limit=20,
         updated_within_days=3, keyword=None,
     )
-    assert {i["id"] for i in page["items"]} == {str(r1.code), str(r2.code)}
+    assert {i["id"] for i in page["items"]} == {str(r1.id), str(r2.id)}
 
 
 def test_service_updated_within_days_invalid(db: Session, world: dict):
@@ -399,8 +397,8 @@ def test_service_order_requirements_updated_at_desc(db: Session, world: dict):
     a = req_svc.create_requirement(db, world["admin"], pid, "旧需求")
     b = req_svc.create_requirement(db, world["admin"], pid, "新需求")
     now = datetime.now(timezone.utc)
-    db.scalar(select(Requirement).where(Requirement.code == a.code).limit(1)).updated_at = now - timedelta(hours=2)
-    db.scalar(select(Requirement).where(Requirement.code == b.code).limit(1)).updated_at = now - timedelta(hours=1)
+    db.get(Requirement, a.id).updated_at = now - timedelta(hours=2)
+    db.get(Requirement, b.id).updated_at = now - timedelta(hours=1)
     db.commit()
     page = req_svc.list_requirements(
         db=db, user=world["member"], project_id=pid, status=None, cursor=None, limit=20,
@@ -412,14 +410,14 @@ def test_service_order_requirements_updated_at_desc(db: Session, world: dict):
 def test_service_order_tasks_updated_at_desc_tiebreak_id(db: Session, world: dict):
     pid = world["project"].id
     _req = req_svc.create_requirement(db, world["admin"], pid, "排序需求")
-    req_svc.set_requirement_status(db, world["admin"], _req.code, "backlog")
-    t1 = task_svc.create_task(db, world["admin"], pid, "任务一", requirement_id=_req.code)
-    t2 = task_svc.create_task(db, world["admin"], pid, "任务二", requirement_id=_req.code)
-    t3 = task_svc.create_task(db, world["admin"], pid, "任务三", requirement_id=_req.code)
+    req_svc.set_requirement_status(db, world["admin"], _req.id, "backlog")
+    t1 = task_svc.create_task(db, world["admin"], pid, "任务一", requirement_id=_req.id)
+    t2 = task_svc.create_task(db, world["admin"], pid, "任务二", requirement_id=_req.id)
+    t3 = task_svc.create_task(db, world["admin"], pid, "任务三", requirement_id=_req.id)
     now = datetime.now(timezone.utc)
-    db.scalar(select(Task).where(Task.code == t1.code).limit(1)).updated_at = now - timedelta(hours=1)
-    db.scalar(select(Task).where(Task.code == t2.code).limit(1)).updated_at = now - timedelta(hours=2)
-    db.scalar(select(Task).where(Task.code == t3.code).limit(1)).updated_at = now - timedelta(hours=1)  # 与 t1 相同 → id 倒序决胜
+    db.get(Task, t1.id).updated_at = now - timedelta(hours=1)
+    db.get(Task, t2.id).updated_at = now - timedelta(hours=2)
+    db.get(Task, t3.id).updated_at = now - timedelta(hours=1)  # 与 t1 相同 → id 倒序决胜
     db.commit()
     page = task_svc.list_tasks(
         db=db, user=world["member"], project_id=pid, requirement_id=None, assignee_id=None,
@@ -435,9 +433,9 @@ def test_service_order_tasks_updated_at_desc_tiebreak_id(db: Session, world: dic
 def test_large_pagination_tasks_service(db: Session, world: dict):
     pid = world["project"].id
     _req = req_svc.create_requirement(db, world["admin"], pid, "分页需求")
-    req_svc.set_requirement_status(db, world["admin"], _req.code, "backlog")
+    req_svc.set_requirement_status(db, world["admin"], _req.id, "backlog")
     for i in range(105):
-        task_svc.create_task(db, world["admin"], pid, f"任务 {i}", requirement_id=_req.code)
+        task_svc.create_task(db, world["admin"], pid, f"任务 {i}", requirement_id=_req.id)
     page1 = task_svc.list_tasks(
         db=db, user=world["member"], project_id=pid, requirement_id=None, assignee_id=None,
         status=None, cursor=None, limit=100, updated_within_days=None, keyword=None,

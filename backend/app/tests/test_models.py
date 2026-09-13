@@ -53,21 +53,21 @@ def world(session: Session) -> tuple[User, Team, Project]:
 
 def test_roundtrip(session: Session, world: tuple[User, Team, Project]) -> None:
     u, _, p = world
-    req = Requirement(project_id=p.id, code="REQ-1", title="做个搜索", status="backlog")
+    req = Requirement(project_id=p.id, title="做个搜索", status="backlog")
     session.add(req)
     session.commit()
-    assert req.code == "REQ-1" and req.status == "backlog"
+    assert req.id is not None and req.status == "backlog"
     assert req.deleted_at is None
 
-    t = Task(project_id=p.id, code="TASK-1", title="建索引", requirement_id=req.code, assignee_id=u.id)
+    t = Task(project_id=p.id, title="建索引", requirement_id=req.id, assignee_id=u.id)
     session.add(t)
     session.commit()
-    assert t.requirement_id == req.code
+    assert t.requirement_id == req.id
 
 
 def test_status_check_constraint(session: Session, world: tuple[User, Team, Project]) -> None:
     _, _, p = world
-    req = Requirement(project_id=p.id, code="REQ-2", title="坏状态", status="nonsense")
+    req = Requirement(project_id=p.id, title="坏状态", status="nonsense")
     session.add(req)
     with pytest.raises(IntegrityError):
         session.commit()
@@ -79,12 +79,12 @@ def test_requirement_six_states_task_four_states(
 ) -> None:
     """需求六态(verifying 合法,验收上移需求);任务四态(verifying 拒绝)。"""
     _, _, p = world
-    req = Requirement(project_id=p.id, code="REQ-3", title="验收中需求", status="verifying")
+    req = Requirement(project_id=p.id, title="验收中需求", status="verifying")
     session.add(req)
     session.commit()
     assert req.status == "verifying"
 
-    t = Task(project_id=p.id, code="TASK-2", title="非法验收态", status="verifying", requirement_id=req.code)
+    t = Task(project_id=p.id, title="非法验收态", status="verifying", requirement_id=req.id)
     session.add(t)
     with pytest.raises(IntegrityError):
         session.commit()
@@ -96,7 +96,7 @@ def test_polymorphic_target_check(session: Session, world: tuple[User, Team, Pro
     comment = Comment(
         project_id=p.id,
         target_type="spaceship",
-        target_id="REQ-1",
+        target_id=uuid.uuid4(),
         author_id=u.id,
         body="hello",
     )
@@ -107,7 +107,7 @@ def test_polymorphic_target_check(session: Session, world: tuple[User, Team, Pro
 
 def test_polymorphic_roundtrip(session: Session, world: tuple[User, Team, Project]) -> None:
     u, _, p = world
-    req = Requirement(project_id=p.id, code="REQ-4", title="r1")
+    req = Requirement(project_id=p.id, title="r1")
     session.add(req)
     session.commit()
 
@@ -115,7 +115,7 @@ def test_polymorphic_roundtrip(session: Session, world: tuple[User, Team, Projec
         Comment(
             project_id=p.id,
             target_type="requirement",
-            target_id=req.code,
+            target_id=req.id,
             author_id=u.id,
             body="先看下设计",
         )
@@ -124,7 +124,7 @@ def test_polymorphic_roundtrip(session: Session, world: tuple[User, Team, Projec
         Activity(
             project_id=p.id,
             target_type="requirement",
-            target_id=req.code,
+            target_id=req.id,
             actor_id=u.id,
             action="create",
             summary="创建需求 r1",
@@ -134,9 +134,9 @@ def test_polymorphic_roundtrip(session: Session, world: tuple[User, Team, Projec
         Reference(
             project_id=p.id,
             from_type="task",
-            from_id="REQ-1",
+            from_id=uuid.uuid4(),
             to_type="requirement",
-            to_id=req.code,
+            to_id=req.id,
             type="derives",
         )
     )
@@ -151,9 +151,9 @@ def test_reference_enum_check(session: Session, world: tuple[User, Team, Project
     ref = Reference(
         project_id=p.id,
         from_type="task",
-        from_id="TASK-1",
+        from_id=uuid.uuid4(),
         to_type="requirement",
-        to_id="REQ-1",
+        to_id=uuid.uuid4(),
         type="teleports",
     )
     session.add(ref)

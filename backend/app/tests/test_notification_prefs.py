@@ -14,7 +14,7 @@ from app.services import requirements as req_svc
 
 def make_requirement(db: Session, world: dict, title: str = "需求") -> dict:
     req = req_svc.create_requirement(db, world["agent"], world["project"].id, title)
-    req_svc.set_requirement_status(db, world["agent"], req.code, "backlog")
+    req_svc.set_requirement_status(db, world["agent"], req.id, "backlog")
     return req_svc._requirement_dict(db, req)
 
 
@@ -56,7 +56,7 @@ class TestPreferences:
 class TestWatch:
     def test_watch_unwatch_roundtrip(self, db: Session, world: dict):
         r = make_requirement(db, world)
-        rid = r["id"]
+        rid = uuid.UUID(r["id"])
         assert svc.is_watching(db, world["admin"], "requirement", rid) is False
         svc.watch_entity(db, world["admin"], "requirement", rid)
         assert svc.is_watching(db, world["admin"], "requirement", rid) is True
@@ -65,7 +65,7 @@ class TestWatch:
 
     def test_viewer_can_watch(self, db: Session, world: dict):
         r = make_requirement(db, world)
-        rid = r["id"]
+        rid = uuid.UUID(r["id"])
         svc.watch_entity(db, world["member"], "requirement", rid)
         assert svc.is_watching(db, world["member"], "requirement", rid)
 
@@ -73,7 +73,7 @@ class TestWatch:
         svc.update_preferences(db, world["admin"], {"requirement": False}, {"status": False})
         r = make_requirement(db, world, "被关注需求")
         assert admin_notifications(db, world) == []
-        svc.watch_entity(db, world["admin"], "requirement", r["id"])
-        req_svc.set_requirement_status(db, world["agent"], r["id"], "in_progress")
-        notes = admin_notifications(db, world, r["id"])
+        svc.watch_entity(db, world["admin"], "requirement", uuid.UUID(r["id"]))
+        req_svc.set_requirement_status(db, world["agent"], uuid.UUID(r["id"]), "in_progress")
+        notes = admin_notifications(db, world, uuid.UUID(r["id"]))
         assert any(n.action == "status" for n in notes)

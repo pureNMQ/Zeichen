@@ -123,7 +123,7 @@ def mcp_server(tmp_path_factory, request):
     db_file = tmp_path_factory.mktemp("mcp") / "e2e.db"
     db_url = f"sqlite:///{db_file.as_posix()}"
 
-    from sqlalchemy import create_engine, select
+    from sqlalchemy import create_engine
     from sqlalchemy.orm import Session
 
     from app.models import ApiKey, Base, MemoryDataset, Project, ProjectMember, Team, User, WorkspaceMember
@@ -404,7 +404,7 @@ def test_list_filters_over_mcp(mcp_server: dict):
     import uuid
     from datetime import datetime, timedelta, timezone
 
-    from sqlalchemy import create_engine, select
+    from sqlalchemy import create_engine
     from sqlalchemy.orm import Session as SASession
 
     from app.models import Requirement as ReqModel
@@ -441,7 +441,7 @@ def test_list_filters_over_mcp(mcp_server: dict):
     db_path = mcp_server["log_file"].parent / "e2e.db"
     engine = create_engine(f"sqlite:///{db_path.as_posix()}", connect_args={"timeout": 10})
     with SASession(engine) as s:
-        row = s.scalar(select(ReqModel).where(ReqModel.code == r3["id"]).limit(1))
+        row = s.get(ReqModel, uuid.UUID(r3["id"]))
         assert row is not None
         row.updated_at = datetime.now(timezone.utc) - timedelta(days=5)
         s.commit()

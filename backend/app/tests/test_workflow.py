@@ -40,8 +40,9 @@ def proj(db: Session, world: dict) -> dict:
     return {"**world": world, "carol": carol, "project": project, "req": None}
 
 
-def make_requirement(db: Session, actor: User, project: Project, title="需求 A") -> Requirement:
-    return req_svc.create_requirement(db, actor, project.id, title)
+def make_requirement(db: Session, actor: User, project: Project, title="需求 A") -> dict:
+    r = req_svc.create_requirement(db, actor, project.id, title)
+    return req_svc._requirement_dict(db, r)
 
 
 def make_requirement_row(db: Session, actor: User, project: Project, title="挂载需求") -> Requirement:
@@ -59,15 +60,15 @@ def make_task(
     # 任务必须挂已确认需求(ADR 0003);测试默认自动建一个
     if requirement_id is None:
         requirement = make_requirement_row(db, actor, project)
-        req_svc.set_requirement_status(db, actor, requirement.code, "backlog")
+        req_svc.set_requirement_status(db, actor, requirement.id, "backlog")
     else:
-        rid = requirement_id.code if hasattr(requirement_id, "code") else requirement_id
-        requirement = req_svc.get_requirement(db, actor, rid)
+        requirement = req_svc.get_requirement(db, actor, _as_uuid(requirement_id))
         if requirement.status == "pending":
-            req_svc.set_requirement_status(db, actor, requirement.code, "backlog")
-    return task_svc.create_task(
-        db, actor, project.id, title, None, requirement.code, assignee_id
+            req_svc.set_requirement_status(db, actor, requirement.id, "backlog")
+    t = task_svc.create_task(
+        db, actor, project.id, title, None, requirement.id, assignee_id
     )
+    return task_svc._task_dict(db, t)
 
 
 def _as_uuid(value) -> uuid.UUID:
@@ -75,29 +76,27 @@ def _as_uuid(value) -> uuid.UUID:
 
 
 def set_req(db, actor, rid, target):
-    rid = rid.code if hasattr(rid, "code") else rid
-    return req_svc.set_requirement_status(db, actor, rid, target)
+    return req_svc.set_requirement_status(db, actor, _as_uuid(rid), target)
 
 
 def set_task(db, actor, tid, target):
-    tid = tid.code if hasattr(tid, "code") else tid
-    return task_svc.set_task_status(db, actor, tid, target)
+    return task_svc.set_task_status(db, actor, _as_uuid(tid), target)
 
 
 class TestRequirementLifecycle:
     def test_create_pending_with_activity(self, db: Session, world: dict, proj: dict):
         r = make_requirement(db, world["admin"], world["project"])
-        assert r.status == "pending"
+        assert r["status"] == "pending"
         activity = db.scalar(select(Activity).where(Activity.action == "create"))
         assert activity is not None
         assert activity.target_type == "requirement"
 
     def test_viewer_can_read_but_not_write(self, db: Session, world: dict, proj: dict):
         r = make_requirement(db, world["admin"], world["project"])
-        got = req_svc.get_requirement(db, world["member"], r.code)
-        assert got.code == r.code
+        got = req_svc.get_requirement(db, world["member"], uuid.UUID(r["id"]))
+        assert got.id == uuid.UUID(r["id"])
         with pytest.raises(AppError) as e:
-            req_svc.update_requirement(db, world["member"], r.code, "hack", None)
+            req_svc.update_requirement(db, world["member"], uuid.UUID(r["id"]), "hack", None)
         assert e.value.code == "permission_denied"
 
     def test_non_member_cannot_see(self, db: Session, world: dict, proj: dict):
@@ -106,7 +105,7 @@ class TestRequirementLifecycle:
         stranger = make_user(db, "stranger", role="member")
         r = make_requirement(db, world["admin"], world["project"])
         with pytest.raises(AppError) as e:
-            req_svc.get_requirement(db, stranger, r.code)
+            req_svc.get_requirement(db, stranger, uuid.UUID(r["id"]))
         assert e.value.code == "not_found"
 
     def test_free_transitions_all_pairs(self, db: Session, world: dict, proj: dict):
@@ -114,7 +113,7 @@ class TestRequirementLifecycle:
         statuses = ["pending", "backlog", "in_progress", "verifying", "done", "cancelled"]
         for current in statuses:
             r = make_requirement(db, world["admin"], world["project"], f"需求 {current}")
-            rid = r
+            rid = uuid.UUID(r["id"])
             if current != "pending":
                 set_req(db, world["admin"], rid, current)
             for target in statuses:
@@ -125,7 +124,7 @@ class TestRequirementLifecycle:
 
     def test_same_status_conflict(self, db: Session, world: dict, proj: dict):
         r = make_requirement(db, world["admin"], world["project"])
-        rid = r
+        rid = uuid.UUID(r["id"])
         with pytest.raises(AppError) as e:
             set_req(db, world["admin"], rid, "pending")
         assert e.value.code == "conflict"
@@ -133,14 +132,14 @@ class TestRequirementLifecycle:
     def test_invalid_status_rejected(self, db: Session, world: dict, proj: dict):
         r = make_requirement(db, world["admin"], world["project"])
         with pytest.raises(AppError) as e:
-            set_req(db, world["admin"], r.code, "nonsense")
+            set_req(db, world["admin"], uuid.UUID(r["id"]), "nonsense")
         assert e.value.code == "invalid_request"
 
     def test_pending_requirement_rejects_task_derivation(self, db: Session, world: dict, proj: dict):
         r = make_requirement(db, world["admin"], world["project"])
         with pytest.raises(AppError) as e:
             task_svc.create_task(
-                db, world["admin"], world["project"].id, "过早拆解", None, r.code
+                db, world["admin"], world["project"].id, "过早拆解", None, uuid.UUID(r["id"])
             )
         assert e.value.code == "invalid_request"
         assert "请先确认需求" in e.value.message
@@ -148,64 +147,64 @@ class TestRequirementLifecycle:
     def test_done_with_pending_tasks_no_validation(self, db: Session, world: dict, proj: dict):
         """需求带未决任务可直接置 done:无任何前置校验(方案 B 完全自由)。"""
         r = make_requirement(db, world["admin"], world["project"])
-        rid = r
+        rid = uuid.UUID(r["id"])
         t = make_task(db, world["admin"], world["project"], "任务 1", rid)
-        set_task(db, world["agent"], t.code, "in_progress")
+        set_task(db, world["agent"], uuid.UUID(t["id"]), "in_progress")
         got = set_req(db, world["admin"], rid, "done")
         assert got.status == "done"
         # 继续加任务也不回退(无自动流转,状态全手动)
         make_task(db, world["admin"], world["project"], "新增任务", rid)
-        assert req_svc.get_requirement(db, world["admin"], rid.code).status == "done"
+        assert req_svc.get_requirement(db, world["admin"], rid).status == "done"
 
     def test_task_status_does_not_touch_requirement(self, db: Session, world: dict, proj: dict):
         """任务状态变化不影响需求状态(自动流转已删除,需求状态全手动)。"""
         r = make_requirement(db, world["admin"], world["project"])
-        rid = r
+        rid = uuid.UUID(r["id"])
         t1 = make_task(db, world["admin"], world["project"], "任务 1", rid)
         t2 = make_task(db, world["admin"], world["project"], "任务 2", rid)
-        set_task(db, world["agent"], t1.code, "in_progress")
-        set_task(db, world["agent"], t1.code, "done")
-        task_svc.cancel_task(db, world["admin"], t2.code)
-        got = req_svc.get_requirement(db, world["admin"], rid.code)
+        set_task(db, world["agent"], uuid.UUID(t1["id"]), "in_progress")
+        set_task(db, world["agent"], uuid.UUID(t1["id"]), "done")
+        task_svc.cancel_task(db, world["admin"], uuid.UUID(t2["id"]))
+        got = req_svc.get_requirement(db, world["admin"], rid)
         assert got.status == "backlog"
 
     def test_cancel_convenience(self, db: Session, world: dict, proj: dict):
         r = make_requirement(db, world["admin"], world["project"])
-        rid = r
-        got = req_svc.cancel_requirement(db, world["admin"], rid.code)
+        rid = uuid.UUID(r["id"])
+        got = req_svc.cancel_requirement(db, world["admin"], rid)
         assert got.status == "cancelled"
         with pytest.raises(AppError) as e:
-            req_svc.cancel_requirement(db, world["admin"], rid.code)
+            req_svc.cancel_requirement(db, world["admin"], rid)
         assert e.value.code == "conflict"
 
     def test_status_activity_recorded(self, db: Session, world: dict, proj: dict):
         r = make_requirement(db, world["admin"], world["project"])
-        rid = r
+        rid = uuid.UUID(r["id"])
         set_req(db, world["admin"], rid, "done")
-        page = svc_list_activity(db, world["admin"], "requirement", rid.code)
+        page = svc_list_activity(db, world["admin"], "requirement", rid)
         actions = [a["action"] for a in page["items"]]
         assert actions == ["create", "status"]
 
     def test_delete_requires_task_count_confirm(self, db: Session, world: dict, proj: dict):
         r = make_requirement(db, world["admin"], world["project"])
-        rid = r
+        rid = uuid.UUID(r["id"])
         make_task(db, world["admin"], world["project"], "任务 1", rid)
         with pytest.raises(AppError) as e:
-            req_svc.delete_requirement(db, world["admin"], rid.code)
+            req_svc.delete_requirement(db, world["admin"], rid)
         assert e.value.code == "conflict"
         with pytest.raises(AppError) as e:
-            req_svc.delete_requirement(db, world["admin"], rid.code, confirm_task_count=3)
+            req_svc.delete_requirement(db, world["admin"], rid, confirm_task_count=3)
         assert e.value.code == "conflict"
-        req_svc.delete_requirement(db, world["admin"], rid.code, confirm_task_count=1)
+        req_svc.delete_requirement(db, world["admin"], rid, confirm_task_count=1)
         with pytest.raises(AppError) as e:
-            req_svc.get_requirement(db, world["admin"], rid.code)
+            req_svc.get_requirement(db, world["admin"], rid)
         assert e.value.code == "not_found"
 
     def test_empty_requirement_delete_no_confirm_and_restore(self, db: Session, world: dict, proj: dict):
         r = make_requirement(db, world["admin"], world["project"])
-        rid = r
-        req_svc.delete_requirement(db, world["admin"], rid.code)
-        restored = req_svc.restore_requirement(db, world["admin"], rid.code)
+        rid = uuid.UUID(r["id"])
+        req_svc.delete_requirement(db, world["admin"], rid)
+        restored = req_svc.restore_requirement(db, world["admin"], rid)
         assert restored.status == "pending"
         assert restored.deleted_at is None
 
@@ -216,7 +215,7 @@ class TestTaskStateMachine:
         statuses = ["backlog", "in_progress", "done", "cancelled"]
         for current in statuses:
             t = make_task(db, world["admin"], world["project"], f"任务 {current}")
-            tid = t
+            tid = uuid.UUID(t["id"])
             if current != "backlog":
                 set_task(db, world["admin"], tid, current)
             for target in statuses:
@@ -227,82 +226,82 @@ class TestTaskStateMachine:
 
     def test_direct_done_and_cancelled_no_ritual(self, db: Session, world: dict, proj: dict):
         t = make_task(db, world["admin"], world["project"])
-        tid = t
+        tid = uuid.UUID(t["id"])
         assert set_task(db, world["admin"], tid, "done").status == "done"
         t2 = make_task(db, world["admin"], world["project"], "任务 2")
-        assert set_task(db, world["admin"], t2.code, "cancelled").status == "cancelled"
+        assert set_task(db, world["admin"], uuid.UUID(t2["id"]), "cancelled").status == "cancelled"
 
     def test_invalid_status_rejected(self, db: Session, world: dict, proj: dict):
         t = make_task(db, world["admin"], world["project"])
         with pytest.raises(AppError) as e:
-            set_task(db, world["admin"], t.code, "nonsense")
+            set_task(db, world["admin"], uuid.UUID(t["id"]), "nonsense")
         assert e.value.code == "invalid_request"
 
     def test_cancel_convenience(self, db: Session, world: dict, proj: dict):
         t = make_task(db, world["admin"], world["project"])
-        got = task_svc.cancel_task(db, world["admin"], t.code)
+        got = task_svc.cancel_task(db, world["admin"], uuid.UUID(t["id"]))
         assert got.status == "cancelled"
         with pytest.raises(AppError) as e:
-            task_svc.cancel_task(db, world["admin"], t.code)
+            task_svc.cancel_task(db, world["admin"], uuid.UUID(t["id"]))
         assert e.value.code == "conflict"
 
     def test_delete_assigned_task_restricted_then_restore(self, db: Session, world: dict, proj: dict):
         t = make_task(db, world["admin"], world["project"], assignee_id=world["agent"].id)
-        tid = t
+        tid = uuid.UUID(t["id"])
         with pytest.raises(AppError) as e:
-            task_svc.delete_task(db, proj["carol"], tid.code)
+            task_svc.delete_task(db, proj["carol"], tid)
         assert e.value.code == "permission_denied"
-        task_svc.delete_task(db, world["agent"], tid.code)
-        restored = task_svc.restore_task(db, world["admin"], tid.code)
+        task_svc.delete_task(db, world["agent"], tid)
+        restored = task_svc.restore_task(db, world["admin"], tid)
         assert restored.deleted_at is None
 
 
 class TestTaskOwnership:
     def test_set_status_by_assignee_only(self, db: Session, world: dict, proj: dict):
         t = make_task(db, world["admin"], world["project"], assignee_id=world["agent"].id)
-        set_task(db, world["agent"], t.code, "in_progress")
+        set_task(db, world["agent"], uuid.UUID(t["id"]), "in_progress")
         t2 = make_task(db, world["admin"], world["project"], "任务 2", assignee_id=world["agent"].id)
         with pytest.raises(AppError) as e:
-            set_task(db, proj["carol"], t2.code, "in_progress")
+            set_task(db, proj["carol"], uuid.UUID(t2["id"]), "in_progress")
         assert e.value.code == "permission_denied"
-        set_task(db, world["admin"], t2.code, "in_progress")
+        set_task(db, world["admin"], uuid.UUID(t2["id"]), "in_progress")
 
     def test_unassigned_task_any_editor(self, db: Session, world: dict, proj: dict):
         t = make_task(db, world["admin"], world["project"])
-        set_task(db, proj["carol"], t.code, "in_progress")
+        set_task(db, proj["carol"], uuid.UUID(t["id"]), "in_progress")
 
     def test_claim_then_second_claim_conflict(self, db: Session, world: dict, proj: dict):
         t = make_task(db, world["admin"], world["project"])
-        claimed = task_svc.claim_task(db, world["agent"], t.code)
+        claimed = task_svc.claim_task(db, world["agent"], uuid.UUID(t["id"]))
         assert claimed.assignee_id == world["agent"].id
         with pytest.raises(AppError) as e:
-            task_svc.claim_task(db, proj["carol"], t.code)
+            task_svc.claim_task(db, proj["carol"], uuid.UUID(t["id"]))
         assert e.value.code == "conflict"
 
     def test_assign_unassigned_any_editor_then_reassign_restricted(self, db: Session, world: dict, proj: dict):
         t = make_task(db, world["admin"], world["project"])
-        task_svc.assign_task(db, proj["carol"], t.code, world["agent"].id)
+        task_svc.assign_task(db, proj["carol"], uuid.UUID(t["id"]), world["agent"].id)
         with pytest.raises(AppError) as e:
-            task_svc.assign_task(db, proj["carol"], t.code, proj["carol"].id)
+            task_svc.assign_task(db, proj["carol"], uuid.UUID(t["id"]), proj["carol"].id)
         assert e.value.code == "permission_denied"
-        task_svc.assign_task(db, world["admin"], t.code, proj["carol"].id)
+        task_svc.assign_task(db, world["admin"], uuid.UUID(t["id"]), proj["carol"].id)
 
     def test_unassign_by_assignee_or_admin(self, db: Session, world: dict, proj: dict):
         t = make_task(db, world["admin"], world["project"], assignee_id=world["agent"].id)
-        task_svc.unassign_task(db, world["agent"], t.code)
-        assert task_svc.get_task(db, world["admin"], t.code).assignee_id is None
+        task_svc.unassign_task(db, world["agent"], uuid.UUID(t["id"]))
+        assert task_svc.get_task(db, world["admin"], uuid.UUID(t["id"])).assignee_id is None
         t2 = make_task(db, world["admin"], world["project"], "任务 2", assignee_id=world["agent"].id)
         with pytest.raises(AppError) as e:
-            task_svc.unassign_task(db, proj["carol"], t2.code)
+            task_svc.unassign_task(db, proj["carol"], uuid.UUID(t2["id"]))
         assert e.value.code == "permission_denied"
 
     def test_requirement_status_any_editor(self, db: Session, world: dict, proj: dict):
         """需求改状态任意编辑权主体(无指派规则)。"""
         r = make_requirement(db, world["admin"], world["project"])
-        got = set_req(db, proj["carol"], r.code, "in_progress")
+        got = set_req(db, proj["carol"], uuid.UUID(r["id"]), "in_progress")
         assert got.status == "in_progress"
         with pytest.raises(AppError) as e:
-            set_req(db, world["member"], r.code, "done")
+            set_req(db, world["member"], uuid.UUID(r["id"]), "done")
         assert e.value.code == "permission_denied"
 
 
@@ -326,7 +325,7 @@ class TestConcurrency:
         project = Project(team_id=team.id, name="race")
         sess.add(project)
         sess.flush()
-        requirement = Requirement(project_id=project.id, code="REQ-1", title="race req", status="backlog")
+        requirement = Requirement(project_id=project.id, title="race req", status="backlog")
         sess.add(requirement)
         sess.flush()
         sess.add_all(
@@ -337,15 +336,14 @@ class TestConcurrency:
         )
         task = Task(
             project_id=project.id,
-            code="TASK-1",
             title="race task",
             status="backlog",
             created_by=admin.id,
-            requirement_id="REQ-1",
+            requirement_id=requirement.id,
         )
         sess.add(task)
         sess.commit()
-        task_id = task.code
+        task_id = task.id
 
         barrier = threading.Barrier(2)
         outcomes = []
@@ -355,7 +353,7 @@ class TestConcurrency:
             barrier.wait()
             try:
                 user = local.get(User, user_id)
-                task_svc.claim_task(local, user, "TASK-1")
+                task_svc.claim_task(local, user, task_id)
                 outcomes.append(str(user_id))
             except AppError as e:
                 outcomes.append(e.code)

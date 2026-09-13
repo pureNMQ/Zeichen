@@ -26,7 +26,7 @@ def test_user_profile_nickname_and_avatar_lifecycle(client, db, world, tmp_path,
     assert uploaded.status_code == 200, uploaded.text
     avatar_url = uploaded.json()["avatar"]
     assert avatar_url.startswith(f"/api/users/{world['admin'].id}/avatar?v=")
-    attachment = db.query(Attachment).filter_by(target_id=str(world["admin"].id)).one()
+    attachment = db.query(Attachment).filter_by(target_id=world["admin"].id).one()
     assert attachment.project_id is None
     assert Path(attachment.storage_path).read_bytes() == PNG
 

@@ -3,8 +3,8 @@
 契约(实现前已写入需求 197b5721 评论):
 
 - 模型:新表 ``task_blocker``,模型 ``TaskBlocker`` 从 ``app.models`` 导出。
-  边行字段:id / task_id(被阻塞任务,FK task.code CASCADE)/
-  blocker_id(前置任务,FK task.code CASCADE)/ project_id / created_by / created_at;
+  边行字段:id / task_id(被阻塞任务,FK task.id CASCADE)/
+  blocker_id(前置任务,FK task.id CASCADE)/ project_id / created_by / created_at;
   (task_id, blocker_id) 唯一(``uq_task_blocker_pair``);边行不软删,移除 = 删行。
 - service:``app.services.task_blockers``
   - ``is_blocked(prerequisite_statuses)`` 纯函数:任一前置状态 != "done" → True
@@ -43,13 +43,13 @@ def _confirmed_req(db: Session, world: dict, title="挂载需求"):
     from app.services import requirements as req_svc
 
     r = req_svc.create_requirement(db, world["admin"], world["project"].id, title)
-    req_svc.set_requirement_status(db, world["admin"], r.code, "backlog")
+    req_svc.set_requirement_status(db, world["admin"], r.id, "backlog")
     return r
 
 
 def make_task(db: Session, world: dict, title="任务", **kw) -> Task:
     if "requirement_id" not in kw:
-        kw["requirement_id"] = _confirmed_req(db, world).code
+        kw["requirement_id"] = _confirmed_req(db, world).id
     return task_svc.create_task(db, world["admin"], world["project"].id, title, **kw)
 
 
@@ -69,10 +69,9 @@ class TestTaskBlockerModel:
 
         assert TaskBlocker.__tablename__ == "task_blocker"
         cols = {c.name for c in TaskBlocker.__table__.columns}
-        assert {"task_id", "blocker_id", "project_id", "created_by", "created_at", "updated_at"} <= cols
+        assert {"id", "task_id", "blocker_id", "project_id", "created_by", "created_at"} <= cols
         fk_targets = {fk.target_fullname for fk in TaskBlocker.__table__.foreign_keys}
-        # ADR 0002:复合外键 (project_id, 短码) → task(project_id, code)
-        assert "task.project_id" in fk_targets and "task.code" in fk_targets
+        assert "task.id" in fk_targets
         pair_unique = [
             u for u in TaskBlocker.__table__.constraints if u.name == "uq_task_blocker_pair"
         ]
@@ -83,11 +82,11 @@ class TestTaskBlockerModel:
 
         a = make_task(db, world, "任务A")
         b = make_task(db, world, "任务B")
-        db.add(TaskBlocker(task_id=a.code, blocker_id=b.code, project_id=a.project_id))
+        db.add(TaskBlocker(task_id=a.id, blocker_id=b.id, project_id=a.project_id))
         db.flush()
         rows = db.query(TaskBlocker).all()
-        assert len(rows) == 1 and rows[0].task_id == a.code and rows[0].blocker_id == b.code
-        db.add(TaskBlocker(task_id=a.code, blocker_id=b.code, project_id=a.project_id))
+        assert len(rows) == 1 and rows[0].task_id == a.id and rows[0].blocker_id == b.id
+        db.add(TaskBlocker(task_id=a.id, blocker_id=b.id, project_id=a.project_id))
         with pytest.raises(IntegrityError):
             db.flush()
 
@@ -116,10 +115,10 @@ class TestAddBlocker:
         list_blockers = svc_task_blockers().list_blockers
         a = make_task(db, world, "任务A")
         b = make_task(db, world, "任务B")
-        add_blocker(db, world["admin"], a.code, b.code)
-        state = list_blockers(db, world["admin"], a.code)
+        add_blocker(db, world["admin"], a.id, b.id)
+        state = list_blockers(db, world["admin"], a.id)
         assert state["blocked"] is True
-        assert [i["id"] for i in state["items"]] == [b.code]
+        assert [i["id"] for i in state["items"]] == [b.id]
         assert state["items"][0]["title"] == "任务B"
         assert state["items"][0]["status"] == "backlog"
         assert state["items"][0]["resolved"] is False
@@ -128,7 +127,7 @@ class TestAddBlocker:
         add_blocker = svc_task_blockers().add_blocker
         a = make_task(db, world, "任务A")
         with pytest.raises(AppError) as e:
-            add_blocker(db, world["admin"], a.code, a.code)
+            add_blocker(db, world["admin"], a.id, a.id)
         assert e.value.code == "invalid_request"
 
     def test_add_blocker_rejects_cross_project(self, db: Session, world: dict):
@@ -140,38 +139,31 @@ class TestAddBlocker:
         from app.services import requirements as req_svc
         from app.services import tasks as svc
 
-        # 别项目需求直建模型,避免无项目上下文的消歧路径(两项目各有 REQ-1)
-        from app.models import Requirement as RequirementModel
-
-        foreign_req = RequirementModel(
-            project_id=other.id, code="REQ-1", title="别项目需求", status="backlog",
-            created_by=world["admin"].id,
-        )
-        db.add(foreign_req)
-        db.flush()
+        foreign_req = req_svc.create_requirement(db, world["admin"], other.id, "别项目需求")
+        req_svc.set_requirement_status(db, world["admin"], foreign_req.id, "backlog")
         foreign = svc.create_task(
-            db, world["admin"], other.id, "别项目的任务", requirement_id=foreign_req.code
+            db, world["admin"], other.id, "别项目的任务", requirement_id=foreign_req.id
         )
         with pytest.raises(AppError) as e:
-            add_blocker(db, world["admin"], a.code, foreign.code)
-        assert e.value.code in ("invalid_request", "not_found")
+            add_blocker(db, world["admin"], a.id, foreign.id)
+        assert e.value.code == "invalid_request"
 
     def test_add_blocker_rejects_duplicate(self, db: Session, world: dict):
         add_blocker = svc_task_blockers().add_blocker
         a = make_task(db, world, "任务A")
         b = make_task(db, world, "任务B")
-        add_blocker(db, world["admin"], a.code, b.code)
+        add_blocker(db, world["admin"], a.id, b.id)
         with pytest.raises(AppError) as e:
-            add_blocker(db, world["admin"], a.code, b.code)
+            add_blocker(db, world["admin"], a.id, b.id)
         assert e.value.code == "conflict"
 
     def test_add_blocker_rejects_two_node_cycle(self, db: Session, world: dict):
         add_blocker = svc_task_blockers().add_blocker
         a = make_task(db, world, "任务A")
         b = make_task(db, world, "任务B")
-        add_blocker(db, world["admin"], a.code, b.code)
+        add_blocker(db, world["admin"], a.id, b.id)
         with pytest.raises(AppError) as e:
-            add_blocker(db, world["admin"], b.code, a.code)
+            add_blocker(db, world["admin"], b.id, a.id)
         assert e.value.code == "conflict"
 
     def test_add_blocker_rejects_long_chain_cycle(self, db: Session, world: dict):
@@ -180,23 +172,23 @@ class TestAddBlocker:
         b = make_task(db, world, "B")
         c = make_task(db, world, "C")
         d = make_task(db, world, "D")
-        add_blocker(db, world["admin"], a.code, b.code)
-        add_blocker(db, world["admin"], b.code, c.code)
-        add_blocker(db, world["admin"], c.code, d.code)
+        add_blocker(db, world["admin"], a.id, b.id)
+        add_blocker(db, world["admin"], b.id, c.id)
+        add_blocker(db, world["admin"], c.id, d.id)
         with pytest.raises(AppError) as e:
-            add_blocker(db, world["admin"], d.code, a.code)
+            add_blocker(db, world["admin"], d.id, a.id)
         assert e.value.code == "conflict"
 
     def test_add_blocker_missing_or_deleted_blocker_not_found(self, db: Session, world: dict):
         add_blocker = svc_task_blockers().add_blocker
         a = make_task(db, world, "任务A")
         with pytest.raises(AppError) as e:
-            add_blocker(db, world["admin"], a.code, "TASK-999")
+            add_blocker(db, world["admin"], a.id, uuid.uuid4())
         assert e.value.code == "not_found"
         b = make_task(db, world, "待删除前置")
-        task_svc.delete_task(db, world["admin"], b.code)
+        task_svc.delete_task(db, world["admin"], b.id)
         with pytest.raises(AppError) as e:
-            add_blocker(db, world["admin"], a.code, b.code)
+            add_blocker(db, world["admin"], a.id, b.id)
         assert e.value.code == "not_found"
 
     def test_viewer_cannot_maintain_blockers(self, db: Session, world: dict):
@@ -204,7 +196,7 @@ class TestAddBlocker:
         a = make_task(db, world, "任务A")
         b = make_task(db, world, "任务B")
         with pytest.raises(AppError) as e:
-            add_blocker(db, world["member"], a.code, b.code)
+            add_blocker(db, world["member"], a.id, b.id)
         assert e.value.code == "permission_denied"
 
 
@@ -215,15 +207,15 @@ class TestSetBlockers:
         a = make_task(db, world, "任务A")
         b = make_task(db, world, "任务B")
         c = make_task(db, world, "任务C")
-        set_blockers(db, world["admin"], a.code, [b.code])
-        set_blockers(db, world["admin"], a.code, [b.code, c.code])
-        state = list_blockers(db, world["admin"], a.code)
-        assert {i["id"] for i in state["items"]} == {b.code, c.code}
-        set_blockers(db, world["admin"], a.code, [c.code])
-        state = list_blockers(db, world["admin"], a.code)
-        assert [i["id"] for i in state["items"]] == [c.code]
-        set_blockers(db, world["admin"], a.code, [])
-        state = list_blockers(db, world["admin"], a.code)
+        set_blockers(db, world["admin"], a.id, [b.id])
+        set_blockers(db, world["admin"], a.id, [b.id, c.id])
+        state = list_blockers(db, world["admin"], a.id)
+        assert {i["id"] for i in state["items"]} == {b.id, c.id}
+        set_blockers(db, world["admin"], a.id, [c.id])
+        state = list_blockers(db, world["admin"], a.id)
+        assert [i["id"] for i in state["items"]] == [c.id]
+        set_blockers(db, world["admin"], a.id, [])
+        state = list_blockers(db, world["admin"], a.id)
         assert state["blocked"] is False and state["items"] == []
 
     def test_set_blockers_validates_rules(self, db: Session, world: dict):
@@ -231,11 +223,11 @@ class TestSetBlockers:
         a = make_task(db, world, "任务A")
         b = make_task(db, world, "任务B")
         with pytest.raises(AppError) as e:
-            set_blockers(db, world["admin"], a.code, [a.code])
+            set_blockers(db, world["admin"], a.id, [a.id])
         assert e.value.code == "invalid_request"
-        set_blockers(db, world["admin"], a.code, [b.code])
+        set_blockers(db, world["admin"], a.id, [b.id])
         with pytest.raises(AppError) as e:
-            set_blockers(db, world["admin"], b.code, [a.code])
+            set_blockers(db, world["admin"], b.id, [a.id])
         assert e.value.code == "conflict"
 
 
@@ -246,12 +238,12 @@ class TestRemoveBlocker:
         list_blockers = svc_task_blockers().list_blockers
         a = make_task(db, world, "任务A")
         b = make_task(db, world, "任务B")
-        add_blocker(db, world["admin"], a.code, b.code)
-        remove_blocker(db, world["admin"], a.code, b.code)
-        state = list_blockers(db, world["admin"], a.code)
+        add_blocker(db, world["admin"], a.id, b.id)
+        remove_blocker(db, world["admin"], a.id, b.id)
+        state = list_blockers(db, world["admin"], a.id)
         assert state["blocked"] is False and state["items"] == []
         with pytest.raises(AppError) as e:
-            remove_blocker(db, world["admin"], a.code, b.code)
+            remove_blocker(db, world["admin"], a.id, b.id)
         assert e.value.code == "not_found"
 
 
@@ -261,11 +253,11 @@ class TestListBlockersResolvedState:
         list_blockers = svc_task_blockers().list_blockers
         a = make_task(db, world, "任务A")
         b = make_task(db, world, "任务B")
-        add_blocker(db, world["admin"], a.code, b.code)
-        task_svc.set_task_status(db, world["admin"], b.code, "done")
-        state = list_blockers(db, world["admin"], a.code)
+        add_blocker(db, world["admin"], a.id, b.id)
+        task_svc.set_task_status(db, world["admin"], b.id, "done")
+        state = list_blockers(db, world["admin"], a.id)
         assert state["blocked"] is False
-        assert state["items"][0]["id"] == b.code
+        assert state["items"][0]["id"] == b.id
         assert state["items"][0]["status"] == "done"
         assert state["items"][0]["resolved"] is True
 
@@ -279,18 +271,18 @@ class TestSoftDeletedBlockerContract:
         list_blockers = svc_task_blockers().list_blockers
         a = make_task(db, world, "任务A")
         b = make_task(db, world, "前置任务B")
-        add_blocker(db, world["admin"], a.code, b.code)
-        assert list_blockers(db, world["admin"], a.code)["blocked"] is True
+        add_blocker(db, world["admin"], a.id, b.id)
+        assert list_blockers(db, world["admin"], a.id)["blocked"] is True
 
-        task_svc.delete_task(db, world["admin"], b.code)
-        state = list_blockers(db, world["admin"], a.code)
+        task_svc.delete_task(db, world["admin"], b.id)
+        state = list_blockers(db, world["admin"], a.id)
         assert state["blocked"] is False
-        assert all(i["id"] != b.code for i in state["items"])
+        assert all(i["id"] != b.id for i in state["items"])
 
-        task_svc.restore_task(db, world["admin"], b.code)
-        state = list_blockers(db, world["admin"], a.code)
+        task_svc.restore_task(db, world["admin"], b.id)
+        state = list_blockers(db, world["admin"], a.id)
         assert state["blocked"] is True
-        assert [i["id"] for i in state["items"]] == [b.code]
+        assert [i["id"] for i in state["items"]] == [b.id]
 
 
 # ---------- g) 状态机隔离 ----------
@@ -302,11 +294,11 @@ class TestStateMachineIsolation:
         remove_blocker = svc_task_blockers().remove_blocker
         a = make_task(db, world, "任务A")
         b = make_task(db, world, "任务B")
-        task_svc.set_task_status(db, world["admin"], a.code, "in_progress")
-        add_blocker(db, world["admin"], a.code, b.code)
+        task_svc.set_task_status(db, world["admin"], a.id, "in_progress")
+        add_blocker(db, world["admin"], a.id, b.id)
         db.refresh(a)
         assert a.status == "in_progress"
-        remove_blocker(db, world["admin"], a.code, b.code)
+        remove_blocker(db, world["admin"], a.id, b.id)
         db.refresh(a)
         assert a.status == "in_progress"
 
@@ -315,23 +307,23 @@ class TestStateMachineIsolation:
         list_blockers = svc_task_blockers().list_blockers
         a = make_task(db, world, "任务A")
         b = make_task(db, world, "任务B")
-        add_blocker(db, world["admin"], a.code, b.code)
+        add_blocker(db, world["admin"], a.id, b.id)
         for target in ("in_progress", "done", "backlog"):
-            task_svc.set_task_status(db, world["admin"], a.code, target)
-            state = list_blockers(db, world["admin"], a.code)
-            assert [i["id"] for i in state["items"]] == [b.code]
+            task_svc.set_task_status(db, world["admin"], a.id, target)
+            state = list_blockers(db, world["admin"], a.id)
+            assert [i["id"] for i in state["items"]] == [b.id]
 
     def test_blocker_completion_does_not_change_blocked_task_status(self, db: Session, world: dict):
         add_blocker = svc_task_blockers().add_blocker
         list_blockers = svc_task_blockers().list_blockers
         a = make_task(db, world, "任务A")
         b = make_task(db, world, "任务B")
-        task_svc.set_task_status(db, world["admin"], a.code, "in_progress")
-        add_blocker(db, world["admin"], a.code, b.code)
-        task_svc.set_task_status(db, world["admin"], b.code, "done")
+        task_svc.set_task_status(db, world["admin"], a.id, "in_progress")
+        add_blocker(db, world["admin"], a.id, b.id)
+        task_svc.set_task_status(db, world["admin"], b.id, "done")
         db.refresh(a)
         assert a.status == "in_progress"
-        assert list_blockers(db, world["admin"], a.code)["blocked"] is False
+        assert list_blockers(db, world["admin"], a.id)["blocked"] is False
 
     def test_done_task_gaining_blockers_stays_done(self, db: Session, world: dict):
         """已完成任务的前置变化仍只是信息:不自动改状态,仅 blocked 提示为真。"""
@@ -339,11 +331,11 @@ class TestStateMachineIsolation:
         list_blockers = svc_task_blockers().list_blockers
         a = make_task(db, world, "任务A")
         b = make_task(db, world, "任务B")
-        task_svc.set_task_status(db, world["admin"], a.code, "done")
-        add_blocker(db, world["admin"], a.code, b.code)
+        task_svc.set_task_status(db, world["admin"], a.id, "done")
+        add_blocker(db, world["admin"], a.id, b.id)
         db.refresh(a)
         assert a.status == "done"
-        assert list_blockers(db, world["admin"], a.code)["blocked"] is True
+        assert list_blockers(db, world["admin"], a.id)["blocked"] is True
 
 
 # ---------- d) API 层 ----------
@@ -351,7 +343,7 @@ class TestStateMachineIsolation:
 
 class TestTaskBlockerApi:
     def _create(self, client, db, world, project_id, title, blocked_by=None):
-        rid = _confirmed_req(db, world, f"挂载:{title}").code
+        rid = _confirmed_req(db, world, f"挂载:{title}").id
         payload: dict = {"title": title, "requirement_id": str(rid)}
         if blocked_by is not None:
             payload["blocked_by"] = [str(x) for x in blocked_by]

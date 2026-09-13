@@ -72,12 +72,12 @@ def search_requirements(db: Session, project_ids: list[uuid.UUID], query: str) -
                 Requirement.description.ilike(f"%{needle}%"),
             ),
         )
-        .order_by(Requirement.updated_at.desc(), Requirement.code)
+        .order_by(Requirement.updated_at.desc(), Requirement.id)
     ).all()
     return [
         {
             "domain": "requirement",
-            "id": r.code,
+            "id": str(r.id),
             "project_id": str(r.project_id),
             "title": r.title,
             "summary": r.description or "",
@@ -100,12 +100,12 @@ def search_tasks(db: Session, project_ids: list[uuid.UUID], query: str) -> list[
                 Task.description.ilike(f"%{needle}%"),
             ),
         )
-        .order_by(Task.updated_at.desc(), Task.code)
+        .order_by(Task.updated_at.desc(), Task.id)
     ).all()
     return [
         {
             "domain": "task",
-            "id": t.code,
+            "id": str(t.id),
             "project_id": str(t.project_id),
             "title": t.title,
             "summary": t.description or "",
@@ -128,12 +128,12 @@ def search_documents(db: Session, project_ids: list[uuid.UUID], query: str) -> l
                 Document.content.ilike(f"%{needle}%"),
             ),
         )
-        .order_by(Document.updated_at.desc(), Document.code)
+        .order_by(Document.updated_at.desc(), Document.id)
     ).all()
     return [
         {
             "domain": "document",
-            "id": d.code,
+            "id": str(d.id),
             "project_id": str(d.project_id),
             "doc_type": d.doc_type,
             "title": d.title,

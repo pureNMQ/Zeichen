@@ -160,7 +160,7 @@ def test_error_four_piece_shape(client: TestClient, world: dict, db):
     assert resp.json() == {"code": "permission_denied", "message": resp.json()["message"]}
 
     # 不存在 → not_found(非成员视角 404,不泄露存在性)
-    resp = client.get("/api/requirements/REQ-999")
+    resp = client.get(f"/api/requirements/{uuid.uuid4()}")
     assert resp.status_code == 404
     assert resp.json()["code"] == "not_found"
 

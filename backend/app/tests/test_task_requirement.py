@@ -21,13 +21,11 @@ def _req(client: TestClient, pid: str, title: str) -> dict:
     resp = client.post(f"/api/projects/{pid}/requirements", json={"title": title})
     assert resp.status_code == 201, resp.text
     requirement = resp.json()
-    # 项目内确认端点:避免跨项目同码时的无上下文消歧(ADR 0002)
     resp = client.post(
-        f"/api/projects/{pid}/requirements/{requirement['id']}/status",
-        json={"status": "backlog"},
+        f"/api/requirements/{requirement['id']}/status", json={"status": "backlog"}
     )
     assert resp.status_code == 200, resp.text
-    return requirement
+    return resp.json()
 
 
 def _task(client: TestClient, pid: str, rid: str, title="任务") -> dict:
@@ -46,17 +44,10 @@ def test_create_requires_same_project_requirement(client: TestClient, world: dic
     assert resp.status_code == 400
     assert resp.json()["code"] == "invalid_request"
 
-    # 旧 UUID/非法格式 → invalid_request(ADR 0002 无 UUID 兼容)
+    # 不存在 → not_found
     resp = client.post(
         f"/api/projects/{pid}/tasks",
         json={"title": "幽灵任务", "requirement_id": str(uuid.uuid4())},
-    )
-    assert resp.status_code == 400
-    assert resp.json()["code"] == "invalid_request"
-    # 合法格式但不存在 → not_found
-    resp = client.post(
-        f"/api/projects/{pid}/tasks",
-        json={"title": "幽灵任务", "requirement_id": "REQ-999"},
     )
     assert resp.status_code == 404
     assert resp.json()["code"] == "not_found"
@@ -108,10 +99,9 @@ def test_cross_project_and_deleted_requirement_rejected(client: TestClient, worl
     r = _req(client, pid, "本需求")
     t = _task(client, pid, r["id"])
 
-    # ADR 0002:改指向按任务所在项目寻址;两项目各自 REQ-1 → 命中本项目的 r(项目内寻址)
     resp = client.patch(f"/api/tasks/{t['id']}", json={"requirement_id": r_other["id"]})
-    assert resp.status_code == 200
-    assert resp.json()["requirement_id"] == r["id"]
+    assert resp.status_code == 400
+    assert resp.json()["code"] == "invalid_request"
     assert client.get(f"/api/tasks/{t['id']}").json()["requirement_id"] == r["id"]
 
     r_dead = _req(client, pid, "将被删的需求")
@@ -168,9 +158,9 @@ def test_requirement_link_permissions(client: TestClient, world: dict, db: Sessi
     # 本人(agent,经服务层直接调用)可改指向,但置空被拒
     from app.services import tasks as task_svc
 
-    tid = t3["id"]
+    tid = uuid.UUID(t3["id"])
     got = task_svc.update_task(db, world["agent"], tid, requirement_id=r1["id"])
-    assert got.requirement_id == r1["id"]
+    assert str(got.requirement_id) == r1["id"]
     with pytest.raises(AppError) as e:
         task_svc.update_task(db, world["agent"], tid, requirement_id=None)
     assert e.value.code == "invalid_request"

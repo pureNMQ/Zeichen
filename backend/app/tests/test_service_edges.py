@@ -75,7 +75,7 @@ class TestPolymorphicEdges:
 
         r = req_svc.create_requirement(db, world["admin"], world["project"].id, "需求")
         with pytest.raises(AppError) as e:
-            poly_svc.create_reference(db, world["admin"], "requirement", r.code, "task", uuid.uuid4(), "teleports")
+            poly_svc.create_reference(db, world["admin"], "requirement", r.id, "task", uuid.uuid4(), "teleports")
         assert e.value.code == "invalid_request"
         with pytest.raises(AppError) as e:
             poly_svc.delete_reference(db, world["admin"], uuid.uuid4())
@@ -87,7 +87,7 @@ class TestPolymorphicEdges:
         activity = Activity(
             project_id=world["project"].id,
             target_type="project",
-            target_id=str(world["project"].id),
+            target_id=world["project"].id,
             action="seed",
             summary="无操作者",
         )
@@ -105,7 +105,7 @@ class TestNotificationEdges:
             project_id=world["project"].id,
             actor_id=None,
             target_type="project",
-            target_id=str(world["project"].id),
+            target_id=world["project"].id,
             action="seed",
             summary="x",
         )
@@ -124,7 +124,7 @@ class TestNotificationEdges:
                     user_id=world["member"].id,
                     actor_id=world["admin"].id,
                     target_type="project",
-                    target_id=str(world["project"].id),
+                    target_id=world["project"].id,
                     action="note",
                     summary=f"n{i}",
                 )

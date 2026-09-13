@@ -31,7 +31,7 @@ def _page_limit(limit: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_
 def list_children(
     project_id: uuid.UUID,
     module: str,
-    parent_id: str | None = None,
+    parent_id: uuid.UUID | None = None,
     cursor: str | None = None,
     limit: int = Depends(_page_limit),
     user: User = Depends(current_user),
@@ -57,7 +57,7 @@ def ancestors(
     project_id: uuid.UUID,
     module: str,
     node_kind: str,
-    node_id: str,
+    node_id: uuid.UUID,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -93,7 +93,7 @@ def create_directory(
 @router.get("/documents/{module}/{document_id}")
 def get_document(
     module: str,
-    document_id: str,
+    document_id: uuid.UUID,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -103,7 +103,7 @@ def get_document(
 @router.patch("/documents/{module}/{document_id}")
 def update_document(
     module: str,
-    document_id: str,
+    document_id: uuid.UUID,
     body: DocumentUpdate,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
@@ -117,7 +117,7 @@ def update_document(
 @router.post("/documents/{module}/{document_id}/move")
 def move_document(
     module: str,
-    document_id: str,
+    document_id: uuid.UUID,
     body: DocumentMove,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
@@ -129,7 +129,7 @@ def move_document(
 @router.get("/documents/{module}/{document_id}/delete-impact")
 def document_delete_impact(
     module: str,
-    document_id: str,
+    document_id: uuid.UUID,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -140,7 +140,7 @@ def document_delete_impact(
 @router.post("/documents/{module}/{document_id}/delete")
 def delete_document(
     module: str,
-    document_id: str,
+    document_id: uuid.UUID,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -152,7 +152,7 @@ def delete_document(
 @router.post("/documents/{module}/{document_id}/restore")
 def restore_document(
     module: str,
-    document_id: str,
+    document_id: uuid.UUID,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -166,7 +166,7 @@ def restore_document(
 @router.get("/documents/{module}/{document_id}/versions")
 def list_versions(
     module: str,
-    document_id: str,
+    document_id: uuid.UUID,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -176,7 +176,7 @@ def list_versions(
 @router.post("/documents/{module}/{document_id}/rollback")
 def rollback_document(
     module: str,
-    document_id: str,
+    document_id: uuid.UUID,
     body: RollbackBody,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
@@ -187,7 +187,7 @@ def rollback_document(
 @router.get("/documents/{module}/{document_id}/references")
 def document_references(
     module: str,
-    document_id: str,
+    document_id: uuid.UUID,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -197,7 +197,7 @@ def document_references(
 @router.get("/directories/{module}/{directory_id}")
 def get_directory(
     module: str,
-    directory_id: str,
+    directory_id: uuid.UUID,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -207,7 +207,7 @@ def get_directory(
 @router.patch("/directories/{module}/{directory_id}")
 def rename_directory(
     module: str,
-    directory_id: str,
+    directory_id: uuid.UUID,
     body: DirectoryRename,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
@@ -219,7 +219,7 @@ def rename_directory(
 @router.post("/directories/{module}/{directory_id}/move")
 def move_directory(
     module: str,
-    directory_id: str,
+    directory_id: uuid.UUID,
     body: DirectoryMove,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
@@ -231,7 +231,7 @@ def move_directory(
 @router.get("/directories/{module}/{directory_id}/delete-impact")
 def directory_delete_impact(
     module: str,
-    directory_id: str,
+    directory_id: uuid.UUID,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -242,7 +242,7 @@ def directory_delete_impact(
 @router.post("/directories/{module}/{directory_id}/delete")
 def delete_directory(
     module: str,
-    directory_id: str,
+    directory_id: uuid.UUID,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -254,7 +254,7 @@ def delete_directory(
 @router.post("/directories/{module}/{directory_id}/restore")
 def restore_directory(
     module: str,
-    directory_id: str,
+    directory_id: uuid.UUID,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:

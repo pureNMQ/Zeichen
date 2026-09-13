@@ -48,13 +48,6 @@ def _metadata(actor: User, anchor: dict | None) -> dict:
         entity_type, entity_id = anchor.get("entity_type"), anchor.get("entity_id")
         if not entity_type or not entity_id:
             raise invalid_request("锚点必须同时提供 entity_type 和 entity_id")
-        # ADR 0002:实体锚点新写入一律用短码;project 锚点保持 UUID
-        if entity_type in ("requirement", "task", "document"):
-            from .short_codes import require_valid_code
-
-            entity_id = require_valid_code(
-                entity_type if entity_type != "document" else "document", str(entity_id)
-            )
         result["entity_type"] = entity_type
         result["entity_id"] = str(entity_id)
     return result

@@ -93,9 +93,8 @@ def _record_purge_activities(db: Session, cutoff: datetime) -> int:
             "document": Document,
             "repository": Repository,
         }[target_type]
-        id_column = model.code if target_type != "repository" else model.id
         rows = db.execute(
-            select(id_column, model.project_id).where(*_expired(model.deleted_at, cutoff))
+            select(model.id, model.project_id).where(*_expired(model.deleted_at, cutoff))
         ).all()
         for entity_id, project_id in rows:
             record_activity(
@@ -131,18 +130,14 @@ def purge_soft_deleted(
     # 版本链随文档一并物理删除(DB 无 FK 级联执行时也要成立,显式删);
     # 各 bulk delete 均以 synchronize_session="fetch" 把删除行同步移出
     # identity map(属性保留可读),避免同会话旧对象命中已删行缓存
-    doc_rows = db.execute(
-        select(Document.project_id, Document.code).where(*_expired(Document.deleted_at, cutoff))
+    doc_ids = db.scalars(
+        select(Document.id).where(*_expired(Document.deleted_at, cutoff))
     ).all()
-    if doc_rows:
-        from sqlalchemy import or_, tuple_
-
-        conds = [
-            (DocumentVersion.project_id == pid) & (DocumentVersion.document_id == code)
-            for pid, code in doc_rows
-        ]
+    if doc_ids:
         report["document_version"] = db.execute(
-            delete(DocumentVersion).where(or_(*conds)).execution_options(synchronize_session="fetch")
+            delete(DocumentVersion)
+            .where(DocumentVersion.document_id.in_(doc_ids))
+            .execution_options(synchronize_session="fetch")
         ).rowcount
     report["document"] = db.execute(
         delete(Document)

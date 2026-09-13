@@ -71,28 +71,19 @@ def test_mcp_task_description_plain_text_semantics(mcp_server: dict):
 
 def test_mcp_legacy_markdown_description_read_unaffected_and_normalized_on_update(mcp_server: dict):
     client = _client(mcp_server)
-    pid = mcp_server["project_id"]
+    pid = uuid.UUID(mcp_server["project_id"])
     legacy = "# 存量标题\n- 列表 **加粗**"
 
     db_path = mcp_server["log_file"].parent / "e2e.db"
     engine = create_engine(f"sqlite:///{db_path.as_posix()}", connect_args={"timeout": 10})
     with SASession(engine) as s:
-        # 分配短码(ADR 0002):先取项目当前计数器值
-        from app.models import ShortCodeCounter
-
-        counter = s.get(ShortCodeCounter, (uuid.UUID(str(pid)), "requirement"))
-        seq = (counter.last_seq if counter else 0) + 1
-        code = f"REQ-{seq}"
         row = ReqModel(
-            project_id=uuid.UUID(str(pid)), code=code, title="存量需求", description=legacy,
+            project_id=pid, title="存量需求", description=legacy,
             status="backlog", created_by=uuid.UUID(mcp_server["agent_id"]),
         )
         s.add(row)
         s.commit()
-        if counter:
-            counter.last_seq = seq
-            s.commit()
-        rid = code
+        rid = str(row.id)
     engine.dispose()
 
     # 存量 Markdown 读取原样返回(不迁移、不丢数据)

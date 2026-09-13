@@ -17,7 +17,7 @@ from app.tests.conftest import make_user
 def make_requirement(db: Session, world: dict, title: str = "需求") -> dict:
     """由 agent(editor)创建需求,使 admin(owner) 成为通知接收者。"""
     req = req_svc.create_requirement(db, world["agent"], world["project"].id, title)
-    req_svc.set_requirement_status(db, world["agent"], req.code, "backlog")
+    req_svc.set_requirement_status(db, world["agent"], req.id, "backlog")
     return req_svc._requirement_dict(db, req)
 
 
@@ -28,7 +28,7 @@ class TestNotificationRelevantMembers:
         n = db.scalar(
             select(Notification).where(
                 Notification.user_id == world["admin"].id,
-                Notification.target_id == r["id"],
+                Notification.target_id == uuid.UUID(r["id"]),
             )
         )
         assert n is not None
@@ -45,14 +45,14 @@ class TestNotificationRelevantMembers:
             db,
             task_svc.create_task(
                 db, world["admin"], world["project"].id, "指派任务", None,
-                r["id"], bob.id,
+                uuid.UUID(r["id"]), bob.id,
             ),
         )
         # bob 被指派,收到 create 通知(任务创建者 admin 是 owner 已收)
         n = db.scalar(
             select(Notification).where(
                 Notification.user_id == bob.id,
-                Notification.target_id == t["id"],
+                Notification.target_id == uuid.UUID(t["id"]),
             )
         )
         assert n is not None
@@ -77,13 +77,13 @@ class TestNotificationRelevantMembers:
         db.commit()
         # bob 评论需求
         r = make_requirement(db, world)
-        poly.create_comment(db, bob, "requirement", r["id"], "bob 参与")
+        poly.create_comment(db, bob, "requirement", uuid.UUID(r["id"]), "bob 参与")
         # 之后 admin 改状态,bob 应收到通知
-        req_svc.set_requirement_status(db, world["admin"], r["id"], "in_progress")
+        req_svc.set_requirement_status(db, world["admin"], uuid.UUID(r["id"]), "in_progress")
         n = db.scalar(
             select(Notification).where(
                 Notification.user_id == bob.id,
-                Notification.target_id == r["id"],
+                Notification.target_id == uuid.UUID(r["id"]),
                 Notification.action == "status",
             )
         )
@@ -92,7 +92,7 @@ class TestNotificationRelevantMembers:
     def test_viewer_receives_nothing_for_unrelated(self, db: Session, world: dict):
         # member 是 viewer,不是创建者/评论者/被指派者,需求变更不应通知
         r = make_requirement(db, world)
-        req_svc.set_requirement_status(db, world["agent"], r["id"], "in_progress")
+        req_svc.set_requirement_status(db, world["agent"], uuid.UUID(r["id"]), "in_progress")
         n = db.scalar(
             select(Notification).where(Notification.user_id == world["member"].id)
         )
@@ -102,11 +102,11 @@ class TestNotificationRelevantMembers:
         other = world["project"]
         carol = make_user(db, "carol", role="admin")
         r = make_requirement(db, world)
-        req_svc.set_requirement_status(db, world["agent"], r["id"], "in_progress")
+        req_svc.set_requirement_status(db, world["agent"], uuid.UUID(r["id"]), "in_progress")
         n = db.scalar(
             select(Notification).where(
                 Notification.user_id == carol.id,
-                Notification.target_id == r["id"],
+                Notification.target_id == uuid.UUID(r["id"]),
             )
         )
         assert n is not None

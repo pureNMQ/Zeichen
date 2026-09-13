@@ -95,7 +95,7 @@ def test_repository_permissions_and_activity(client, db, world):
     db.commit()
     _login_admin(client)
     repository = _create(client, str(world["project"].id))
-    assert db.query(Activity).filter_by(target_type="repository", target_id=repository["id"], action="create").count() == 1
+    assert db.query(Activity).filter_by(target_type="repository", target_id=uuid.UUID(repository["id"]), action="create").count() == 1
 
     login(client, "bob", "bob-pass-1")
     assert client.get(f"/api/projects/{world['project'].id}/repositories").status_code == 200

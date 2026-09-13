@@ -104,8 +104,8 @@ def _confirmed_requirement(world, db) -> "uuid.UUID":
     from app.services.requirements import set_requirement_status
 
     r = create_requirement(db, world["admin"], world["project"].id, "挂载需求")
-    set_requirement_status(db, world["admin"], r.code, "backlog")
-    return r.code
+    set_requirement_status(db, world["admin"], r.id, "backlog")
+    return r.id
 
 
 def test_create_requirement_markdown_normalized(world, db):
@@ -133,11 +133,11 @@ def test_create_task_markdown_normalized_and_html_rejected(world, db):
 
 def test_update_requirement_and_task_apply_plain_text_rules(world, db):
     r = create_requirement(db, world["admin"], world["project"].id, "需求A", "原描述")
-    updated = update_requirement(db, world["admin"], r.code, None, "**新描述**")
+    updated = update_requirement(db, world["admin"], r.id, None, "**新描述**")
     assert updated.description == "新描述"
     rid = _confirmed_requirement(world, db)
     t = create_task(db, world["admin"], world["project"].id, "任务A", "原任务描述", rid)
-    ut = update_task(db, world["admin"], t.code, description="`ls` [列表](https://example.com/ls)")
+    ut = update_task(db, world["admin"], t.id, description="`ls` [列表](https://example.com/ls)")
     assert ut.description == "ls 列表"
 
 
@@ -147,7 +147,6 @@ def test_update_requirement_and_task_apply_plain_text_rules(world, db):
 def _legacy_requirement(db, world, description: str) -> Requirement:
     r = Requirement(
         project_id=world["project"].id,
-        code="REQ-90",
         title="存量需求",
         description=description,
         status="backlog",
@@ -162,7 +161,6 @@ def _legacy_task(db, world, description: str) -> Task:
     rid = _confirmed_requirement(world, db)
     t = Task(
         project_id=world["project"].id,
-        code="TASK-90",
         title="存量任务",
         description=description,
         status="backlog",
@@ -177,30 +175,30 @@ def _legacy_task(db, world, description: str) -> Task:
 def test_legacy_markdown_requirement_description_read_unaffected(world, db):
     legacy = "# 大标题\n- 列表一 **加粗**\n- 列表二"
     r = _legacy_requirement(db, world, legacy)
-    assert get_requirement(db, world["admin"], r.code).description == legacy
+    assert get_requirement(db, world["admin"], r.id).description == legacy
 
 
 def test_legacy_markdown_task_description_read_unaffected(world, db):
     legacy = "## 任务\n1. 步骤一 `a`\n2. 步骤二"
     t = _legacy_task(db, world, legacy)
-    assert get_task(db, world["admin"], t.code).description == legacy
+    assert get_task(db, world["admin"], t.id).description == legacy
 
 
 def test_requirement_title_only_update_keeps_legacy_markdown(world, db):
     legacy = "**加粗** 与 `代码`"
     r = _legacy_requirement(db, world, legacy)
-    update_requirement(db, world["admin"], r.code, "只改标题", None)
+    update_requirement(db, world["admin"], r.id, "只改标题", None)
     assert r.title == "只改标题"
     assert r.description == legacy
 
 
 def test_legacy_markdown_normalized_when_description_updated(world, db):
     r = _legacy_requirement(db, world, "**旧** 描述")
-    updated = update_requirement(db, world["admin"], r.code, None, "[新](https://example.com/new) **描述**")
+    updated = update_requirement(db, world["admin"], r.id, None, "[新](https://example.com/new) **描述**")
     assert updated.description == "新 描述"
 
 
 def test_legacy_markdown_task_normalized_when_description_updated(world, db):
     t = _legacy_task(db, world, "~~旧~~ 任务")
-    updated = update_task(db, world["admin"], t.code, description="**新** 任务")
+    updated = update_task(db, world["admin"], t.id, description="**新** 任务")
     assert updated.description == "新 任务"

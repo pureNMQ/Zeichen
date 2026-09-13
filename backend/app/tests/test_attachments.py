@@ -32,7 +32,7 @@ def make_requirement(db: Session, world: dict) -> dict:
 class TestAttachmentService:
     def test_upload_and_download(self, db: Session, world: dict, isolated_storage):
         r = make_requirement(db, world)
-        rid = r["id"]
+        rid = uuid.UUID(r["id"])
         a = svc.upload(db, world["agent"], world["project"].id, "requirement", rid, "note.txt", b"hello")
         assert a.size == 5
         file_name, data, _ = svc.download(db, world["member"], a.id)
@@ -45,24 +45,24 @@ class TestAttachmentService:
     def test_upload_permission_viewer_denied(self, db: Session, world: dict, isolated_storage):
         r = make_requirement(db, world)
         with pytest.raises(AppError) as e:
-            svc.upload(db, world["member"], world["project"].id, "requirement", r["id"], "a.txt", b"x")
+            svc.upload(db, world["member"], world["project"].id, "requirement", uuid.UUID(r["id"]), "a.txt", b"x")
         assert e.value.code == "permission_denied"
 
     def test_empty_file_rejected(self, db: Session, world: dict, isolated_storage):
         r = make_requirement(db, world)
         with pytest.raises(AppError) as e:
-            svc.upload(db, world["agent"], world["project"].id, "requirement", r["id"], "empty.bin", b"")
+            svc.upload(db, world["agent"], world["project"].id, "requirement", uuid.UUID(r["id"]), "empty.bin", b"")
         assert e.value.code == "invalid_request"
 
     def test_max_file_size_conflict(self, db: Session, world: dict, isolated_storage):
         r = make_requirement(db, world)
         with pytest.raises(AppError) as e:
-            svc.upload(db, world["agent"], world["project"].id, "requirement", r["id"], "big.bin", b"x" * 8000)
+            svc.upload(db, world["agent"], world["project"].id, "requirement", uuid.UUID(r["id"]), "big.bin", b"x" * 8000)
         assert e.value.code == "conflict"
 
     def test_project_quota_conflict(self, db: Session, world: dict, isolated_storage):
         r = make_requirement(db, world)
-        rid = r["id"]
+        rid = uuid.UUID(r["id"])
         svc.upload(db, world["agent"], world["project"].id, "requirement", rid, "a.bin", b"x" * 3000)
         # 配额 6000,已用 3000,再传 4000 超限
         with pytest.raises(AppError) as e:
@@ -79,13 +79,12 @@ class TestAttachmentService:
             db, req_svc.create_requirement(db, world["admin"], other.id, "别的项目")
         )
         with pytest.raises(AppError) as e:
-            svc.upload(db, world["agent"], world["project"].id, "requirement", r["id"], "a.txt", b"x")
-        # 他项目同码在本项目内寻址不存在 → not_found(ADR 0002 项目内短码)
-        assert e.value.code == "not_found"
+            svc.upload(db, world["agent"], world["project"].id, "requirement", uuid.UUID(r["id"]), "a.txt", b"x")
+        assert e.value.code == "invalid_request"
 
     def test_list_and_delete_restore(self, db: Session, world: dict, isolated_storage):
         r = make_requirement(db, world)
-        rid = r["id"]
+        rid = uuid.UUID(r["id"])
         svc.upload(db, world["agent"], world["project"].id, "requirement", rid, "one.txt", b"1")
         svc.upload(db, world["agent"], world["project"].id, "requirement", rid, "two.txt", b"22")
         page = svc.list_attachments(db, world["member"], "requirement", rid, None, 20)
@@ -99,7 +98,7 @@ class TestAttachmentService:
 
     def test_delete_follows_parent(self, db: Session, world: dict, isolated_storage):
         r = make_requirement(db, world)
-        rid = r["id"]
+        rid = uuid.UUID(r["id"])
         svc.upload(db, world["agent"], world["project"].id, "requirement", rid, "doc.pdf", b"%PDF")
         from app.services import requirements as req_svc
 
@@ -109,7 +108,7 @@ class TestAttachmentService:
 
     def test_download_soft_deleted_not_found(self, db: Session, world: dict, isolated_storage):
         r = make_requirement(db, world)
-        a = svc.upload(db, world["agent"], world["project"].id, "requirement", r["id"], "gone.txt", b"x")
+        a = svc.upload(db, world["agent"], world["project"].id, "requirement", uuid.UUID(r["id"]), "gone.txt", b"x")
         svc.soft_delete(db, world["admin"], a.id)
         with pytest.raises(AppError) as e:
             svc.download(db, world["admin"], a.id)
@@ -124,17 +123,17 @@ class TestAttachmentService:
     def test_empty_file_name_rejected(self, db: Session, world: dict, isolated_storage):
         r = make_requirement(db, world)
         with pytest.raises(AppError) as e:
-            svc.upload(db, world["agent"], world["project"].id, "requirement", r["id"], "   ", b"x")
+            svc.upload(db, world["agent"], world["project"].id, "requirement", uuid.UUID(r["id"]), "   ", b"x")
         assert e.value.code == "invalid_request"
 
     def test_upload_missing_target_not_found(self, db: Session, world: dict, isolated_storage):
         with pytest.raises(AppError) as e:
-            svc.upload(db, world["agent"], world["project"].id, "requirement", "REQ-999", "a.txt", b"x")
+            svc.upload(db, world["agent"], world["project"].id, "requirement", uuid.uuid4(), "a.txt", b"x")
         assert e.value.code == "not_found"
 
     def test_download_missing_file_not_found(self, db: Session, world: dict, isolated_storage):
         r = make_requirement(db, world)
-        a = svc.upload(db, world["agent"], world["project"].id, "requirement", r["id"], "lost.bin", b"x")
+        a = svc.upload(db, world["agent"], world["project"].id, "requirement", uuid.UUID(r["id"]), "lost.bin", b"x")
         svc._attachment_path(a.project_id, a.id).unlink()
         with pytest.raises(AppError) as e:
             svc.download(db, world["member"], a.id)
@@ -147,7 +146,7 @@ class TestAttachmentService:
 
     def test_restore_only_for_deleted(self, db: Session, world: dict, isolated_storage):
         r = make_requirement(db, world)
-        a = svc.upload(db, world["agent"], world["project"].id, "requirement", r["id"], "keep.txt", b"x")
+        a = svc.upload(db, world["agent"], world["project"].id, "requirement", uuid.UUID(r["id"]), "keep.txt", b"x")
         with pytest.raises(AppError) as e:
             svc.restore(db, world["admin"], a.id)
         assert e.value.code == "not_found"
@@ -192,7 +191,7 @@ class TestAttachmentMcpPayload:
         import base64
 
         r = make_requirement(db, world)
-        rid = r["id"]
+        rid = uuid.UUID(r["id"])
         raw = b"\x89PNG\r\n\x1a\n fake-image-bytes " * 20
 
         # 模拟 MCP 层行为:data 是 base64 字符串,解码后传给 service
