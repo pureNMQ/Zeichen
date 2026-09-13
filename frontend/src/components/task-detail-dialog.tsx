@@ -144,8 +144,8 @@ export function TaskDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
+      <DialogContent className="flex max-h-[85svh] flex-col overflow-hidden sm:max-w-2xl">
+        <DialogHeader className="shrink-0">
           <DialogTitle className="flex items-center gap-2 pr-8">
             <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">{t.id}</span>
             <span className="truncate">{t.title}</span>
@@ -154,7 +154,7 @@ export function TaskDetailDialog({
           <DialogDescription className="sr-only">任务详情</DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
           {t.description && <p className="text-sm text-muted-foreground">{t.description}</p>}
 
           {t.blocked && (
@@ -295,7 +295,7 @@ export function TaskDetailDialog({
 
           <ErrorNotification message={error} />
 
-          <div className="max-h-56 overflow-y-auto rounded-lg border p-2">
+          <div className="rounded-lg border p-2">
             <ActivityStream targetType="task" targetId={t.id} />
           </div>
         </div>

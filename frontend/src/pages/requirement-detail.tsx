@@ -7,6 +7,7 @@ import { ActivityStream } from '@/components/activity-stream'
 import { AttachmentList } from '@/components/attachment-list'
 import { CommentStream } from '@/components/comment-stream'
 import { CreateTaskDialog } from '@/components/create-task-dialog'
+import { Kanban } from '@/components/kanban'
 import { TaskDetailDialog } from '@/components/task-detail-dialog'
 import { TaskRefLink } from '@/components/task-ref-link'
 import { StatusBadge } from '@/components/status-badge'
@@ -33,6 +34,7 @@ import {
   type ReferenceRow,
   type RequirementRow,
   type TaskRow,
+  type WorkflowStatus,
 } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { useCurrentProject, useProjectRole } from '@/lib/current-project'
@@ -49,6 +51,79 @@ function referenceHref(type: string, id: string, module?: string | null) {
 // 旧 UUID 标识(迁移前书签/引用)→ 引导提示(ADR 0002 §6:不做跳转)
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
+// 任务看板列(ADR 0003 四态):已取消列随「隐藏已取消」开关显隐
+const TASK_BOARD_COLUMNS: WorkflowStatus[] = ['backlog', 'in_progress', 'done']
+const TASK_BOARD_COLUMNS_ALL: WorkflowStatus[] = ['backlog', 'in_progress', 'done', 'cancelled']
+
+interface TaskCardProps {
+  task: TaskRow
+  canEdit: boolean
+  onOpen: (taskId: string) => void
+  onStatus: (task: TaskRow, status: string) => void
+  onClaim: (taskId: string) => void
+  onDelete: (task: TaskRow) => void
+}
+
+function TaskCard({ task: t, canEdit, onOpen, onStatus, onClaim, onDelete }: TaskCardProps) {
+  const { user } = useAuth()
+  const role = useProjectRole()
+  const canStatus = canSetTaskStatus(t, user, role)
+  return (
+    <Card>
+      <CardContent className="space-y-2 p-3">
+        <button
+          type="button"
+          className="block w-full text-left text-sm font-medium hover:text-primary"
+          onClick={() => onOpen(t.id)}
+          aria-label={`打开任务 ${t.title}`}
+        >
+          <span className="mr-1.5 rounded bg-muted px-1 py-0.5 font-mono text-[10px] text-muted-foreground">{t.id}</span>
+          {t.title}
+        </button>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <StatusSelect
+            value={t.status}
+            statuses={TASK_STATUSES}
+            onSelect={(s) => onStatus(t, s)}
+            disabled={!canStatus}
+          />
+          {t.blocked && <Badge variant="destructive">受阻</Badge>}
+          {t.assignee && (
+            <Badge variant="outline" className="gap-1.5">
+              <UserAvatar user={{ id: t.assignee_id, username: t.assignee, avatar: t.assignee_avatar }} className="h-4 w-4 text-[9px]" />
+              {t.assignee}
+            </Badge>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5">
+          {canEdit && !t.assignee_id && t.status !== 'done' && t.status !== 'cancelled' && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 px-2 text-xs"
+              onClick={() => onClaim(t.id)}
+            >
+              <UserPlus className="mr-1 h-3 w-3" />
+              认领
+            </Button>
+          )}
+          {canEdit && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2 text-xs text-muted-foreground hover:text-destructive"
+              onClick={() => onDelete(t)}
+            >
+              <Trash2 className="mr-1 h-3 w-3" />
+              删除
+            </Button>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
 function Guide({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex flex-col items-center gap-3 py-16 text-muted-foreground">
@@ -61,7 +136,6 @@ function Guide({ children }: { children: React.ReactNode }) {
 export function RequirementDetailPage() {
   const { id = '' } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
-  const { user } = useAuth()
   const qc = useQueryClient()
   const role = useProjectRole()
   const { currentProject, isLoading: cpLoading, selectProject } = useCurrentProject()
@@ -262,59 +336,27 @@ export function RequirementDetailPage() {
               {showCancelled ? '暂无任务' : '暂无任务(已取消默认隐藏)'}
             </p>
           )}
-          {visibleTasks.map((t) => {
-            const canStatus = canSetTaskStatus(t, user, role)
-            return (
-              <div key={t.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-2.5 text-sm">
-                <button
-                  type="button"
-                  className="min-w-0 flex-1 truncate text-left hover:text-primary"
-                  onClick={() => openTask(t.id)}
-                  aria-label={`打开任务 ${t.title}`}
-                >
-                  <span className="mr-1.5 rounded bg-muted px-1 py-0.5 font-mono text-[10px] text-muted-foreground">{t.id}</span>
-                  {t.title}
-                </button>
-                <span className="flex flex-wrap items-center gap-1.5">
-                  {t.blocked && <Badge variant="destructive">受阻</Badge>}
-                  {t.assignee && (
-                    <Badge variant="outline" className="gap-1.5">
-                      <UserAvatar user={{ id: t.assignee_id, username: t.assignee, avatar: t.assignee_avatar }} className="h-4 w-4 text-[9px]" />
-                      {t.assignee}
-                    </Badge>
-                  )}
-                  <StatusSelect
-                    value={t.status}
-                    statuses={TASK_STATUSES}
-                    onSelect={(s) => void changeTaskStatus(t, s)}
-                    disabled={!canStatus}
-                  />
-                  {canEdit && !t.assignee_id && t.status !== 'done' && t.status !== 'cancelled' && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-6 px-2 text-xs"
-                      onClick={() => void claimPanelTask(t.id)}
-                    >
-                      <UserPlus className="mr-1 h-3 w-3" />
-                      认领
-                    </Button>
-                  )}
-                  {canEdit && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 px-2 text-xs text-muted-foreground hover:text-destructive"
-                      onClick={() => setDeleteTarget(t)}
-                    >
-                      <Trash2 className="mr-1 h-3 w-3" />
-                      删除
-                    </Button>
-                  )}
-                </span>
-              </div>
-            )
-          })}
+          {!isPending && visibleTasks.length > 0 && (
+            <Kanban
+              items={visibleTasks}
+              canDrag={canEdit}
+              columns={showCancelled ? TASK_BOARD_COLUMNS_ALL : TASK_BOARD_COLUMNS}
+              onMove={(taskId, to) => {
+                const target = allTasks.find((x) => x.id === taskId)
+                if (target) void changeTaskStatus(target, to)
+              }}
+              renderCard={(t) => (
+                <TaskCard
+                  task={t}
+                  canEdit={canEdit}
+                  onOpen={openTask}
+                  onStatus={(task, s) => void changeTaskStatus(task, s)}
+                  onClaim={(taskId) => void claimPanelTask(taskId)}
+                  onDelete={setDeleteTarget}
+                />
+              )}
+            />
+          )}
         </CardContent>
       </Card>
 

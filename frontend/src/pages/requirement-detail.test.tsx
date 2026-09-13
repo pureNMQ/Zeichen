@@ -258,7 +258,8 @@ describe('需求详情任务面板(ADR 0003)', () => {
     renderDetail()
     await switchProject()
     const user = (await import('@testing-library/user-event')).default
-    await user.click(screen.getByRole('button', { name: /认领/ }))
+    // 看板拖拽包装层(role=button)的可访问名包含整卡文本,动作按钮用精确名匹配
+    await user.click(screen.getAllByRole('button', { name: '认领' })[0])
     expect(await screen.findByText('任务已被认领')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '关闭提示' }))
     expect(screen.queryByText('任务已被认领')).not.toBeInTheDocument()
@@ -279,7 +280,7 @@ describe('需求详情任务面板(ADR 0003)', () => {
     renderDetail()
     await switchProject()
     const user = (await import('@testing-library/user-event')).default
-    await user.click(screen.getAllByRole('button', { name: /删除/ })[0])
+    await user.click(screen.getAllByRole('button', { name: '删除' })[0])
     expect(await screen.findByText('确认删除任务「实现登录页」?删除为软删,可从恢复入口找回。')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '确认删除' }))
     expect(api.post).toHaveBeenCalledWith('/tasks/t1/delete')
@@ -298,6 +299,41 @@ describe('需求详情任务面板(ADR 0003)', () => {
       description: null,
       requirement_id: 'r1',
     })
+  })
+
+  it('任务面板以看板分列展示:默认待办/实现中/已完成三列,已取消列随开关显隐', async () => {
+    renderDetail()
+    await switchProject()
+    expect(screen.getAllByText('待办').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('实现中').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('已完成').length).toBeGreaterThan(0)
+    expect(screen.queryAllByText('已取消')).toHaveLength(0)
+    const user = (await import('@testing-library/user-event')).default
+    await user.click(screen.getByRole('button', { name: /隐藏已取消/ }))
+    expect(screen.getAllByText('已取消').length).toBeGreaterThan(0)
+    expect(screen.getByText('废弃方案')).toBeInTheDocument()
+  })
+
+  it('任务卡状态下拉改状态走任务状态端点', async () => {
+    vi.mocked(api.post).mockResolvedValue({ ok: true })
+    renderDetail()
+    await switchProject()
+    const user = (await import('@testing-library/user-event')).default
+    const combo = screen.getAllByRole('combobox', { name: '状态' })[1]
+    await user.click(combo)
+    await user.click(await screen.findByRole('option', { name: '已完成' }))
+    expect(api.post).toHaveBeenCalledWith('/tasks/t1/status', { status: 'done' })
+  })
+
+  it('任务详情弹窗加宽且限高内部滚动(不溢出视口)', async () => {
+    renderDetail()
+    await switchProject()
+    const user = (await import('@testing-library/user-event')).default
+    await user.click(screen.getByRole('button', { name: '打开任务 实现登录页' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog.className).toContain('sm:max-w-2xl')
+    expect(dialog.className).toContain('max-h-[85svh]')
+    expect(dialog.className).toContain('overflow-hidden')
   })
 
   it('?task= 深链定位任务弹窗(通知/搜索跳转)', async () => {
