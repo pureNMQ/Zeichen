@@ -170,14 +170,20 @@ def execute(db: Session, job_id: uuid.UUID, client: CogneeClient | None = None) 
         job.status = "completed"
         job.result = _json_safe(result)
     except AppError as exc:
-        # Cognee returns {} when a server-side stale lock already exists. It
-        # is not this job's successful completion and cannot be auto-retried.
+        # 失败路径可能处于事务中止态:先回滚再改状态,否则 finally 的 commit 会以
+        # InFailedSqlTransaction 二次崩溃并带垮整个 worker 循环(2026-09-14 实证)
+        db.rollback()
+        job = db.get(MemoryImproveJob, job_id)
         job.status = "upstream_busy" if exc.code == "conflict" else "failed"
         job.error = exc.message
     except TimeoutError:
+        db.rollback()
+        job = db.get(MemoryImproveJob, job_id)
         job.status = "timed_out"
         job.error = "等待 Cognee 超过任务时限；远端执行状态未知，未自动重试"
     except Exception as exc:  # pragma: no cover - provider-specific failures
+        db.rollback()
+        job = db.get(MemoryImproveJob, job_id)
         job.status = "failed"
         job.error = str(exc)[:2000]
     finally:

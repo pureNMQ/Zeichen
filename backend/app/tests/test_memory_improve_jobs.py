@@ -127,3 +127,24 @@ def test_submit_integrity_error_race_falls_back_to_active_job(db, world, monkeyp
 
     assert result["status"] == "queued"
     assert db.query(MemoryImproveJob).count() == 1
+
+
+def test_execute_survives_aborted_transaction(db, world, monkeypatch):
+    """失败路径若已处事务中止态,必须先回滚再落状态(2026-09-14 worker 二次崩溃实证)。"""
+    provision(db, world)
+    submitted = svc.submit(db, world["admin"], world["project"].id, world["agent"].id, "s")
+    svc.claim_next(db)
+
+    from sqlalchemy import text
+
+    def abort_and_raise(*args, **kwargs):
+        try:
+            db.execute(text("SELECT * FROM nonexistent_table_purposely"))
+        except Exception:
+            pass  # 故意制造事务中止态(不同后端报错类型不同)
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(memory_svc, "improve", abort_and_raise)
+    result = svc.execute(db, uuid.UUID(submitted["id"]), FakeCognee())
+    assert result["status"] == "failed"
+    assert result["error"] == "boom"
