@@ -110,7 +110,7 @@ def update_document(
 ) -> dict:
     document = service.get_document(db, user, document_id, module)
     metadata = body.metadata if "metadata" in body.model_fields_set else service._UNSET
-    saved, warning = service.update_document(db, user, document.id, body.title, body.content, metadata)
+    saved, warning = service.update_document(db, user, document.code, body.title, body.content, metadata)
     return service._document_dict(db, saved, warning)
 
 
@@ -123,7 +123,7 @@ def move_document(
     db: Session = Depends(get_db),
 ) -> dict:
     document = service.get_document(db, user, document_id, module)
-    return service._document_dict(db, service.move_document(db, user, document.id, body.parent_id, body.directory_id))
+    return service._document_dict(db, service.move_document(db, user, document.code, body.parent_id, body.directory_id))
 
 
 @router.get("/documents/{module}/{document_id}/delete-impact")
@@ -134,7 +134,7 @@ def document_delete_impact(
     db: Session = Depends(get_db),
 ) -> dict:
     document = service.get_document(db, user, document_id, module)
-    return service.delete_impact_document(db, user, document.id)
+    return service.delete_impact_document(db, user, document.code)
 
 
 @router.post("/documents/{module}/{document_id}/delete")
@@ -145,7 +145,7 @@ def delete_document(
     db: Session = Depends(get_db),
 ) -> dict:
     document = service.get_document(db, user, document_id, module)
-    service.delete_document(db, user, document.id)
+    service.delete_document(db, user, document.code)
     return {"ok": True}
 
 
@@ -160,7 +160,7 @@ def restore_document(
     if document.doc_type != module:
         from ..errors import not_found
         raise not_found("文档不存在")
-    return service._document_dict(db, service.restore_document(db, user, document.id))
+    return service._document_dict(db, service.restore_document(db, user, document.code))
 
 
 @router.get("/documents/{module}/{document_id}/versions")
@@ -213,7 +213,7 @@ def rename_directory(
     db: Session = Depends(get_db),
 ) -> dict:
     directory = service.get_directory(db, user, directory_id, module)
-    return service._directory_dict(db, service.rename_directory(db, user, directory.id, body.name))
+    return service._directory_dict(db, service.rename_directory(db, user, directory.code, body.name))
 
 
 @router.post("/directories/{module}/{directory_id}/move")
@@ -225,7 +225,7 @@ def move_directory(
     db: Session = Depends(get_db),
 ) -> dict:
     directory = service.get_directory(db, user, directory_id, module)
-    return service._directory_dict(db, service.move_directory(db, user, directory.id, body.parent_id))
+    return service._directory_dict(db, service.move_directory(db, user, directory.code, body.parent_id))
 
 
 @router.get("/directories/{module}/{directory_id}/delete-impact")
@@ -236,7 +236,7 @@ def directory_delete_impact(
     db: Session = Depends(get_db),
 ) -> dict:
     directory = service.get_directory(db, user, directory_id, module)
-    return service.delete_impact_directory(db, user, directory.id)
+    return service.delete_impact_directory(db, user, directory.code)
 
 
 @router.post("/directories/{module}/{directory_id}/delete")
@@ -247,7 +247,7 @@ def delete_directory(
     db: Session = Depends(get_db),
 ) -> dict:
     directory = service.get_directory(db, user, directory_id, module)
-    service.delete_directory(db, user, directory.id)
+    service.delete_directory(db, user, directory.code)
     return {"ok": True}
 
 
@@ -258,8 +258,8 @@ def restore_directory(
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    directory = service._get_directory_raw(db, directory_id)
+    directory = service._editable_directory(db, user, directory_id, include_deleted=True)
     if directory.module_type != module:
         from ..errors import not_found
         raise not_found("目录不存在")
-    return service._directory_dict(db, service.restore_directory(db, user, directory.id))
+    return service._directory_dict(db, service.restore_directory(db, user, directory.code))
