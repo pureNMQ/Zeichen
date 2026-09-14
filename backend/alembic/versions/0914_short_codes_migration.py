@@ -30,7 +30,9 @@ _ENTITIES = {
     "document_directory": ("document_directory", "DIR"),
 }
 # document 特殊:wiki → DOC,glossary → TERM,分开计数
-_DOCUMENT_TYPES = (("wiki", "DOC"), ("glossary", "TERM"))
+# 计数器键必须与运行时 short_codes.CODE_PREFIXES 一致(document/glossary_term);
+# 键名漂移会导致 allocate_code 找不到计数器行而从 1 重分,与存量主键冲突(REQ-49)
+_DOCUMENT_TYPES = (("wiki", "document", "DOC"), ("glossary", "glossary_term", "TERM"))
 
 _POLY_TABLES = ("comment", "activity", "notification", "entity_watch", "attachment")
 
@@ -53,8 +55,8 @@ def _backfill_codes(bind) -> None:
         _add_code_column(bind, table)
         _backfill_table(bind, table, entity_type, prefix, extra_type_col=None)
     _add_code_column(bind, "document")
-    for doc_type, prefix in _DOCUMENT_TYPES:
-        _backfill_table(bind, "document", f"document:{doc_type}", prefix, extra_type_col=doc_type)
+    for doc_type, counter_key, prefix in _DOCUMENT_TYPES:
+        _backfill_table(bind, "document", counter_key, prefix, extra_type_col=doc_type)
 
 
 def _backfill_table(bind, table: str, entity_type: str, prefix: str, extra_type_col) -> None:

@@ -116,3 +116,34 @@ class TestAllocation:
         got = [c for c in codes if c != "RETRY"]
         assert len(got) == len(set(got)), f"重号: {sorted(got)}"
         engine.dispose()
+
+
+class TestMigrationCounterKeys:
+    """REQ-49:0914 迁移回填的计数器键必须与运行时 CODE_PREFIXES 一致。
+
+    键名漂移(如 document:wiki ≠ document)会让 allocate_code 找不到计数器行,
+    从 1 重分短码并与存量复合主键冲突;空测试库迁移回填不触发,须静态断言防复发。
+    """
+
+    def test_0914_counter_keys_match_runtime(self):
+        import importlib.util
+        from pathlib import Path
+
+        path = (
+            Path(__file__).resolve().parents[2]
+            / "alembic"
+            / "versions"
+            / "0914_short_codes_migration.py"
+        )
+        spec = importlib.util.spec_from_file_location("migration_0914_short_codes", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        pairs = {entity_type: prefix for _, (entity_type, prefix) in mod._ENTITIES.items()}
+        pairs.update({entity_type: prefix for _, entity_type, prefix in mod._DOCUMENT_TYPES})
+        drifted = sorted(set(pairs) - set(short_codes.CODE_PREFIXES))
+        assert not drifted, f"迁移计数器键漂移(运行时不存在): {drifted}"
+        for entity_type, prefix in pairs.items():
+            assert prefix == short_codes.CODE_PREFIXES[entity_type], (
+                f"{entity_type} 前缀漂移: 迁移={prefix} 运行时={short_codes.CODE_PREFIXES[entity_type]}"
+            )
