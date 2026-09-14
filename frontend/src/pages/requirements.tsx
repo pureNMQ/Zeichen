@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { ErrorNotification } from '@/components/ui/notification'
 import {
   api,
@@ -52,12 +53,14 @@ function RequirementCard({
   onStatus,
   onDelete,
   canDelete,
+  onReject,
 }: {
   r: RequirementRow
   canEdit: boolean
   onStatus: (r: RequirementRow, s: string) => void
   onDelete: (r: RequirementRow) => void
   canDelete: boolean
+  onReject?: (r: RequirementRow) => void
 }) {
   return (
     <Card>
@@ -77,15 +80,29 @@ function RequirementCard({
             {r.done_task_count ?? 0}/{r.task_count} 任务
           </Badge>
         </div>
-        {canDelete && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 px-2 text-xs text-muted-foreground"
-            onClick={() => onDelete(r)}
-          >
-            删除
-          </Button>
+        {(canDelete || (canEdit && onReject && r.status === 'verifying')) && (
+          <div className="flex items-center gap-1">
+            {canDelete && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-xs text-muted-foreground"
+                onClick={() => onDelete(r)}
+              >
+                删除
+              </Button>
+            )}
+            {canEdit && onReject && r.status === 'verifying' && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-xs text-destructive"
+                onClick={() => onReject(r)}
+              >
+                打回
+              </Button>
+            )}
+          </div>
         )}
       </CardContent>
     </Card>
@@ -121,6 +138,10 @@ export function RequirementsPage() {
   const [deleteTarget, setDeleteTarget] = useState<RequirementRow | null>(null)
   const [confirmCount, setConfirmCount] = useState('')
   const [actionError, setActionError] = useState<string | null>(null)
+  const [rejectTarget, setRejectTarget] = useState<RequirementRow | null>(null)
+  const [rejectReason, setRejectReason] = useState('')
+  const [rejectError, setRejectError] = useState<string | null>(null)
+  const [rejecting, setRejecting] = useState(false)
 
   const keywordTimer = useRef<number | null>(null)
 
@@ -212,6 +233,41 @@ export function RequirementsPage() {
       await qc.invalidateQueries({ queryKey: ['requirements', projectId] })
     } catch (err) {
       setActionError(err instanceof ApiError ? err.message : '删除失败')
+    }
+  }
+
+  function openReject(r: RequirementRow) {
+    setRejectTarget(r)
+    setRejectReason('')
+    setRejectError(null)
+  }
+
+  async function doReject() {
+    if (!rejectTarget) return
+    const reason = rejectReason.trim()
+    if (reason === '') return
+    setRejecting(true)
+    setRejectError(null)
+    try {
+      await api.post(`/targets/requirement/${rejectTarget.id}/comments`, { body: `打回：${reason}` })
+    } catch (err) {
+      setRejectError(err instanceof ApiError ? err.message : '评论发布失败,请重试')
+      setRejecting(false)
+      return
+    }
+    try {
+      await moveRequirement(rejectTarget.id, 'backlog')
+      await qc.invalidateQueries({ queryKey: ['requirements', projectId] })
+      setRejectTarget(null)
+      setRejectReason('')
+    } catch (err) {
+      setRejectError(
+        err instanceof ApiError
+          ? `打回理由已发布到评论区,但状态回退失败:${err.message}`
+          : '打回理由已发布到评论区,但状态回退失败,请手动改回待办',
+      )
+    } finally {
+      setRejecting(false)
     }
   }
 
@@ -313,6 +369,7 @@ export function RequirementsPage() {
               onStatus={onCardStatus}
               onDelete={setDeleteTarget}
               canDelete={canEdit}
+              onReject={openReject}
             />
           )}
         />
@@ -344,6 +401,42 @@ export function RequirementsPage() {
       )}
 
       <CreateRequirementDialog open={createOpen} onOpenChange={setCreateOpen} />
+
+      <Dialog open={rejectTarget !== null} onOpenChange={(v) => !v && setRejectTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>打回需求</DialogTitle>
+            <DialogDescription>
+              打回理由将发布到需求「{rejectTarget?.title}」的评论区,确认后需求状态回退到待办。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label htmlFor="reject-reason">打回理由</Label>
+            <Textarea
+              id="reject-reason"
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              autoComplete="off"
+              maxLength={2000}
+              rows={4}
+              placeholder="请填写需要修改或补充的内容"
+            />
+            {rejectError && <p className="text-sm text-destructive">{rejectError}</p>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRejectTarget(null)}>
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => void doReject()}
+              disabled={rejecting || rejectReason.trim() === ''}
+            >
+              {rejecting ? '提交中…' : '确认打回'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={deleteTarget !== null} onOpenChange={(v) => !v && setDeleteTarget(null)}>
         <DialogContent>

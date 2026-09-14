@@ -27,12 +27,12 @@ vi.mock('@/lib/api', () => {
       done: '已完成',
       cancelled: '已取消',
     },
-    REQUIREMENT_STATUSES: ['pending', 'backlog', 'in_progress', 'done', 'cancelled'],
-    EXECUTION_REQUIREMENT_STATUSES: ['backlog', 'in_progress', 'done', 'cancelled'],
+    REQUIREMENT_STATUSES: ['pending', 'backlog', 'in_progress', 'verifying', 'done', 'cancelled'],
+    EXECUTION_REQUIREMENT_STATUSES: ['backlog', 'in_progress', 'verifying', 'done', 'cancelled'],
   }
 })
 
-import { api, type ProjectRow, type RequirementRow } from '@/lib/api'
+import { api, ApiError, type ProjectRow, type RequirementRow } from '@/lib/api'
 import { CurrentProjectProvider } from '@/lib/current-project'
 import { NotificationProvider } from '@/components/ui/notification'
 import { moveRequirement, RequirementsPage } from '@/pages/requirements'
@@ -455,18 +455,17 @@ describe('需求执行看板(四列自由拖拽)', () => {
     localStorage.clear()
   })
 
-  it('看板默认展示五列(含待确认)且显示待确认需求,筛选条提供五态多选', async () => {
+  it('看板默认展示六列(含待确认与验收中)且显示待确认需求,筛选条提供六态多选', async () => {
     renderRequirements([projects[1]])
-    // 默认即看板:五列列头可见(含待确认),无「验收中」列
-    for (const label of ['待确认', '待办', '实现中', '已完成', '已取消']) {
+    // 默认即看板:六列列头可见(ADR 0003 六态,含待确认与验收中)
+    for (const label of ['待确认', '待办', '实现中', '验收中', '已完成', '已取消']) {
       expect((await screen.findAllByText(label)).length).toBeGreaterThan(0)
     }
-    expect(screen.queryByText('验收中')).not.toBeInTheDocument()
     expect(screen.getByText('等待产品确认')).toBeInTheDocument()
-    // 状态筛选为五态多选
+    // 状态筛选为六态多选
     const user = (await import('@testing-library/user-event')).default
     await user.click(screen.getByRole('button', { name: /状态/ }))
-    for (const label of ['待确认', '待办', '实现中', '已完成', '已取消']) {
+    for (const label of ['待确认', '待办', '实现中', '验收中', '已完成', '已取消']) {
       expect(await screen.findByRole('checkbox', { name: label })).toBeInTheDocument()
     }
   })
@@ -560,5 +559,73 @@ describe('错误反馈(ErrorNotification,禁用 alert)', () => {
     } finally {
       alertSpy.mockRestore()
     }
+  })
+})
+
+describe('看板验收中卡片打回(REQ-47/TASK-116)', () => {
+  const verifyingReq: RequirementRow = {
+    id: 'rv',
+    title: '待打回需求',
+    description: null,
+    status: 'verifying',
+    project_id: 'p2',
+    created_by: 'u1',
+    created_at: '2026-08-01T00:00:00+00:00',
+    updated_at: '2026-08-01T00:00:00+00:00',
+    task_count: 1,
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    qc.clear()
+    localStorage.clear()
+    vi.mocked(api.post).mockReset()
+    vi.mocked(api.post).mockResolvedValue({})
+  })
+
+  it('验收中卡片显示打回按钮,确认后理由进评论区且状态回待办', async () => {
+    const user = (await import('@testing-library/user-event')).default
+    renderRequirements([projects[1]], { items: [verifyingReq] })
+    await user.click(await screen.findByRole('button', { name: '打回' }))
+    expect(await screen.findByRole('dialog')).toHaveTextContent('打回需求')
+    await user.type(screen.getByLabelText('打回理由'), '验收不通过,缺少边界用例')
+    await user.click(screen.getByRole('button', { name: '确认打回' }))
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith('/targets/requirement/rv/comments', {
+        body: '打回：验收不通过,缺少边界用例',
+      }),
+    )
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith('/requirements/rv/status', { status: 'backlog' }),
+    )
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('理由为空时确认按钮禁用', async () => {
+    const user = (await import('@testing-library/user-event')).default
+    renderRequirements([projects[1]], { items: [verifyingReq] })
+    await user.click(await screen.findByRole('button', { name: '打回' }))
+    expect(await screen.findByRole('button', { name: '确认打回' })).toBeDisabled()
+    await user.type(screen.getByLabelText('打回理由'), '需要补充')
+    expect(screen.getByRole('button', { name: '确认打回' })).toBeEnabled()
+  })
+
+  it('评论发布失败时不改状态,错误显示在弹窗内', async () => {
+    vi.mocked(api.post).mockImplementation((path: string) =>
+      path.includes('/comments') ? Promise.reject(new ApiError(500, '评论服务不可用')) : Promise.resolve({}),
+    )
+    const user = (await import('@testing-library/user-event')).default
+    renderRequirements([projects[1]], { items: [verifyingReq] })
+    await user.click(await screen.findByRole('button', { name: '打回' }))
+    await user.type(await screen.findByLabelText('打回理由'), '理由')
+    await user.click(screen.getByRole('button', { name: '确认打回' }))
+    expect(await screen.findByRole('dialog')).toHaveTextContent('评论服务不可用')
+    expect(api.post).not.toHaveBeenCalledWith('/requirements/rv/status', { status: 'backlog' })
+  })
+
+  it('非验收中卡片与列表视图不显示打回按钮', async () => {
+    renderRequirements([projects[1]], { items: [{ ...verifyingReq, status: 'backlog', id: 'rb' }] })
+    expect(await screen.findByText('待打回需求')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '打回' })).not.toBeInTheDocument()
   })
 })
