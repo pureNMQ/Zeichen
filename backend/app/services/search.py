@@ -22,7 +22,7 @@ from ..models import (
     WorkspaceMember,
 )
 from .pagination import MAX_PAGE_SIZE, decode_cursor_page, page_result
-from .permissions import get_team, is_admin
+from .permissions import get_team, is_admin, effective_user_id
 
 
 def _accessible_project_ids(db: Session, user: User) -> list[uuid.UUID]:
@@ -39,7 +39,7 @@ def _accessible_project_ids(db: Session, user: User) -> list[uuid.UUID]:
             select(ProjectMember.project_id)
             .join(Project, Project.id == ProjectMember.project_id)
             .where(
-                ProjectMember.user_id == user.id,
+                ProjectMember.user_id == effective_user_id(db, user.id),
                 Project.deleted_at.is_(None),
             )
         ).all()

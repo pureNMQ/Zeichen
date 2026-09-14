@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..errors import conflict, invalid_request, not_found, permission_denied
 from ..models import Project, ProjectMember, User, WorkspaceMember
-from .permissions import get_accessible_project, get_project_role, get_team, is_admin, require_workspace_admin
+from .permissions import effective_user_id, get_accessible_project, get_project_role, get_team, is_admin, require_workspace_admin
 from ..security import verify_password
 
 PROJECT_ROLES = ("owner", "editor", "viewer")
@@ -16,7 +16,11 @@ PROJECT_ROLES = ("owner", "editor", "viewer")
 
 def list_projects(db: Session, user: User) -> list[tuple[Project, str]]:
     team = get_team(db)
-    if is_admin(db, user.id):
+    # 附属 agent 按主人身份列出项目(判权统一走 permissions 解析)
+    effective_id = effective_user_id(db, user.id)
+    if effective_id is None:
+        return []
+    if is_admin(db, effective_id):
         projects = db.scalars(
             select(Project)
             .where(Project.team_id == team.id, Project.deleted_at.is_(None))
@@ -27,7 +31,7 @@ def list_projects(db: Session, user: User) -> list[tuple[Project, str]]:
         select(Project, ProjectMember.role)
         .join(ProjectMember, ProjectMember.project_id == Project.id)
         .where(
-            ProjectMember.user_id == user.id,
+            ProjectMember.user_id == effective_id,
             Project.team_id == team.id,
             Project.deleted_at.is_(None),
         )
@@ -101,10 +105,8 @@ def list_member_candidates(db: Session, actor: User, project_id: uuid.UUID) -> l
         )
         .order_by(User.created_at)
     ).scalars().all()
-    agents = db.execute(
-        select(User).where(User.is_agent.is_(True), User.deleted_at.is_(None)).order_by(User.created_at)
-    ).scalars().all()
-    return [u for u in [*humans, *agents] if u.id not in already]
+    # ADR 0004:agent 不再作为项目成员授权,候选仅工作区人类成员
+    return [u for u in humans if u.id not in already]
 
 
 def _add_member_row(db: Session, project: Project, user_id: uuid.UUID, role: str, actor: User) -> None:
@@ -113,15 +115,17 @@ def _add_member_row(db: Session, project: Project, user_id: uuid.UUID, role: str
     target = db.get(User, user_id)
     if target is None or target.deleted_at is not None:
         raise not_found("用户不存在")
-    if not target.is_agent:
-        team = get_team(db)
-        wm = db.scalar(
-            select(WorkspaceMember).where(
-                WorkspaceMember.team_id == team.id, WorkspaceMember.user_id == user_id
-            )
+    if target.is_agent:
+        # ADR 0004:agent 随主人访问项目,不再单独授权
+        raise invalid_request("附属 Agent 不单独加入项目,其权限随主人")
+    team = get_team(db)
+    wm = db.scalar(
+        select(WorkspaceMember).where(
+            WorkspaceMember.team_id == team.id, WorkspaceMember.user_id == user_id
         )
-        if wm is None:
-            raise invalid_request("该账号不是工作区成员")
+    )
+    if wm is None:
+        raise invalid_request("该账号不是工作区成员")
     dup = db.scalar(
         select(ProjectMember).where(
             ProjectMember.project_id == project.id, ProjectMember.user_id == user_id

@@ -139,13 +139,13 @@ def mcp_server(tmp_path_factory, request):
         db.add(admin)
         db.flush()
         db.add(WorkspaceMember(team_id=team.id, user_id=admin.id, role="admin"))
-        agent = User(username="agent-e2e", password_hash="", is_agent=True)
+        # ADR 0004:agent 附属 admin,继承其全项目 owner 级访问
+        agent = User(username="agent-e2e", password_hash="", is_agent=True, owner_id=admin.id)
         db.add(agent)
         db.flush()
         project = Project(team_id=team.id, name="E2E")
         db.add(project)
         db.flush()
-        db.add(ProjectMember(project_id=project.id, user_id=agent.id, role="editor"))
         db.add(MemoryDataset(project_id=project.id, cognee_dataset_id="cognee-e2e-dataset"))
         token = generate_api_token()
         db.add(ApiKey(user_id=agent.id, token_hash=token_digest(token), token_encrypted="x", note="e2e"))
@@ -225,7 +225,9 @@ def test_agent_claim_to_requirement_done(mcp_server: dict):
     me = client.call("agent.whoami")
     assert me["username"] == "agent-e2e"
     assert me["is_agent"] is True
-    assert me["project_grants"][0]["role"] == "editor"
+    # ADR 0004:agent 附属 admin,继承全项目 owner 级;whoami 透出宿主
+    assert me["owner"]["username"] == "admin"
+    assert me["project_grants"][0]["role"] == "owner"
 
     # MCP submission is durable and immediate: it never waits for Cognee.
     improve_job = client.call("memory.improve", project_id=mcp_server["project_id"], session_id="mcp-queued")

@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from ..errors import conflict, invalid_request, not_found, permission_denied
 from ..models import MemoryDataset, ProjectMember, User
 from .cognee import CogneeClient
-from .permissions import get_accessible_project, require_project_role
+from .permissions import get_accessible_project, require_project_role, get_project_role
 from .polymorphic import record_activity
 from .user_profiles import display_name
 
@@ -162,9 +162,14 @@ def recall(db: Session, actor: User, project_id: uuid.UUID, query: str, session_
 
 def improve(db: Session, actor: User, project_id: uuid.UUID, target_agent_id: uuid.UUID, session_id: str, client: CogneeClient | None = None) -> Any:
     require_project_role(db, actor.id, project_id, "editor")
-    member = db.scalar(select(ProjectMember).where(ProjectMember.project_id == project_id, ProjectMember.user_id == target_agent_id))
     target = db.get(User, target_agent_id)
-    if member is None or target is None or not target.is_agent:
+    # ADR 0004:附属 agent 随主人判权,主人在项目内即可作为蒸馏目标
+    if (
+        target is None
+        or not target.is_agent
+        or target.deleted_at is not None
+        or get_project_role(db, target_agent_id, project_id) is None
+    ):
         raise not_found("目标 agent 不在项目中")
     client = client or CogneeClient()
     dataset = _dataset(db, project_id, client, create=False)

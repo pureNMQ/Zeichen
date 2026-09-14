@@ -13,7 +13,7 @@ from ..errors import AppError, conflict, not_found
 from ..models import MemoryImproveJob, ProjectMember, User
 from . import memory
 from .cognee import CogneeClient
-from .permissions import get_accessible_project, require_project_role
+from .permissions import get_accessible_project, get_project_role, require_project_role
 
 
 ACTIVE_STATUSES = ("queued", "running")
@@ -40,14 +40,14 @@ def _job_dict(job: MemoryImproveJob) -> dict:
 
 
 def _validate_target(db: Session, project_id: uuid.UUID, target_agent_id: uuid.UUID) -> User:
-    member = db.scalar(
-        select(ProjectMember).where(
-            ProjectMember.project_id == project_id,
-            ProjectMember.user_id == target_agent_id,
-        )
-    )
     target = db.get(User, target_agent_id)
-    if member is None or target is None or not target.is_agent:
+    # ADR 0004:附属 agent 随主人判权
+    if (
+        target is None
+        or not target.is_agent
+        or target.deleted_at is not None
+        or get_project_role(db, target_agent_id, project_id) is None
+    ):
         raise not_found("目标 agent 不在项目中")
     return target
 

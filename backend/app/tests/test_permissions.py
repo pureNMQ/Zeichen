@@ -16,7 +16,8 @@ def test_get_team_raises_conflict_before_bootstrap(db):
 
 def test_workspace_member_lookup_roundtrip(db, world):
     assert svc.get_workspace_member(db, world["admin"].id).role == "admin"
-    assert svc.get_workspace_member(db, world["agent"].id) is None
+    # ADR 0004:附属 agent 继承主人的工作区成员身份(carol=member)
+    assert svc.get_workspace_member(db, world["agent"].id).role == "member"
 
 
 def test_admin_implies_project_owner(db, world):

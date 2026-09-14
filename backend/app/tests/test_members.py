@@ -25,7 +25,7 @@ def test_list_members_requires_an_authenticated_session(client, world):
     assert resp.status_code == 200
     rows = resp.json()
     usernames = {r["username"]: r["role"] for r in rows}
-    assert usernames == {"admin": "admin", "bob": "member"}
+    assert usernames == {"admin": "admin", "bob": "member", "a-owner": "member"}
     admin = next(row for row in rows if row["username"] == "admin")
     assert admin["is_bootstrap"] is True
     assert admin["is_self"] is True

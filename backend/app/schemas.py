@@ -59,19 +59,12 @@ class MemberUpdate(BaseModel):
     role: Literal["admin", "member"]
 
 
-class ProjectGrant(BaseModel):
-    project_id: uuid.UUID
-    role: Literal["owner", "editor", "viewer"]
-
-
-class AgentCreate(BaseModel):
+class MyAgentCreate(BaseModel):
     username: str = Field(min_length=1, max_length=64)
-    project_grants: list[ProjectGrant] = []
 
 
-class AgentUpdate(BaseModel):
-    username: str | None = Field(default=None, min_length=1, max_length=64)
-    project_grants: list[ProjectGrant] | None = None
+class AgentProfileUpdate(BaseModel):
+    nickname: str | None = Field(default=None, max_length=64)
 
 
 class KeyIssue(BaseModel):

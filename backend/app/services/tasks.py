@@ -16,7 +16,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from ..errors import conflict, invalid_request, not_found, permission_denied
-from ..models import ProjectMember, Requirement, Task, User
+from ..models import Requirement, Task, User
 from . import task_blockers
 from .labels import STATUS_CN
 from .pagination import page_result
@@ -83,12 +83,8 @@ def _check_assignee(db: Session, project_id: uuid.UUID, assignee_id: uuid.UUID) 
     assignee = db.get(User, assignee_id)
     if assignee is None or assignee.deleted_at is not None:
         raise not_found("被指派者不存在")
-    member = db.scalar(
-        select(ProjectMember).where(
-            ProjectMember.project_id == project_id, ProjectMember.user_id == assignee_id
-        )
-    )
-    if member is None:
+    # ADR 0004:附属 agent 随主人判权,可被指派(主人有项目角色即可)
+    if get_project_role(db, assignee_id, project_id) is None:
         raise invalid_request("被指派者不是项目成员")
     return assignee
 

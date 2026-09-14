@@ -80,7 +80,7 @@ def test_create_project_admin_only(client, db, world, monkeypatch):
             "name": "网站改版",
             "members": [
                 {"user_id": str(world["member"].id), "role": "editor"},
-                {"user_id": str(world["agent"].id), "role": "editor"},
+                {"user_id": str(world["agent_owner"].id), "role": "editor"},
             ],
         },
     )
@@ -89,7 +89,7 @@ def test_create_project_admin_only(client, db, world, monkeypatch):
 
     detail = client.get(f"/api/projects/{resp.json()['id']}/members").json()
     roles = {m["username"]: m["role"] for m in detail}
-    assert roles == {"admin": "owner", "bob": "editor", "agent-a": "editor"}
+    assert roles == {"admin": "owner", "bob": "editor", "a-owner": "editor"}
 
 
 def test_update_project_name(client, db, world):
@@ -184,8 +184,8 @@ def test_remove_member_last_owner_guard(client, db, world):
     login(client, "bob", "whatever-1")
     client.post("/api/auth/set-password", json={"password": "bob-pass-1"})
 
-    # 移除非 owner 成员成功
-    resp = client.delete(f"/api/projects/{project_id}/members/{world['agent'].id}")
+    # 移除非 owner 成功(项目成员:a-owner editor)
+    resp = client.delete(f"/api/projects/{project_id}/members/{world['agent_owner'].id}")
     assert resp.status_code == 200
 
     # 唯一 owner 不可移除
@@ -224,7 +224,7 @@ def test_update_member_role_requires_owner(client, db, world):
     login(client, "bob", "whatever-1")
     client.post("/api/auth/set-password", json={"password": "bob-pass-1"})
     resp = client.patch(
-        f"/api/projects/{project_id}/members/{world['agent'].id}",
+        f"/api/projects/{project_id}/members/{world['agent_owner'].id}",
         json={"role": "viewer"},
     )
     assert resp.status_code == 403
@@ -285,7 +285,8 @@ def test_member_candidates(client, db, world):
     assert names["carol"] is False
     assert "admin" not in names  # admin 自动 owner,不列为候选人
     assert "bob" not in names  # 已在项目中
-    assert "agent-a" not in names  # 已在项目中
+    assert "a-owner" not in names  # 已在项目中
+    assert "agent-a" not in names  # ADR 0004:agent 不单独授权,不列为候选人
 
     # viewer 成员无候选人访问权
     login(client, "bob", "whatever-1")
@@ -308,7 +309,7 @@ def test_project_access_matrix(client, db, world):
     assert members.status_code == 200
     assert {row["username"]: row["role"] for row in members.json()} == {
         "bob": "viewer",
-        "agent-a": "editor",
+        "a-owner": "editor",
     }
     assert client.post(
         f"/api/projects/{project_id}/members",

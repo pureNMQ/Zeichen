@@ -228,36 +228,25 @@ class TestMemberEdges:
 
 
 class TestAgentEdges:
-    def test_update_agent_username_conflict(self, db: Session, world: dict):
-        from app.services import agents as svc
-
+    def test_create_agent_requires_username(self, db: Session, world: dict):
         with pytest.raises(AppError) as e:
-            svc.update_agent(db, world["admin"], world["agent"].id, username="bob")
-        assert e.value.code == "conflict"
-
-    def test_apply_grants_rejects_unknown_project(self, db: Session, world: dict):
-        from app.services import agents as svc
-
-        with pytest.raises(AppError) as e:
-            svc.update_agent(
-                db, world["admin"], world["agent"].id, grants=[{"project_id": uuid.uuid4(), "role": "editor"}]
-            )
+            agents_svc.create_agent(db, world["admin"], "   ")
         assert e.value.code == "invalid_request"
-        assert "项目不存在" in e.value.message
+
+    def test_reveal_requires_owned_agent(self, db: Session, world: dict):
+        # admin 尚未创建附属 Agent:回看直接 not_found
+        with pytest.raises(AppError) as e:
+            agents_svc.reveal_key(db, world["admin"], "admin-pass-1", uuid.uuid4())
+        assert e.value.code == "not_found"
 
     def test_key_lookup_and_reveal_guards(self, db: Session, world: dict):
-        from app.security import generate_api_token
-
-        key, _ = agents_svc.issue_key(db, world["agent"].id, "note")
-        assert agents_svc.list_keys(db, world["agent"].id)[0].id == key.id
+        agent = agents_svc.create_agent(db, world["admin"], "edge-bot")
+        key, _ = agents_svc.issue_key(db, world["admin"], "note")
+        assert key.user_id == agent.id
         with pytest.raises(AppError) as e:
-            agents_svc.reveal_key(db, world["admin"], "admin-pass-1", world["agent"].id, uuid.uuid4())
-        assert e.value.code == "not_found"
-        with pytest.raises(AppError) as e:
-            agents_svc.reveal_key(db, world["member"], "x", world["agent"].id, key.id)
+            agents_svc.reveal_key(db, world["admin"], "wrong-pass", key.id)
         assert e.value.code == "permission_denied"
-        with pytest.raises(AppError) as e:
-            agents_svc.reveal_key(db, world["admin"], "wrong-pass", world["agent"].id, key.id)
-        assert e.value.code == "permission_denied"
-        revealed = agents_svc.reveal_key(db, world["admin"], "admin-pass-1", world["agent"].id, key.id)
+        revealed = agents_svc.reveal_key(db, world["admin"], "admin-pass-1", key.id)
         assert revealed.startswith("zc_")
+        # admin 紧急吊销(对自己 agent 亦可用)
+        assert agents_svc.admin_revoke_keys(db, agent.id) == 1

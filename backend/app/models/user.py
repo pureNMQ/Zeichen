@@ -1,13 +1,14 @@
 """user / api_key 及工作区角色常量。
 
 规格书 §2.2:人类与 agent 同表,is_agent 区分;username 为登录账号。
+ADR 0004(附属化):is_agent 行须带 owner_id 指向主人,权限完全继承;每主人至多一个。
 api_key:仅 agent 签发,多 key 并存、独立吊销(revoked_at 即生命周期终点,不再叠加软删)。
 """
 
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, String, Text, Uuid
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, String, Text, Uuid, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, CreatedByMixin, IdMixin, SoftDeleteMixin, TimestampMixin
@@ -17,7 +18,17 @@ WORKSPACE_ROLE_VALUES = ("admin", "member")
 
 class User(IdMixin, TimestampMixin, SoftDeleteMixin, CreatedByMixin, Base):
     __tablename__ = "user"
-    __table_args__ = (CheckConstraint("username <> ''", name="ck_user_username_not_empty"),)
+    __table_args__ = (
+        CheckConstraint("username <> ''", name="ck_user_username_not_empty"),
+        CheckConstraint("owner_id IS NULL OR is_agent", name="ck_user_owner_only_for_agent"),
+        Index(
+            "uq_user_owner_one_agent",
+            "owner_id",
+            unique=True,
+            postgresql_where=text("owner_id IS NOT NULL"),
+            sqlite_where=text("owner_id IS NOT NULL"),
+        ),
+    )
 
     username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
     nickname: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -26,6 +37,10 @@ class User(IdMixin, TimestampMixin, SoftDeleteMixin, CreatedByMixin, Base):
     avatar: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_agent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # ADR 0004:附属 Agent 的主人;人类成员恒为 NULL。判权时动态解析主人角色。
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("user.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
     # The founding human account is permanently protected from workspace role
     # changes and removal.  It is deliberately a user-level property so the
     # protection survives membership lookups.

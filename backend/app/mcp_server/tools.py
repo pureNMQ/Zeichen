@@ -726,18 +726,24 @@ def _register_all(mcp) -> None:
     @mcp.tool(name="agent.whoami")
     @sessioned
     def agent_whoami() -> dict:
-        """当前 agent 身份与项目授权。"""
+        """当前 agent 身份、宿主与项目授权(ADR 0004:权限动态继承主人)。"""
         db, actor = dbc()
-        grants = db.execute(
-            select(ProjectMember.role, ProjectMember.project_id).where(
-                ProjectMember.user_id == actor.id
-            )
-        ).all()
+        owner = db.get(User, actor.owner_id) if actor.owner_id else None
+        projects = project_svc.list_projects(db, actor)
         return {
             "id": str(actor.id),
             "username": actor.username,
             "is_agent": actor.is_agent,
-            "project_grants": [{"project_id": str(p), "role": r} for r, p in grants],
+            "owner": (
+                {
+                    "id": str(owner.id),
+                    "username": owner.username,
+                    "nickname": owner.nickname,
+                }
+                if owner is not None
+                else None
+            ),
+            "project_grants": [{"project_id": str(p.id), "role": role} for p, role in projects],
         }
 
     # ---------- search.* ----------

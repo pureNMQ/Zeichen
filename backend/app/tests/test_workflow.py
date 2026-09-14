@@ -319,8 +319,19 @@ class TestConcurrency:
         sess.add(admin)
         sess.flush()
         sess.add(WorkspaceMember(team_id=team.id, user_id=admin.id, role="admin"))
-        a1 = User(username="agent-1", password_hash="", is_agent=True)
-        a2 = User(username="agent-2", password_hash="", is_agent=True)
+        # ADR 0004:两个附属 agent 各随主人(项目 editor)参与认领竞争
+        o1 = User(username="owner-1", password_hash="", is_agent=False)
+        o2 = User(username="owner-2", password_hash="", is_agent=False)
+        sess.add_all([o1, o2])
+        sess.flush()
+        sess.add_all(
+            [
+                WorkspaceMember(team_id=team.id, user_id=o1.id, role="member"),
+                WorkspaceMember(team_id=team.id, user_id=o2.id, role="member"),
+            ]
+        )
+        a1 = User(username="agent-1", password_hash="", is_agent=True, owner_id=o1.id)
+        a2 = User(username="agent-2", password_hash="", is_agent=True, owner_id=o2.id)
         sess.add_all([a1, a2])
         sess.flush()
         project = Project(team_id=team.id, name="race")
@@ -331,8 +342,8 @@ class TestConcurrency:
         sess.flush()
         sess.add_all(
             [
-                ProjectMember(project_id=project.id, user_id=a1.id, role="editor"),
-                ProjectMember(project_id=project.id, user_id=a2.id, role="editor"),
+                ProjectMember(project_id=project.id, user_id=o1.id, role="editor"),
+                ProjectMember(project_id=project.id, user_id=o2.id, role="editor"),
             ]
         )
         task = Task(

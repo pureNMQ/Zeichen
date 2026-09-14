@@ -43,10 +43,19 @@ def get_user(db: Session, user_id: uuid.UUID) -> User:
     return user
 
 
+def _can_edit_profile(db: Session, actor: User, target: User) -> bool:
+    """本人 / 工作区 admin / 附属 Agent 的主人(ADR 0004)。"""
+    if actor.id == target.id:
+        return True
+    if is_admin(db, actor.id):
+        return True
+    return bool(target.is_agent and target.owner_id == actor.id and target.deleted_at is None)
+
+
 def update_profile(db: Session, actor: User, target_id: uuid.UUID, nickname: str | None) -> User:
-    if actor.id != target_id and not is_admin(db, actor.id):
-        raise permission_denied("只能修改自己的资料")
     target = get_user(db, target_id)
+    if not _can_edit_profile(db, actor, target):
+        raise permission_denied("只能修改自己的资料")
     target.nickname = nickname.strip() if nickname is not None and nickname.strip() else None
     db.commit()
     db.refresh(target)
@@ -67,9 +76,9 @@ def _attachment(db: Session, user: User) -> Attachment | None:
 
 
 async def set_avatar(db: Session, actor: User, target_id: uuid.UUID, upload: UploadFile) -> User:
-    if actor.id != target_id and not is_admin(db, actor.id):
-        raise permission_denied("只能修改自己的头像")
     target = get_user(db, target_id)
+    if not _can_edit_profile(db, actor, target):
+        raise permission_denied("只能修改自己的头像")
     if upload.content_type not in ALLOWED_AVATAR_TYPES:
         raise invalid_request("头像必须是 JPEG、PNG、GIF 或 WebP 图片")
     data = await upload.read(get_settings().attachment_max_bytes + 1)
