@@ -40,7 +40,9 @@ def resolve_target(db: Session, target_type: str, target_id, user: User | None =
         raise invalid_request(f"不支持的目标类型: {target_type}")
     if target_type == "project":
         project = db.scalar(
-            select(Project).where(Project.id == target_id, Project.deleted_at.is_(None))
+            select(Project).where(
+                Project.id == uuid.UUID(str(target_id)), Project.deleted_at.is_(None)
+            )
         )
         if project is None:
             raise not_found("目标不存在")

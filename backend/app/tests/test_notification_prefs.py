@@ -77,3 +77,33 @@ class TestWatch:
         req_svc.set_requirement_status(db, world["agent"], r["id"], "in_progress")
         notes = admin_notifications(db, world, r["id"])
         assert any(n.action == "status" for n in notes)
+
+
+class TestWatchApiRoutes:
+    """API 层回归:watch 三端点必须路由到 notifications 服务(REQ-50,曾误指 polymorphic 全 500)。"""
+
+    def test_watch_roundtrip_via_http(self, client, world):
+        from app.tests.conftest import login
+
+        login(client, "admin", "admin-pass-1")
+        resp = client.post(
+            f"/api/projects/{world['project'].id}/requirements",
+            json={"title": "被关注需求"},
+        )
+        assert resp.status_code == 201, resp.text
+        rid = resp.json()["id"]
+
+        assert client.get(f"/api/targets/requirement/{rid}/watch").json() == {"watching": False}
+        assert client.post(f"/api/targets/requirement/{rid}/watch").status_code == 201
+        assert client.get(f"/api/targets/requirement/{rid}/watch").json() == {"watching": True}
+        assert client.delete(f"/api/targets/requirement/{rid}/watch").status_code == 200
+        assert client.get(f"/api/targets/requirement/{rid}/watch").json() == {"watching": False}
+
+    def test_watch_uuid_target_project(self, client, world):
+        from app.tests.conftest import login
+
+        login(client, "admin", "admin-pass-1")
+        pid = str(world["project"].id)
+        assert client.get(f"/api/targets/project/{pid}/watch").status_code == 200
+        assert client.post(f"/api/targets/project/{pid}/watch").status_code == 201
+        assert client.delete(f"/api/targets/project/{pid}/watch").status_code == 200

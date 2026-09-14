@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from ..models import User
 from ..schemas import CommentCreate, ReferenceCreate
+from ..services import notifications as notification_service
 from ..services import polymorphic as service
 from ..services.pagination import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from .deps import current_user
@@ -111,7 +112,7 @@ def get_watch_state(
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    return {"watching": service.is_watching(db, user, target_type, target_id)}
+    return {"watching": notification_service.is_watching(db, user, target_type, target_id)}
 
 
 @router.post("/targets/{target_type}/{target_id}/watch", status_code=201)
@@ -121,7 +122,7 @@ def watch_target(
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    service.watch_entity(db, user, target_type, target_id)
+    notification_service.watch_entity(db, user, target_type, target_id)
     return {"watching": True}
 
 
@@ -132,5 +133,5 @@ def unwatch_target(
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    service.unwatch_entity(db, user, target_type, target_id)
+    notification_service.unwatch_entity(db, user, target_type, target_id)
     return {"watching": False}
