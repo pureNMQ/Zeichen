@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Copy, KeyRound, Plus, Trash2, UserRound } from 'lucide-react'
-import { api, ApiError, type MemberCreateResponse, type MemberRow, type PasswordSetupLinkResponse, type Role } from '@/lib/api'
+import { Bot, Copy, KeyRound, Plus, ShieldAlert, Trash2, UserRound } from 'lucide-react'
+import { api, ApiError, type MemberCreateResponse, type MemberRow, type MyAgentDetail, type PasswordSetupLinkResponse, type Role } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -166,6 +166,243 @@ function RoleSelect({ member }: { member: MemberRow }) {
   )
 }
 
+function CreateAgentDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+  const qc = useQueryClient()
+  const [username, setUsername] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault()
+    setError(null)
+    setSubmitting(true)
+    try {
+      await api.post('/my-agent', { username: username.trim() })
+      setUsername('')
+      onOpenChange(false)
+      await qc.invalidateQueries({ queryKey: ['members'] })
+      await qc.invalidateQueries({ queryKey: ['my-agent'] })
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : '创建失败,请重试')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>创建我的 Agent</DialogTitle>
+          <DialogDescription>每个成员只能创建一个附属 Agent;其权限与你完全一致,随你的角色即时生效。</DialogDescription>
+        </DialogHeader>
+        <form onSubmit={onSubmit} className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="agent-username">Agent 账号</Label>
+            <Input
+              id="agent-username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              autoComplete="off"
+              maxLength={64}
+              required
+            />
+          </div>
+          {error && <p className="text-sm text-destructive">{error}</p>}
+          <DialogFooter>
+            <Button type="submit" disabled={submitting}>
+              {submitting ? '创建中…' : '创建'}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function ManageAgentDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+  const qc = useQueryClient()
+  const [note, setNote] = useState('')
+  const [issuedToken, setIssuedToken] = useState<string | null>(null)
+  const [revealFor, setRevealFor] = useState<string | null>(null)
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const { data: agent } = useQuery({
+    queryKey: ['my-agent'],
+    queryFn: () => api.get<{ agent: MyAgentDetail | null }>('/my-agent'),
+    enabled: open,
+  })
+
+  async function run(action: () => Promise<void>) {
+    setError(null)
+    try {
+      await action()
+      await qc.invalidateQueries({ queryKey: ['my-agent'] })
+      await qc.invalidateQueries({ queryKey: ['members'] })
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : '操作失败,请重试')
+    }
+  }
+
+  const detail = agent?.agent ?? null
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) { setIssuedToken(null); setRevealFor(null); setPassword(''); setError(null) } onOpenChange(v) }}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>管理我的 Agent</DialogTitle>
+          <DialogDescription>明文 key 仅签发时展示一次;回看需输入你的密码。</DialogDescription>
+        </DialogHeader>
+        {detail && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 text-sm">
+              <Bot className="h-4 w-4 text-muted-foreground" />
+              <span className="font-medium">{detail.display_name}</span>
+              <span className="text-xs text-muted-foreground">@{detail.username}</span>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="agent-key-note">签发新 key(备注可选)</Label>
+              <div className="flex gap-2">
+                <Input id="agent-key-note" value={note} onChange={(e) => setNote(e.target.value)} autoComplete="off" maxLength={500} />
+                <Button
+                  type="button"
+                  onClick={() =>
+                    void run(async () => {
+                      const created = await api.post<{ token: string }>('/my-agent/keys', { note: note.trim() || null })
+                      setIssuedToken(created.token)
+                      setNote('')
+                    })
+                  }
+                >
+                  签发
+                </Button>
+              </div>
+              {issuedToken && (
+                <div className="rounded-md border bg-muted/50 p-2 text-xs">
+                  <p className="mb-1 font-medium text-destructive">请立即复制,关闭后将不再显示:</p>
+                  <code className="break-all">{issuedToken}</code>
+                </div>
+              )}
+            </div>
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-muted-foreground">API key 列表({detail.active_keys} 个活跃)</p>
+              {detail.keys.length === 0 && <p className="text-sm text-muted-foreground">尚未签发</p>}
+              {detail.keys.map((k) => (
+                <div key={k.id} className="flex items-center justify-between gap-2 rounded-md border p-2 text-sm">
+                  <div className="min-w-0">
+                    <p className="truncate">{k.note || '无备注'}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {new Date(k.created_at).toLocaleDateString()}
+                      {k.revoked_at ? ` · 已吊销 ${new Date(k.revoked_at).toLocaleDateString()}` : ' · 活跃'}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    {!k.revoked_at && (
+                      <>
+                        {revealFor === k.id ? (
+                          <div className="flex items-center gap-1">
+                            <Input
+                              aria-label="你的密码"
+                              type="password"
+                              autoComplete="current-password"
+                              className="h-7 w-32 text-xs"
+                              value={password}
+                              onChange={(e) => setPassword(e.target.value)}
+                              placeholder="你的密码"
+                            />
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() =>
+                                void run(async () => {
+                                  const r = await api.post<{ token: string }>(`/my-agent/keys/${k.id}/reveal`, { password })
+                                  await navigator.clipboard.writeText(r.token).catch(() => undefined)
+                                  setRevealFor(null)
+                                  setPassword('')
+                                  window.alert('明文已复制到剪贴板')
+                                })
+                              }
+                            >
+                              查看
+                            </Button>
+                          </div>
+                        ) : (
+                          <Button variant="ghost" size="sm" onClick={() => { setRevealFor(k.id); setPassword('') }}>
+                            回看
+                          </Button>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-destructive"
+                          onClick={() => void run(() => api.delete(`/my-agent/keys/${k.id}`))}
+                        >
+                          吊销
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {error && <p className="text-sm text-destructive">{error}</p>}
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>关闭</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function MemberAgentSection({ member }: { member: MemberRow }) {
+  const isAdmin = member.role === 'admin'
+  return (
+    <div className="space-y-1.5 border-t pt-3">
+      <p className="text-xs font-medium text-muted-foreground">附属 Agent</p>
+      {member.agent ? (
+        <div className="flex items-center justify-between gap-2">
+          <span className="flex min-w-0 items-center gap-1.5 text-sm">
+            <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <span className="truncate">{member.agent.display_name}</span>
+            <span className="shrink-0 text-xs text-muted-foreground">{member.agent.active_keys} key</span>
+          </span>
+          {isAdmin && <EmergencyRevokeButton memberId={member.id} agentName={member.agent.display_name} />}
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">未创建</p>
+      )}
+    </div>
+  )
+}
+
+function EmergencyRevokeButton({ memberId, agentName }: { memberId: string; agentName: string }) {
+  const qc = useQueryClient()
+  const [error, setError] = useState<string | null>(null)
+
+  async function revoke() {
+    if (!window.confirm(`紧急吊销 ${agentName} 的全部 API key?该 Agent 将立即失去 MCP 访问。`)) return
+    setError(null)
+    try {
+      await api.post(`/members/${memberId}/agent/revoke-keys`)
+      await qc.invalidateQueries({ queryKey: ['members'] })
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : '吊销失败')
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-1">
+      {error && <span className="text-xs text-destructive">{error}</span>}
+      <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-destructive" onClick={() => void revoke()}>
+        <ShieldAlert className="h-3.5 w-3.5" />
+        紧急吊销
+      </Button>
+    </div>
+  )
+}
+
 export function MembersPage() {
   const { user } = useAuth()
   const isAdmin = user?.workspace_role === 'admin'
@@ -182,6 +419,8 @@ export function MembersPage() {
   const qc = useQueryClient()
   const [removeError, setRemoveError] = useState<string | null>(null)
   const [profileFor, setProfileFor] = useState<MemberRow | null>(null)
+  const [agentCreateOpen, setAgentCreateOpen] = useState(false)
+  const [agentManageOpen, setAgentManageOpen] = useState(false)
 
   async function remove(id: string, username: string) {
     if (!window.confirm(`移除成员 ${username}?其项目权限将一并清除`)) return
@@ -245,7 +484,7 @@ export function MembersPage() {
               const lockedMessage = m.is_self ? '不能操作自己的成员资格' : '首用户不能被操作'
 
               return (
-                <Card key={m.id} data-testid="member-card" className="h-52 overflow-hidden">
+                <Card key={m.id} data-testid="member-card" className="overflow-hidden">
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
                       <UserIdentityLabel user={m} showUsername />
@@ -257,6 +496,22 @@ export function MembersPage() {
                       <p className="text-xs font-medium text-muted-foreground">角色</p>
                       {isAdmin ? <RoleSelect member={m} /> : <p className="text-sm">{m.role === 'admin' ? '管理员' : '成员'}</p>}
                     </div>
+                    <MemberAgentSection member={m} />
+                    {m.is_self && (
+                      <div className="flex items-center gap-2">
+                        {!m.agent ? (
+                          <Button variant="outline" size="sm" onClick={() => setAgentCreateOpen(true)}>
+                            <Bot className="mr-1.5 h-4 w-4" />
+                            创建我的 Agent
+                          </Button>
+                        ) : (
+                          <Button variant="outline" size="sm" onClick={() => setAgentManageOpen(true)}>
+                            <KeyRound className="mr-1.5 h-4 w-4" />
+                            管理 Agent 与 key
+                          </Button>
+                        )}
+                      </div>
+                    )}
                     {isAdmin && (
                       <div className="flex items-center gap-2 border-t pt-3">
                         <Button variant="outline" size="sm" onClick={() => setProfileFor(m)}>
@@ -303,6 +558,8 @@ export function MembersPage() {
           <PasswordSetupLinkDialog setupUrl={setupUrl} onOpenChange={(open) => { if (!open) setSetupUrl(null) }} />
         </>
       )}
+      <CreateAgentDialog open={agentCreateOpen} onOpenChange={setAgentCreateOpen} />
+      <ManageAgentDialog open={agentManageOpen} onOpenChange={setAgentManageOpen} />
       {profileFor && (
         <UserProfileDialog
           user={profileFor}

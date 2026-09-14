@@ -35,6 +35,7 @@ export interface MemberRow extends UserIdentity {
   is_bootstrap: boolean
   is_self: boolean
   has_password: boolean
+  agent: MemberAgentSummary | null
 }
 
 export interface MemberCreateResponse extends MemberRow {
@@ -58,24 +59,26 @@ export interface ProjectMemberRow extends UserIdentity {
   is_current_user?: boolean
 }
 
-export interface ProjectGrant {
-  project_id: string
-  name: string
-  role: ProjectRole
-}
-
-export interface AgentRow extends UserIdentity {
+export interface MemberAgentSummary {
+  id: string
+  username: string
+  nickname: string | null
+  display_name: string
   created_at: string
-  grants: ProjectGrant[]
-  key_count: number
   active_keys: number
 }
 
-export interface AgentKey {
+export interface MyAgentKey {
   id: string
   note: string | null
   created_at: string
   revoked_at: string | null
+}
+
+export interface MyAgentDetail extends UserIdentity {
+  created_at: string
+  active_keys: number
+  keys: MyAgentKey[]
 }
 
 export interface CogneeConfiguration {

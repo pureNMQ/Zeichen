@@ -6,7 +6,6 @@ import { api } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { DocumentNavigationProvider } from '@/lib/document-navigation'
 import { CurrentProjectProvider } from '@/lib/current-project'
-import { AgentsPage } from '@/pages/agents'
 import { BootstrapPage } from '@/pages/bootstrap'
 import { LoginPage } from '@/pages/login'
 import { MembersPage } from '@/pages/members'
@@ -119,9 +118,6 @@ export function App() {
         <Route path="search" element={<SearchPage />} />
         <Route path="manual" element={<ManualPage />} />
         <Route path="members" element={<MembersPage />} />
-        <Route path="agents" element={<RequireAdmin />}>
-          <Route index element={<AgentsPage />} />
-        </Route>
         <Route path="cognee" element={<RequireAdmin />}>
           <Route index element={<CogneePage />} />
         </Route>

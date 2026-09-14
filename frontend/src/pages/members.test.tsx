@@ -47,8 +47,8 @@ vi.mock('@/lib/auth', () => ({
 import { ApiError, api, type MemberRow } from '@/lib/api'
 
 const rows: MemberRow[] = [
-  { id: 'u1', username: 'admin', role: 'admin', created_at: '2026-08-01T00:00:00Z', is_bootstrap: true, is_self: true, has_password: true },
-  { id: 'u2', username: 'bob', role: 'member', created_at: '2026-08-02T00:00:00Z', is_bootstrap: false, is_self: false, has_password: false },
+  { id: 'u1', username: 'admin', role: 'admin', created_at: '2026-08-01T00:00:00Z', is_bootstrap: true, is_self: true, has_password: true, agent: { id: 'a1', username: 'admin-bot', nickname: null, display_name: 'admin-bot', created_at: '2026-08-03T00:00:00Z', active_keys: 2 } },
+  { id: 'u2', username: 'bob', role: 'member', created_at: '2026-08-02T00:00:00Z', is_bootstrap: false, is_self: false, has_password: false, agent: null },
 ]
 
 function renderMembers() {
