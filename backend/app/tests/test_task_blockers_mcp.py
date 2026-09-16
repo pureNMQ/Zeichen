@@ -23,7 +23,7 @@ def mcp(mcp_server: dict) -> RawMcpClient:
 
 def _mount_requirement(mcp: RawMcpClient, pid: str, title="MCP 挂载需求") -> str:
     r = mcp.call("requirements.create", project_id=pid, title=title)
-    mcp.call("requirements.set_status", id=r["id"], status="backlog")
+    mcp.call("requirements.set_status", id=r["id"], project_id=pid, status="backlog")
     return r["id"]
 
 
@@ -38,7 +38,7 @@ def test_task_blockers_crud_over_mcp(mcp: RawMcpClient, mcp_server: dict):
     assert b["blocked"] is True
     assert [i["id"] for i in b["blocked_by"]] == [a["id"]]
 
-    got = mcp.call("tasks.get", id=b["id"])
+    got = mcp.call("tasks.get", id=b["id"], project_id=pid)
     assert got["blocked"] is True
     assert got["blocked_by"][0]["id"] == a["id"]
     assert got["blocked_by"][0]["title"] == "前置任务"
@@ -46,9 +46,9 @@ def test_task_blockers_crud_over_mcp(mcp: RawMcpClient, mcp_server: dict):
     assert got["blocked_by"][0]["resolved"] is False
 
     # 整体替换 / 清空
-    cleared = mcp.call("tasks.update", id=b["id"], blocked_by=[])
+    cleared = mcp.call("tasks.update", id=b["id"], project_id=pid, blocked_by=[])
     assert cleared["blocked"] is False and cleared["blocked_by"] == []
-    readded = mcp.call("tasks.update", id=b["id"], blocked_by=[a["id"]])
+    readded = mcp.call("tasks.update", id=b["id"], project_id=pid, blocked_by=[a["id"]])
     assert readded["blocked"] is True
 
     # 列表同样携带阻塞状态(看板/执行视图数据源)
@@ -63,12 +63,12 @@ def test_task_blocker_rules_over_mcp(mcp: RawMcpClient, mcp_server: dict):
     a = mcp.call("tasks.create", project_id=pid, title="任务A", requirement_id=rid)
     b = mcp.call("tasks.create", project_id=pid, title="任务B", requirement_id=rid)
 
-    self_dep = mcp.call("tasks.update", id=a["id"], blocked_by=[a["id"]])
+    self_dep = mcp.call("tasks.update", id=a["id"], project_id=pid, blocked_by=[a["id"]])
     assert "error" in self_dep and "invalid_request" in self_dep["error"], self_dep
 
-    assert "error" not in mcp.call("tasks.update", id=b["id"], blocked_by=[a["id"]])
-    cycle = mcp.call("tasks.update", id=a["id"], blocked_by=[b["id"]])
+    assert "error" not in mcp.call("tasks.update", id=b["id"], project_id=pid, blocked_by=[a["id"]])
+    cycle = mcp.call("tasks.update", id=a["id"], project_id=pid, blocked_by=[b["id"]])
     assert "error" in cycle and "conflict" in cycle["error"], cycle
 
-    dup = mcp.call("tasks.update", id=b["id"], blocked_by=[a["id"], a["id"]])
+    dup = mcp.call("tasks.update", id=b["id"], project_id=pid, blocked_by=[a["id"], a["id"]])
     assert "error" in dup and "conflict" in dup["error"], dup

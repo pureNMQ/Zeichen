@@ -31,7 +31,7 @@ def test_mcp_requirement_description_plain_text_semantics(mcp_server: dict):
     )
     assert req["description"] == "扫码 或 密码 登录"
 
-    updated = client.call("requirements.update", id=req["id"], description="`pytest` **回归**")
+    updated = client.call("requirements.update", id=req["id"], project_id=pid, description="`pytest` **回归**")
     assert updated["description"] == "pytest 回归"
 
     html = client.call(
@@ -55,7 +55,7 @@ def test_mcp_task_description_plain_text_semantics(mcp_server: dict):
     pid = mcp_server["project_id"]
 
     r = client.call("requirements.create", project_id=pid, title="MCP 任务挂载需求")
-    client.call("requirements.set_status", id=r["id"], status="backlog")
+    client.call("requirements.set_status", id=r["id"], project_id=pid, status="backlog")
     t = client.call(
         "tasks.create",
         project_id=pid,
@@ -65,7 +65,7 @@ def test_mcp_task_description_plain_text_semantics(mcp_server: dict):
     )
     assert t["description"] == "红线 用例"
 
-    html = client.call("tasks.update", id=t["id"], description="<b>加粗</b>")
+    html = client.call("tasks.update", id=t["id"], project_id=pid, description="<b>加粗</b>")
     assert "invalid_request" in html["error"]
 
 
@@ -96,13 +96,13 @@ def test_mcp_legacy_markdown_description_read_unaffected_and_normalized_on_updat
     engine.dispose()
 
     # 存量 Markdown 读取原样返回(不迁移、不丢数据)
-    got = client.call("requirements.get", id=rid)
+    got = client.call("requirements.get", id=rid, project_id=pid)
     assert got["description"] == legacy
     # 仅更新标题:描述不动
-    kept = client.call("requirements.update", id=rid, title="只改标题")
+    kept = client.call("requirements.update", id=rid, project_id=pid, title="只改标题")
     assert kept["description"] == legacy
     # 更新描述:应用新规则
-    applied = client.call("requirements.update", id=rid, description="[新](https://example.com/new) **描述**")
+    applied = client.call("requirements.update", id=rid, project_id=pid, description="[新](https://example.com/new) **描述**")
     assert applied["description"] == "新 描述"
 
-    assert client.call("requirements.delete", id=rid, confirm_task_count=0)["deleted"] is True
+    assert client.call("requirements.delete", id=rid, confirm_task_count=0, project_id=pid)["deleted"] is True

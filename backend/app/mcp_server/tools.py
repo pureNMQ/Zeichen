@@ -99,8 +99,25 @@ def _split_statuses(status: str | None) -> list[str] | None:
 
 
 def _scope_uuid(project_id: str | None) -> uuid.UUID | None:
-    """MCP 消歧通道(REQ-55):可选 project_id,空/缺省 = 全局解析。"""
+    """可选 project_id 解析:仅用于多态工具的 project/repository 目标(UUID 寻址)。"""
     return _optional_uuid(project_id, "project_id")
+
+
+def _require_scope(project_id: str | None) -> uuid.UUID:
+    """短码寻址工具必传 project_id(REQ-55 返工:统一接口,缺省项目的全局解析路径从 MCP 移除)。"""
+    if project_id is None or not str(project_id).strip():
+        raise ToolError("invalid_request: project_id 必传(短码按项目内寻址,不接受缺省项目)")
+    return _optional_uuid(project_id, "project_id")
+
+
+_ENTITY_TARGET_TYPES = ("requirement", "task", "document")
+
+
+def _target_scope(project_id: str | None, target_types: tuple[str, ...]) -> uuid.UUID | None:
+    """多态工具目标的项目上下文:实体短码目标必传;project/repository 目标 UUID 寻址可省。"""
+    if any(t in _ENTITY_TARGET_TYPES for t in target_types):
+        return _require_scope(project_id)
+    return _scope_uuid(project_id)
 
 
 def _optional_uuid(value: str | None, field_name: str) -> uuid.UUID | None:
@@ -250,11 +267,11 @@ def _register_all(mcp) -> None:
 
     @mcp.tool(name="requirements.get")
     @sessioned
-    def requirements_get(id: str, project_id: str | None = None) -> dict:
-        """需求详情(含任务数);跨项目同码时传 project_id 消歧。"""
+    def requirements_get(id: str, project_id: str) -> dict:
+        """需求详情(含任务数)。project_id 必传:短码按项目内寻址,无缺省项目路径。"""
         db, actor = dbc()
         return req_svc._requirement_dict(
-            db, req_svc.get_requirement(db, actor, id, project_id=_scope_uuid(project_id))
+            db, req_svc.get_requirement(db, actor, id, project_id=_require_scope(project_id))
         )
 
     @mcp.tool(name="requirements.list")
@@ -279,55 +296,54 @@ def _register_all(mcp) -> None:
     @mcp.tool(name="requirements.update")
     @sessioned
     def requirements_update(
-        id: str, title: str | None = None, description: str | None = None,
-        project_id: str | None = None,
+        id: str, project_id: str, title: str | None = None, description: str | None = None,
     ) -> dict:
-        """更新需求元数据(标题/描述,不涉状态);跨项目同码时传 project_id 消歧。"""
+        """更新需求元数据(标题/描述,不涉状态)。project_id 必传:短码按项目内寻址。"""
         db, actor = dbc()
         r = req_svc.update_requirement(
-            db, actor, id, title, description, project_id=_scope_uuid(project_id)
+            db, actor, id, title, description, project_id=_require_scope(project_id)
         )
         return req_svc._requirement_dict(db, r)
 
     @mcp.tool(name="requirements.set_status")
     @sessioned
-    def requirements_set_status(id: str, status: str, project_id: str | None = None) -> dict:
+    def requirements_set_status(id: str, project_id: str, status: str) -> dict:
         """改状态:任意目标态自由流转(需求六态:pending/backlog/in_progress/verifying/done/cancelled),
         无任何前置校验;pending→backlog 即确认,verifying=验收中(验收语义在需求层)。
-        跨项目同码时传 project_id 消歧。"""
+        project_id 必传:短码按项目内寻址。"""
         db, actor = dbc()
         r = req_svc.set_requirement_status(
-            db, actor, id, status, project_id=_scope_uuid(project_id)
+            db, actor, id, status, project_id=_require_scope(project_id)
         )
         return req_svc._requirement_dict(db, r)
 
     @mcp.tool(name="requirements.cancel")
     @sessioned
-    def requirements_cancel(id: str, project_id: str | None = None) -> dict:
-        """取消需求:set_status('cancelled') 便捷封装;跨项目同码时传 project_id 消歧。"""
+    def requirements_cancel(id: str, project_id: str) -> dict:
+        """取消需求:set_status('cancelled') 便捷封装。project_id 必传:短码按项目内寻址。"""
         db, actor = dbc()
-        r = req_svc.cancel_requirement(db, actor, id, project_id=_scope_uuid(project_id))
+        r = req_svc.cancel_requirement(db, actor, id, project_id=_require_scope(project_id))
         return req_svc._requirement_dict(db, r)
 
     @mcp.tool(name="requirements.delete")
     @sessioned
     def requirements_delete(
-        id: str, confirm_task_count: int | None = None, project_id: str | None = None
+        id: str, project_id: str, confirm_task_count: int | None = None
     ) -> dict:
-        """软删需求;下有任务时须传 confirm_task_count=任务数 二次确认;跨项目同码时传 project_id 消歧。"""
+        """软删需求;下有任务时须传 confirm_task_count=任务数 二次确认。project_id 必传:短码按项目内寻址。"""
         db, actor = dbc()
         req_svc.delete_requirement(
-            db, actor, id, confirm_task_count, project_id=_scope_uuid(project_id)
+            db, actor, id, confirm_task_count, project_id=_require_scope(project_id)
         )
         return {"deleted": True, "id": id}
 
     @mcp.tool(name="requirements.restore")
     @sessioned
-    def requirements_restore(id: str, project_id: str | None = None) -> dict:
-        """恢复已软删需求;跨项目同码时传 project_id 消歧。"""
+    def requirements_restore(id: str, project_id: str) -> dict:
+        """恢复已软删需求。project_id 必传:短码按项目内寻址。"""
         db, actor = dbc()
         return req_svc._requirement_dict(
-            db, req_svc.restore_requirement(db, actor, id, project_id=_scope_uuid(project_id))
+            db, req_svc.restore_requirement(db, actor, id, project_id=_require_scope(project_id))
         )
 
     # ---------- tasks.* ----------
@@ -354,11 +370,11 @@ def _register_all(mcp) -> None:
 
     @mcp.tool(name="tasks.get")
     @sessioned
-    def tasks_get(id: str, project_id: str | None = None) -> dict:
-        """任务详情;跨项目同码时传 project_id 消歧。"""
+    def tasks_get(id: str, project_id: str) -> dict:
+        """任务详情。project_id 必传:短码按项目内寻址,无缺省项目路径。"""
         db, actor = dbc()
         return task_svc._task_dict(
-            db, task_svc.get_task(db, actor, id, project_id=_scope_uuid(project_id))
+            db, task_svc.get_task(db, actor, id, project_id=_require_scope(project_id))
         )
 
     @mcp.tool(name="tasks.list")
@@ -388,15 +404,15 @@ def _register_all(mcp) -> None:
     @sessioned
     def tasks_update(
         id: str,
+        project_id: str,
         title: str | None = None,
         description: str | None = None,
         requirement_id: str | None = _UNSET,
         blocked_by: list[str] | None = _UNSET,
-        project_id: str | None = None,
     ) -> dict:
         """更新任务元数据；省略 requirement_id/blocked_by 保留原值，requirement_id 仅可改指向
         同项目其他需求(传 null/空字符串解除关联会被拒绝，任务必须挂需求)，blocked_by 传 null
-        或 [] 清空(整体替换)；跨项目同码时传 project_id 消歧。"""
+        或 [] 清空(整体替换)。project_id 必传:短码按项目内寻址。"""
         db, actor = dbc()
         kwargs: dict = {}
         if requirement_id is not _UNSET:
@@ -404,75 +420,75 @@ def _register_all(mcp) -> None:
         if blocked_by is not _UNSET:
             kwargs["blocked_by"] = _uuid_list(blocked_by)
         t = task_svc.update_task(
-            db, actor, id, title, description, project_id=_scope_uuid(project_id), **kwargs
+            db, actor, id, title, description, project_id=_require_scope(project_id), **kwargs
         )
         return task_svc._task_dict(db, t)
 
     @mcp.tool(name="tasks.set_status")
     @sessioned
-    def tasks_set_status(id: str, status: str, project_id: str | None = None) -> dict:
-        """改状态:任意目标态自由流转(任务四态:backlog/in_progress/done/cancelled);已指派仅本人/管理员;
-        跨项目同码时传 project_id 消歧。"""
+    def tasks_set_status(id: str, project_id: str, status: str) -> dict:
+        """改状态:任意目标态自由流转(任务四态:backlog/in_progress/done/cancelled);已指派仅本人/管理员。
+        project_id 必传:短码按项目内寻址。"""
         db, actor = dbc()
         t = task_svc.set_task_status(
-            db, actor, id, status, project_id=_scope_uuid(project_id)
+            db, actor, id, status, project_id=_require_scope(project_id)
         )
         return task_svc._task_dict(db, t)
 
     @mcp.tool(name="tasks.assign")
     @sessioned
-    def tasks_assign(id: str, assignee_id: str, project_id: str | None = None) -> dict:
-        """指派(未指派任意编辑权者可指派;已指派仅本人/管理员可改派);跨项目同码时传 project_id 消歧。"""
+    def tasks_assign(id: str, project_id: str, assignee_id: str) -> dict:
+        """指派(未指派任意编辑权者可指派;已指派仅本人/管理员可改派)。project_id 必传:短码按项目内寻址。"""
         db, actor = dbc()
         return task_svc._task_dict(
             db,
             task_svc.assign_task(
-                db, actor, id, uuid.UUID(assignee_id), project_id=_scope_uuid(project_id)
+                db, actor, id, uuid.UUID(assignee_id), project_id=_require_scope(project_id)
             ),
         )
 
     @mcp.tool(name="tasks.claim")
     @sessioned
-    def tasks_claim(id: str, project_id: str | None = None) -> dict:
-        """认领未指派任务(并发安全,失败得 conflict);跨项目同码时传 project_id 消歧。"""
+    def tasks_claim(id: str, project_id: str) -> dict:
+        """认领未指派任务(并发安全,失败得 conflict)。project_id 必传:短码按项目内寻址。"""
         db, actor = dbc()
         return task_svc._task_dict(
-            db, task_svc.claim_task(db, actor, id, project_id=_scope_uuid(project_id))
+            db, task_svc.claim_task(db, actor, id, project_id=_require_scope(project_id))
         )
 
     @mcp.tool(name="tasks.unassign")
     @sessioned
-    def tasks_unassign(id: str, project_id: str | None = None) -> dict:
-        """解除指派(仅本人/管理员);跨项目同码时传 project_id 消歧。"""
+    def tasks_unassign(id: str, project_id: str) -> dict:
+        """解除指派(仅本人/管理员)。project_id 必传:短码按项目内寻址。"""
         db, actor = dbc()
         return task_svc._task_dict(
-            db, task_svc.unassign_task(db, actor, id, project_id=_scope_uuid(project_id))
+            db, task_svc.unassign_task(db, actor, id, project_id=_require_scope(project_id))
         )
 
     @mcp.tool(name="tasks.cancel")
     @sessioned
-    def tasks_cancel(id: str, project_id: str | None = None) -> dict:
-        """取消任务:set_status('cancelled') 便捷封装;跨项目同码时传 project_id 消歧。"""
+    def tasks_cancel(id: str, project_id: str) -> dict:
+        """取消任务:set_status('cancelled') 便捷封装。project_id 必传:短码按项目内寻址。"""
         db, actor = dbc()
         return task_svc._task_dict(
-            db, task_svc.cancel_task(db, actor, id, project_id=_scope_uuid(project_id))
+            db, task_svc.cancel_task(db, actor, id, project_id=_require_scope(project_id))
         )
 
     @mcp.tool(name="tasks.delete")
     @sessioned
-    def tasks_delete(id: str, project_id: str | None = None) -> dict:
-        """软删任务(已指派仅本人/管理员);跨项目同码时传 project_id 消歧。"""
+    def tasks_delete(id: str, project_id: str) -> dict:
+        """软删任务(已指派仅本人/管理员)。project_id 必传:短码按项目内寻址。"""
         db, actor = dbc()
-        task_svc.delete_task(db, actor, id, project_id=_scope_uuid(project_id))
+        task_svc.delete_task(db, actor, id, project_id=_require_scope(project_id))
         return {"deleted": True, "id": id}
 
     @mcp.tool(name="tasks.restore")
     @sessioned
-    def tasks_restore(id: str, project_id: str | None = None) -> dict:
-        """恢复已软删任务;跨项目同码时传 project_id 消歧。"""
+    def tasks_restore(id: str, project_id: str) -> dict:
+        """恢复已软删任务。project_id 必传:短码按项目内寻址。"""
         db, actor = dbc()
         return task_svc._task_dict(
-            db, task_svc.restore_task(db, actor, id, project_id=_scope_uuid(project_id))
+            db, task_svc.restore_task(db, actor, id, project_id=_require_scope(project_id))
         )
 
     # ---------- docs.wiki.* / docs.glossary.* ----------
@@ -484,11 +500,11 @@ def _register_all(mcp) -> None:
         )
         return document_svc._document_dict(db, document)
 
-    def _doc_get(id: str, module: str, project_id: str | None = None) -> dict:
+    def _doc_get(id: str, module: str, project_id: str) -> dict:
         db, actor = dbc()
         return document_svc._document_dict(
             db,
-            document_svc.get_document(db, actor, id, module, project_id=_scope_uuid(project_id)),
+            document_svc.get_document(db, actor, id, module, project_id=_require_scope(project_id)),
         )
 
     def _doc_children(project_id: str, module: str, parent_id: str | None, cursor: str | None, limit: int | None) -> dict:
@@ -498,10 +514,10 @@ def _register_all(mcp) -> None:
 
     def _doc_update(
         id: str, module: str, title: str | None, content: str | None,
-        metadata: dict | None = None, project_id: str | None = None,
+        metadata: dict | None = None, project_id: str = "",
     ) -> dict:
         db, actor = dbc()
-        scope = _scope_uuid(project_id)
+        scope = _require_scope(project_id)
         document = document_svc.get_document(db, actor, id, module, project_id=scope)
         saved, warning = document_svc.update_document(
             db, actor, document.code, title, content,
@@ -511,27 +527,27 @@ def _register_all(mcp) -> None:
 
     def _doc_move(
         id: str, module: str, parent_id: str = "", directory_id: str = "",
-        project_id: str | None = None,
+        project_id: str = "",
     ) -> dict:
         db, actor = dbc()
-        scope = _scope_uuid(project_id)
+        scope = _require_scope(project_id)
         document = document_svc.get_document(db, actor, id, module, project_id=scope)
         moved = document_svc.move_document(
             db, actor, document.code, parent_id or None, directory_id or None, project_id=scope
         )
         return document_svc._document_dict(db, moved)
 
-    def _doc_delete(id: str, module: str, project_id: str | None = None) -> dict:
+    def _doc_delete(id: str, module: str, project_id: str) -> dict:
         db, actor = dbc()
-        scope = _scope_uuid(project_id)
+        scope = _require_scope(project_id)
         document = document_svc.get_document(db, actor, id, module, project_id=scope)
         impact = document_svc.delete_impact_document(db, actor, document.code, project_id=scope)
         document_svc.delete_document(db, actor, document.code, project_id=scope)
         return {"deleted": True, "id": id, "impact": impact}
 
-    def _doc_restore(id: str, module: str, project_id: str | None = None) -> dict:
+    def _doc_restore(id: str, module: str, project_id: str) -> dict:
         db, actor = dbc()
-        scope = _scope_uuid(project_id)
+        scope = _require_scope(project_id)
         document = document_svc._visible_document(
             db, actor, id, include_deleted=True, project_id=scope
         )
@@ -558,8 +574,8 @@ def _register_all(mcp) -> None:
 
     @mcp.tool(name="docs.wiki.get")
     @sessioned
-    def docs_wiki_get(id: str, project_id: str | None = None) -> dict:
-        """Wiki 详情;跨项目同码时传 project_id 消歧。"""
+    def docs_wiki_get(id: str, project_id: str) -> dict:
+        """Wiki 详情。project_id 必传:短码按项目内寻址,无缺省项目路径。"""
         return _doc_get(id, "wiki", project_id)
 
     @mcp.tool(name="docs.wiki.children")
@@ -582,51 +598,50 @@ def _register_all(mcp) -> None:
     @mcp.tool(name="docs.wiki.update")
     @sessioned
     def docs_wiki_update(
-        id: str, title: str | None = None, content: str | None = None,
-        project_id: str | None = None,
+        id: str, project_id: str, title: str | None = None, content: str | None = None,
     ) -> dict:
-        """更新 Wiki;跨项目同码时传 project_id 消歧。"""
+        """更新 Wiki。project_id 必传:短码按项目内寻址。"""
         return _doc_update(id, "wiki", title, content, project_id=project_id)
 
     @mcp.tool(name="docs.wiki.move")
     @sessioned
-    def docs_wiki_move(id: str, parent_id: str = "", project_id: str | None = None) -> dict:
-        """移动 Wiki；省略 parent_id 或传空字符串移动到根节点;跨项目同码时传 project_id 消歧。"""
+    def docs_wiki_move(id: str, project_id: str, parent_id: str = "") -> dict:
+        """移动 Wiki；省略 parent_id 或传空字符串移动到根节点。project_id 必传:短码按项目内寻址。"""
         return _doc_move(id, "wiki", parent_id=parent_id, project_id=project_id)
 
     @mcp.tool(name="docs.wiki.versions")
     @sessioned
-    def docs_wiki_versions(id: str, project_id: str | None = None) -> dict:
-        """Wiki 版本列表;跨项目同码时传 project_id 消歧。"""
+    def docs_wiki_versions(id: str, project_id: str) -> dict:
+        """Wiki 版本列表。project_id 必传:短码按项目内寻址。"""
         db, actor = dbc()
         return {
             "items": document_svc.list_versions(
-                db, actor, id, "wiki", project_id=_scope_uuid(project_id)
+                db, actor, id, "wiki", project_id=_require_scope(project_id)
             )
         }
 
     @mcp.tool(name="docs.wiki.rollback")
     @sessioned
-    def docs_wiki_rollback(id: str, version_no: int, project_id: str | None = None) -> dict:
-        """回滚 Wiki 版本;跨项目同码时传 project_id 消歧。"""
+    def docs_wiki_rollback(id: str, project_id: str, version_no: int) -> dict:
+        """回滚 Wiki 版本。project_id 必传:短码按项目内寻址。"""
         db, actor = dbc()
         return document_svc._document_dict(
             db,
             document_svc.rollback_document(
-                db, actor, id, version_no, "wiki", project_id=_scope_uuid(project_id)
+                db, actor, id, version_no, "wiki", project_id=_require_scope(project_id)
             ),
         )
 
     @mcp.tool(name="docs.wiki.delete")
     @sessioned
-    def docs_wiki_delete(id: str, project_id: str | None = None) -> dict:
-        """删除 Wiki;跨项目同码时传 project_id 消歧。"""
+    def docs_wiki_delete(id: str, project_id: str) -> dict:
+        """删除 Wiki。project_id 必传:短码按项目内寻址。"""
         return _doc_delete(id, "wiki", project_id)
 
     @mcp.tool(name="docs.wiki.restore")
     @sessioned
-    def docs_wiki_restore(id: str, project_id: str | None = None) -> dict:
-        """恢复已删 Wiki;跨项目同码时传 project_id 消歧。"""
+    def docs_wiki_restore(id: str, project_id: str) -> dict:
+        """恢复已删 Wiki。project_id 必传:短码按项目内寻址。"""
         return _doc_restore(id, "wiki", project_id)
 
     def _register_directory_tools(mcp, module: str) -> None:
@@ -639,10 +654,10 @@ def _register_all(mcp) -> None:
 
         @mcp.tool(name=f"docs.{module}.directory_move")
         @sessioned
-        def directory_move(id: str, parent_id: str = "", project_id: str | None = None) -> dict:
-            """移动目录；省略 parent_id 或传空字符串移动到根节点;跨项目同码时传 project_id 消歧。"""
+        def directory_move(id: str, project_id: str, parent_id: str = "") -> dict:
+            """移动目录；省略 parent_id 或传空字符串移动到根节点。project_id 必传:短码按项目内寻址。"""
             db, actor = dbc()
-            scope = _scope_uuid(project_id)
+            scope = _require_scope(project_id)
             directory = document_svc.get_directory(db, actor, id, module, project_id=scope)
             moved = document_svc.move_directory(
                 db, actor, directory.code, parent_id or None, project_id=scope
@@ -651,10 +666,10 @@ def _register_all(mcp) -> None:
 
         @mcp.tool(name=f"docs.{module}.directory_rename")
         @sessioned
-        def directory_rename(id: str, name: str, project_id: str | None = None) -> dict:
-            """重命名目录;跨项目同码时传 project_id 消歧。"""
+        def directory_rename(id: str, project_id: str, name: str) -> dict:
+            """重命名目录。project_id 必传:短码按项目内寻址。"""
             db, actor = dbc()
-            scope = _scope_uuid(project_id)
+            scope = _require_scope(project_id)
             directory = document_svc.get_directory(db, actor, id, module, project_id=scope)
             return document_svc._directory_dict(
                 db,
@@ -663,10 +678,10 @@ def _register_all(mcp) -> None:
 
         @mcp.tool(name=f"docs.{module}.directory_delete")
         @sessioned
-        def directory_delete(id: str, project_id: str | None = None) -> dict:
-            """删除目录;跨项目同码时传 project_id 消歧。"""
+        def directory_delete(id: str, project_id: str) -> dict:
+            """删除目录。project_id 必传:短码按项目内寻址。"""
             db, actor = dbc()
-            scope = _scope_uuid(project_id)
+            scope = _require_scope(project_id)
             directory = document_svc.get_directory(db, actor, id, module, project_id=scope)
             impact = document_svc.delete_impact_directory(db, actor, directory.code, project_id=scope)
             document_svc.delete_directory(db, actor, directory.code, project_id=scope)
@@ -674,10 +689,10 @@ def _register_all(mcp) -> None:
 
         @mcp.tool(name=f"docs.{module}.directory_restore")
         @sessioned
-        def directory_restore(id: str, project_id: str | None = None) -> dict:
-            """恢复已删目录;跨项目同码时传 project_id 消歧。"""
+        def directory_restore(id: str, project_id: str) -> dict:
+            """恢复已删目录。project_id 必传:短码按项目内寻址。"""
             db, actor = dbc()
-            directory = document_svc.restore_directory(db, actor, id, project_id=_scope_uuid(project_id))
+            directory = document_svc.restore_directory(db, actor, id, project_id=_require_scope(project_id))
             if directory.module_type != module:
                 raise ToolError("not_found: 目录不存在")
             return document_svc._directory_dict(db, directory)
@@ -689,13 +704,15 @@ def _register_all(mcp) -> None:
 
     @mcp.tool(name="docs.glossary.get")
     @sessioned
-    def docs_glossary_get(project_id: str | None = None, title: str | None = None, id: str | None = None) -> dict:
+    def docs_glossary_get(project_id: str, title: str | None = None, id: str | None = None) -> dict:
+        """词条详情(id 或 project_id + title)。project_id 必传:短码/标题均按项目内寻址。"""
         db, actor = dbc()
+        scope = _require_scope(project_id)
         if id:
             return _doc_get(id, "glossary", project_id)
-        if not project_id or not title:
+        if not title:
             raise ToolError("invalid_request: 需要 id 或 project_id + title")
-        return document_svc._document_dict(db, document_svc.get_glossary_term(db, actor, uuid.UUID(project_id), title))
+        return document_svc._document_dict(db, document_svc.get_glossary_term(db, actor, scope, title))
 
     @mcp.tool(name="docs.glossary.children")
     @sessioned
@@ -715,16 +732,15 @@ def _register_all(mcp) -> None:
     @mcp.tool(name="docs.glossary.update")
     @sessioned
     def docs_glossary_update(
-        id: str, title: str | None = None, content: str | None = None,
-        project_id: str | None = None,
+        id: str, project_id: str, title: str | None = None, content: str | None = None,
     ) -> dict:
-        """更新词条;跨项目同码时传 project_id 消歧。"""
+        """更新词条。project_id 必传:短码按项目内寻址。"""
         return _doc_update(id, "glossary", title, content, project_id=project_id)
 
     @mcp.tool(name="docs.glossary.move")
     @sessioned
-    def docs_glossary_move(id: str, directory_id: str = "", project_id: str | None = None) -> dict:
-        """移动术语；省略 directory_id 或传空字符串移动到根节点;跨项目同码时传 project_id 消歧。"""
+    def docs_glossary_move(id: str, project_id: str, directory_id: str = "") -> dict:
+        """移动术语；省略 directory_id 或传空字符串移动到根节点。project_id 必传:短码按项目内寻址。"""
         return _doc_move(id, "glossary", directory_id=directory_id, project_id=project_id)
 
     @mcp.tool(name="docs.glossary.deleted")
@@ -734,14 +750,14 @@ def _register_all(mcp) -> None:
 
     @mcp.tool(name="docs.glossary.delete")
     @sessioned
-    def docs_glossary_delete(id: str, project_id: str | None = None) -> dict:
-        """删除词条;跨项目同码时传 project_id 消歧。"""
+    def docs_glossary_delete(id: str, project_id: str) -> dict:
+        """删除词条。project_id 必传:短码按项目内寻址。"""
         return _doc_delete(id, "glossary", project_id)
 
     @mcp.tool(name="docs.glossary.restore")
     @sessioned
-    def docs_glossary_restore(id: str, project_id: str | None = None) -> dict:
-        """恢复已删词条;跨项目同码时传 project_id 消歧。"""
+    def docs_glossary_restore(id: str, project_id: str) -> dict:
+        """恢复已删词条。project_id 必传:短码按项目内寻址。"""
         return _doc_restore(id, "glossary", project_id)
 
     _register_directory_tools(mcp, "glossary")
@@ -752,11 +768,11 @@ def _register_all(mcp) -> None:
     def comment_create(
         target_type: str, target_id: str, body: str, project_id: str | None = None
     ) -> dict:
-        """在实体上添加评论(requirement/document/project;task 目标返回 invalid_request,任务无评论区);
-        实体目标跨项目同码时传 project_id 消歧。"""
+        """在实体上添加评论(requirement/document/project;task 目标返回 invalid_request,任务无评论区)。
+        实体目标(短码寻址)必传 project_id;project 目标(UUID 寻址)可省。"""
         db, actor = dbc()
         c = poly_svc.create_comment(
-            db, actor, target_type, target_id, body, project_id=_scope_uuid(project_id)
+            db, actor, target_type, target_id, body, project_id=_target_scope(project_id, (target_type,))
         )
         return {"id": str(c.id), "target_type": c.target_type, "target_id": str(c.target_id), "body": c.body}
 
@@ -766,12 +782,13 @@ def _register_all(mcp) -> None:
         target_type: str, target_id: str, cursor: str | None = None,
         limit: int | None = None, project_id: str | None = None,
     ) -> dict:
-        """实体的评论流(cursor 分页;task 目标返回 invalid_request,任务无评论区);
-        实体目标跨项目同码时传 project_id 消歧。"""
+        """实体的评论流(cursor 分页;task 目标返回 invalid_request,任务无评论区)。
+        实体目标(短码寻址)必传 project_id;project 目标(UUID 寻址)可省。"""
         db, actor = dbc()
         cursor, limit = _paged({"type": target_type, "id": target_id}, cursor, limit)
         return poly_svc.list_comments(
-            db, actor, target_type, target_id, cursor, limit, project_id=_scope_uuid(project_id)
+            db, actor, target_type, target_id, cursor, limit,
+            project_id=_target_scope(project_id, (target_type,)),
         )
 
     @mcp.tool(name="comment.delete")
@@ -789,12 +806,12 @@ def _register_all(mcp) -> None:
         from_type: str, from_id: str, to_type: str, to_id: str, type: str,
         project_id: str | None = None,
     ) -> dict:
-        """建立实体间引用(type: derives/documents/implements/mentions;双方须同项目);
-        实体目标跨项目同码时传 project_id 消歧。"""
+        """建立实体间引用(type: derives/documents/implements/mentions;双方须同项目)。
+        实体目标(短码寻址)必传 project_id;project/repository 目标(UUID 寻址)可省。"""
         db, actor = dbc()
         r = poly_svc.create_reference(
             db, actor, from_type, from_id, to_type, to_id, type,
-            project_id=_scope_uuid(project_id),
+            project_id=_target_scope(project_id, (from_type, to_type)),
         )
         return {
             "id": str(r.id), "from_type": r.from_type, "from_id": r.from_id,
@@ -807,11 +824,13 @@ def _register_all(mcp) -> None:
         target_type: str, target_id: str, cursor: str | None = None,
         limit: int | None = None, project_id: str | None = None,
     ) -> dict:
-        """实体的引用(双向:from/to 任一命中);实体目标跨项目同码时传 project_id 消歧。"""
+        """实体的引用(双向:from/to 任一命中)。
+        实体目标(短码寻址)必传 project_id;project/repository 目标(UUID 寻址)可省。"""
         db, actor = dbc()
         cursor, limit = _paged({"type": target_type, "id": target_id}, cursor, limit)
         return poly_svc.list_references(
-            db, actor, target_type, target_id, cursor, limit, project_id=_scope_uuid(project_id)
+            db, actor, target_type, target_id, cursor, limit,
+            project_id=_target_scope(project_id, (target_type,)),
         )
 
     @mcp.tool(name="ref.delete")

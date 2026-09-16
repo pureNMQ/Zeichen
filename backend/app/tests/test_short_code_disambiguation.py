@@ -300,7 +300,39 @@ def same_codes(mcp_two_projects: dict) -> dict:
 class TestMcpDisambiguation:
     def test_get_without_project_rejected(self, mcp_two_projects: dict, same_codes: dict):
         got = mcp_two_projects["client"].call("tasks.get", id=same_codes["task"])
-        assert "error" in got and "invalid_request" in got["error"], got
+        # schema 级必传校验:缺 project_id 直接被参数校验拒绝
+        assert "error" in got and "project_id" in got["error"], got
+
+    def test_single_hit_without_project_also_rejected(self, mcp_two_projects: dict):
+        """接口统一(REQ-55 返工):缺省 project_id 的短码寻址一律拒绝,单命中也不例外。"""
+        mcp = mcp_two_projects["client"]
+        pid = mcp_two_projects["pa"]
+        r = mcp.call("requirements.create", project_id=pid, title="仅PA需求")
+        assert "error" not in r, r
+        got = mcp.call("requirements.get", id=r["id"])
+        assert "error" in got and "project_id" in got["error"], got
+        # 携带 project_id 正常寻址
+        ok = mcp.call("requirements.get", id=r["id"], project_id=pid)
+        assert "error" not in ok, ok
+
+    def test_comment_entity_target_requires_project(self, mcp_two_projects: dict, same_codes: dict):
+        """多态工具:实体短码目标必传 project_id;project 目标(UUID 寻址)可省。"""
+        mcp = mcp_two_projects["client"]
+        missing = mcp.call(
+            "comment.create", target_type="requirement", target_id=same_codes["req"], body="x"
+        )
+        assert "error" in missing and "invalid_request" in missing["error"], missing
+        assert "project_id" in missing["error"], missing
+        ok = mcp.call(
+            "comment.create", target_type="requirement", target_id=same_codes["req"],
+            body="x", project_id=mcp_two_projects["pa"],
+        )
+        assert "error" not in ok, ok
+        # project 目标无需 project_id
+        proj = mcp.call(
+            "comment.create", target_type="project", target_id=mcp_two_projects["pa"], body="y"
+        )
+        assert "error" not in proj, proj
 
     def test_get_with_project_disambiguates(self, mcp_two_projects: dict, same_codes: dict):
         got = mcp_two_projects["client"].call(
