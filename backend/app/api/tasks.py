@@ -62,16 +62,18 @@ def create_task(
 @router.get("/tasks/{task_id}")
 def get_task(
     task_id: str,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    return service._task_dict(db, service.get_task(db, user, task_id))
+    return service._task_dict(db, service.get_task(db, user, task_id, project_id))
 
 
 @router.patch("/tasks/{task_id}")
 def update_task(
     task_id: str,
     body: TaskUpdate,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -81,7 +83,8 @@ def update_task(
     return service._task_dict(
         db,
         service.update_task(
-            db, user, task_id, body.title, body.description, requirement_id, blocked_by
+            db, user, task_id, body.title, body.description, requirement_id, blocked_by,
+            project_id=project_id,
         ),
     )
 
@@ -90,63 +93,80 @@ def update_task(
 def set_status(
     task_id: str,
     body: StatusBody,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    return service._task_dict(db, service.set_task_status(db, user, task_id, body.status))
+    return service._task_dict(
+        db, service.set_task_status(db, user, task_id, body.status, project_id=project_id)
+    )
 
 
 @router.post("/tasks/{task_id}/assign")
 def assign_task(
     task_id: str,
     body: TaskAssignBody,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    return service._task_dict(db, service.assign_task(db, user, task_id, body.assignee_id))
+    return service._task_dict(
+        db, service.assign_task(db, user, task_id, body.assignee_id, project_id=project_id)
+    )
 
 
 @router.post("/tasks/{task_id}/claim")
 def claim_task(
     task_id: str,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    return service._task_dict(db, service.claim_task(db, user, task_id))
+    return service._task_dict(db, service.claim_task(db, user, task_id, project_id=project_id))
 
 
 @router.post("/tasks/{task_id}/unassign")
 def unassign_task(
     task_id: str,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    return service._task_dict(db, service.unassign_task(db, user, task_id))
+    return service._task_dict(
+        db, service.unassign_task(db, user, task_id, project_id=project_id)
+    )
 
 
 @router.post("/tasks/{task_id}/cancel")
 def cancel_task(
     task_id: str,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    return service._task_dict(db, service.cancel_task(db, user, task_id))
+    return service._task_dict(
+        db, service.cancel_task(db, user, task_id, project_id=project_id)
+    )
 
 
 @router.post("/tasks/{task_id}/delete")
 def delete_task(
     task_id: str,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    service.delete_task(db, user, task_id)
+    service.delete_task(db, user, task_id, project_id=project_id)
     return {"ok": True}
 
 
 @router.post("/tasks/{task_id}/restore")
 def restore_task(
     task_id: str,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    return service._task_dict(db, service.restore_task(db, user, task_id))
+    return service._task_dict(
+        db, service.restore_task(db, user, task_id, project_id=project_id)
+    )

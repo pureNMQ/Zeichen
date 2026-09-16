@@ -28,6 +28,7 @@ import {
   api,
   ApiError,
   TASK_STATUSES,
+  withProject,
   type ProjectMemberRow,
   type RequirementRow,
   type TaskRow,
@@ -57,7 +58,7 @@ export function TaskDetailDialog({
 
   const { data: fresh } = useQuery({
     queryKey: ['task', task?.id],
-    queryFn: () => api.get<TaskRow>(`/tasks/${task?.id}`),
+    queryFn: () => api.get<TaskRow>(withProject(`/tasks/${task?.id}`, projectId)),
     enabled: open && !!task,
   })
   const t = fresh ?? task
@@ -101,7 +102,7 @@ export function TaskDetailDialog({
     if (!t) return
     setError(null)
     try {
-      await api.post(path, body)
+      await api.post(withProject(path, projectId), body)
       await refresh()
     } catch (err) {
       setError(err instanceof ApiError ? err.message : '操作失败')
@@ -117,7 +118,7 @@ export function TaskDetailDialog({
     if (!t) return
     setError(null)
     try {
-      await api.patch(`/tasks/${t.id}`, body)
+      await api.patch(withProject(`/tasks/${t.id}`, projectId), body)
       await refresh()
     } catch (err) {
       setError(err instanceof ApiError ? err.message : failMessage)
@@ -128,7 +129,7 @@ export function TaskDetailDialog({
     if (!t) return
     setError(null)
     try {
-      await api.post(`/tasks/${t.id}/assign`, { assignee_id: assigneeId })
+      await api.post(withProject(`/tasks/${t.id}/assign`, projectId), { assignee_id: assigneeId })
       await refresh()
     } catch (err) {
       setError(err instanceof ApiError ? err.message : '指派失败')

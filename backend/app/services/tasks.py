@@ -52,18 +52,20 @@ def _task_dict(db: Session, t: Task) -> dict:
     }
 
 
-def _get_visible(db: Session, user: User, task_id: str) -> Task:
+def _get_visible(db: Session, user: User, task_id: str, project_id: uuid.UUID | None = None) -> Task:
     from .short_codes import require_valid_code
     from .short_code_lookup import resolve_by_code
 
     require_valid_code("task", task_id)
-    task, _project = resolve_by_code(db, user, "task", task_id)
+    task, _project = resolve_by_code(db, user, "task", task_id, project_id=project_id)
     get_accessible_project(db, user.id, task.project_id, min_level="viewer")
     return task
 
 
-def _get_editable(db: Session, actor: User, task_id: str) -> Task:
-    task = _get_visible(db, actor, task_id)
+def _get_editable(
+    db: Session, actor: User, task_id: str, project_id: uuid.UUID | None = None
+) -> Task:
+    task = _get_visible(db, actor, task_id, project_id)
     require_project_role(db, actor.id, task.project_id, min_level="editor")
     return task
 
@@ -144,8 +146,10 @@ def create_task(
     return task
 
 
-def get_task(db: Session, user: User, task_id: str) -> Task:
-    return _get_visible(db, user, task_id)
+def get_task(
+    db: Session, user: User, task_id: str, project_id: uuid.UUID | None = None
+) -> Task:
+    return _get_visible(db, user, task_id, project_id)
 
 
 def list_tasks(
@@ -212,13 +216,14 @@ def update_task(
     description: str | None = None,
     requirement_id: object = _UNSET,
     blocked_by: object = _UNSET,
+    project_id: uuid.UUID | None = None,
 ) -> Task:
     """更新任务元数据;requirement_id 可换同项目其他需求但不可置空;blocked_by 可整体替换/清空。
 
     requirement_id 权限与改状态同规则(已指派仅本人/工作区 admin/项目 owner,
     未指派任意编辑权);校验需求同项目且未删除。blocked_by 整体替换前置集合。
     """
-    task = _get_editable(db, actor, task_id)
+    task = _get_editable(db, actor, task_id, project_id)
     if title is not None:
         title = title.strip()
         if not title:
@@ -243,9 +248,11 @@ def update_task(
     return task
 
 
-def set_task_status(db: Session, actor: User, task_id: str, target: str) -> Task:
+def set_task_status(
+    db: Session, actor: User, task_id: str, target: str, project_id: uuid.UUID | None = None
+) -> Task:
     """通用改状态:任意目标态自由流转,无任何前置校验;已指派任务走所有权守卫。"""
-    task = _get_editable(db, actor, task_id)
+    task = _get_editable(db, actor, task_id, project_id)
     _require_owner(db, actor, task)
     assert_status_valid(task.status, target, "任务")
     old = task.status
@@ -263,9 +270,12 @@ def set_task_status(db: Session, actor: User, task_id: str, target: str) -> Task
     return task
 
 
-def assign_task(db: Session, actor: User, task_id: str, assignee_id: uuid.UUID) -> Task:
+def assign_task(
+    db: Session, actor: User, task_id: str, assignee_id: uuid.UUID,
+    project_id: uuid.UUID | None = None,
+) -> Task:
     """未指派任务任何编辑权者可指派;已指派仅本人/管理员可改派。"""
-    task = _get_editable(db, actor, task_id)
+    task = _get_editable(db, actor, task_id, project_id)
     if task.status in TERMINAL:
         raise conflict("任务已结束,无法改派")
     if task.assignee_id is not None:
@@ -279,9 +289,11 @@ def assign_task(db: Session, actor: User, task_id: str, assignee_id: uuid.UUID) 
     return task
 
 
-def claim_task(db: Session, actor: User, task_id: str) -> Task:
+def claim_task(
+    db: Session, actor: User, task_id: str, project_id: uuid.UUID | None = None
+) -> Task:
     """未指派任务的认领;条件 UPDATE 原子化,并发竞争败者得 conflict。"""
-    task = _get_editable(db, actor, task_id)
+    task = _get_editable(db, actor, task_id, project_id)
     if task.status in TERMINAL:
         raise conflict("任务已结束,无法认领")
     try:
@@ -306,8 +318,10 @@ def claim_task(db: Session, actor: User, task_id: str) -> Task:
     return task
 
 
-def unassign_task(db: Session, actor: User, task_id: str) -> Task:
-    task = _get_editable(db, actor, task_id)
+def unassign_task(
+    db: Session, actor: User, task_id: str, project_id: uuid.UUID | None = None
+) -> Task:
+    task = _get_editable(db, actor, task_id, project_id)
     if task.status in TERMINAL:
         raise conflict("任务已结束,无法解除指派")
     _require_owner(db, actor, task)
@@ -317,13 +331,17 @@ def unassign_task(db: Session, actor: User, task_id: str) -> Task:
     return task
 
 
-def cancel_task(db: Session, actor: User, task_id: str) -> Task:
+def cancel_task(
+    db: Session, actor: User, task_id: str, project_id: uuid.UUID | None = None
+) -> Task:
     """取消任务:set_task_status("cancelled") 便捷封装。"""
-    return set_task_status(db, actor, task_id, "cancelled")
+    return set_task_status(db, actor, task_id, "cancelled", project_id=project_id)
 
 
-def delete_task(db: Session, actor: User, task_id: str) -> None:
-    task = _get_editable(db, actor, task_id)
+def delete_task(
+    db: Session, actor: User, task_id: str, project_id: uuid.UUID | None = None
+) -> None:
+    task = _get_editable(db, actor, task_id, project_id)
     _require_owner(db, actor, task)
     task.deleted_at = _now()
     from .attachments import soft_delete_for_target
@@ -333,11 +351,17 @@ def delete_task(db: Session, actor: User, task_id: str) -> None:
     db.commit()
 
 
-def restore_task(db: Session, actor: User, task_id: str) -> Task:
+def restore_task(
+    db: Session, actor: User, task_id: str, project_id: uuid.UUID | None = None
+) -> Task:
     from .short_codes import require_valid_code
 
     require_valid_code("task", task_id)
-    rows = db.scalars(select(Task).where(Task.code == task_id)).all()
+    stmt = select(Task).where(Task.code == task_id)
+    if project_id is not None:
+        get_accessible_project(db, actor.id, project_id, min_level="viewer")
+        stmt = stmt.where(Task.project_id == project_id)
+    rows = db.scalars(stmt).all()
     task = next((t for t in rows if t.deleted_at is not None), None)
     if task is None:
         raise not_found("已删除的任务不存在")

@@ -398,6 +398,14 @@ export interface AttachmentRow {
   deleted_at: string | null
 }
 
+// 短码跨项目消歧(REQ-55):全局短码端点附带当前项目,后端在指定项目内解析。
+// 显式 projectId 优先(实体行自带 project_id,最精确);否则回退当前项目(localStorage)。
+export function withProject(path: string, projectId?: string | null): string {
+  const pid = projectId ?? localStorage.getItem('zeichen.currentProjectId')
+  if (!pid) return path
+  return `${path}${path.includes('?') ? '&' : '?'}project_id=${encodeURIComponent(pid)}`
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const controller = new AbortController()
   const timeout = window.setTimeout(() => controller.abort(), 8000)

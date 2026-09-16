@@ -23,10 +23,12 @@ def upload_attachment(
     target_type: str,
     target_id: str,
     file: UploadFile = File(...),
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    project_id = _target_project(db, target_type, target_id, user)
+    if project_id is None:
+        project_id = _target_project(db, target_type, target_id, user)
     data = file.file.read()
     try:
         a = service.upload(
@@ -49,10 +51,13 @@ def list_attachments(
     target_id: str,
     cursor: str | None = None,
     limit: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    return service.list_attachments(db, user, target_type, target_id, cursor, limit)
+    return service.list_attachments(
+        db, user, target_type, target_id, cursor, limit, project_id=project_id
+    )
 
 
 @router.get("/attachments/{attachment_id}/download")

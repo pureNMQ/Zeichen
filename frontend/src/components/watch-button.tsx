@@ -2,14 +2,14 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { Button } from '@/components/ui/button'
-import { api } from '@/lib/api'
+import { api, withProject } from '@/lib/api'
 
 // 实体级关注(REQ 023b607e):关注的实体变更始终通知,不受偏好收窄影响。
 export function WatchButton({ targetType, targetId }: { targetType: string; targetId: string }) {
   const qc = useQueryClient()
   const { data } = useQuery({
     queryKey: ['watch', targetType, targetId],
-    queryFn: () => api.get<{ watching: boolean }>(`/targets/${targetType}/${targetId}/watch`),
+    queryFn: () => api.get<{ watching: boolean }>(withProject(`/targets/${targetType}/${targetId}/watch`)),
   })
   const [busy, setBusy] = useState(false)
   const watching = data?.watching ?? false
@@ -17,8 +17,8 @@ export function WatchButton({ targetType, targetId }: { targetType: string; targ
   async function toggle() {
     setBusy(true)
     try {
-      if (watching) await api.delete(`/targets/${targetType}/${targetId}/watch`)
-      else await api.post(`/targets/${targetType}/${targetId}/watch`)
+      if (watching) await api.delete(withProject(`/targets/${targetType}/${targetId}/watch`))
+      else await api.post(withProject(`/targets/${targetType}/${targetId}/watch`))
       await qc.invalidateQueries({ queryKey: ['watch', targetType, targetId] })
     } finally {
       setBusy(false)

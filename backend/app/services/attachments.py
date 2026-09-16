@@ -136,11 +136,12 @@ def download(db: Session, user: User, attachment_id: uuid.UUID) -> tuple[str, by
 
 
 def list_attachments(
-    db: Session, user: User, target_type: str, target_id: str, cursor: str | None, limit: int
+    db: Session, user: User, target_type: str, target_id: str, cursor: str | None, limit: int,
+    project_id: uuid.UUID | None = None,
 ) -> dict:
     from .pagination import decode_cursor
 
-    project = resolve_target(db, target_type, target_id, user=user)
+    project = resolve_target(db, target_type, target_id, user=user, project_id=project_id)
     get_accessible_project(db, user.id, project.id, min_level="viewer")
     filters = {"type": target_type, "id": str(target_id)}
     offset = decode_cursor(filters, cursor)

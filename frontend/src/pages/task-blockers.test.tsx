@@ -12,6 +12,7 @@ vi.mock('@/lib/api', () => {
     }
   }
   return {
+  withProject: (path: string) => path,
     ApiError,
     api: {
       get: vi.fn(),

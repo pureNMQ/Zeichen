@@ -31,10 +31,14 @@ _TARGET_MODELS = {
 }
 
 
-def resolve_target(db: Session, target_type: str, target_id, user: User | None = None) -> Project:
+def resolve_target(
+    db: Session, target_type: str, target_id, user: User | None = None,
+    project_id: uuid.UUID | None = None,
+) -> Project:
     """目标实体 → 其所属项目(ADR 0002:实体目标按短码寻址,project/repository 仍按 UUID)。
 
-    五类实体目标:有 user 时按其可访问项目消歧(跨项目同码);无 user 时全库唯一直接返回。
+    五类实体目标:有 user 时按其可访问项目消歧(跨项目同码);显式 project_id 时
+    项目内解析(REQ-55);无 user 时全库唯一直接返回。
     """
     if target_type not in TARGET_TYPES:
         raise invalid_request(f"不支持的目标类型: {target_type}")
@@ -59,7 +63,7 @@ def resolve_target(db: Session, target_type: str, target_id, user: User | None =
     from .short_codes import require_valid_code
     from .short_code_lookup import resolve_by_code
 
-    entity, project = resolve_by_code(db, user, target_type, target_id)
+    entity, project = resolve_by_code(db, user, target_type, target_id, project_id=project_id)
     return project
 
 
@@ -129,13 +133,16 @@ def _activity_dict(db: Session, a: Activity) -> dict:
     }
 
 
-def create_comment(db: Session, actor: User, target_type: str, target_id: str, body: str) -> Comment:
+def create_comment(
+    db: Session, actor: User, target_type: str, target_id: str, body: str,
+    project_id: uuid.UUID | None = None,
+) -> Comment:
     body = body.strip()
     if not body:
         raise invalid_request("评论内容不能为空")
     if target_type == "task":
         raise invalid_request("任务已取消评论区,请在关联需求下评论")
-    project = resolve_target(db, target_type, target_id, user=actor)
+    project = resolve_target(db, target_type, target_id, user=actor, project_id=project_id)
     require_project_role(db, actor.id, project.id, min_level="editor")
     comment = Comment(
         project_id=project.id,
@@ -152,11 +159,12 @@ def create_comment(db: Session, actor: User, target_type: str, target_id: str, b
 
 
 def list_comments(
-    db: Session, user: User, target_type: str, target_id: str, cursor: str | None, limit: int
+    db: Session, user: User, target_type: str, target_id: str, cursor: str | None, limit: int,
+    project_id: uuid.UUID | None = None,
 ) -> dict:
     if target_type == "task":
         raise invalid_request("任务已取消评论区,请在关联需求下评论")
-    project = resolve_target(db, target_type, target_id, user=user)
+    project = resolve_target(db, target_type, target_id, user=user, project_id=project_id)
     get_accessible_project(db, user.id, project.id, min_level="viewer")
     offset = _decode_offset({"type": target_type, "id": str(target_id)}, cursor, limit)
     rows = db.scalars(
@@ -190,9 +198,10 @@ def delete_comment(db: Session, actor: User, comment_id: uuid.UUID) -> None:
 
 
 def list_activity(
-    db: Session, user: User, target_type: str, target_id: str, cursor: str | None, limit: int
+    db: Session, user: User, target_type: str, target_id: str, cursor: str | None, limit: int,
+    project_id: uuid.UUID | None = None,
 ) -> dict:
-    project = resolve_target(db, target_type, target_id, user=user)
+    project = resolve_target(db, target_type, target_id, user=user, project_id=project_id)
     get_accessible_project(db, user.id, project.id, min_level="viewer")
     offset = _decode_offset({"type": target_type, "id": str(target_id)}, cursor, limit)
     rows = db.scalars(
@@ -214,13 +223,14 @@ def create_reference(
     to_type: str,
     to_id: str,
     ref_type: str,
+    project_id: uuid.UUID | None = None,
 ) -> Reference:
     if ref_type not in REFERENCE_TYPES:
         raise invalid_request(f"不支持的引用类型: {ref_type}")
     if from_type == to_type and from_id == to_id:
         raise invalid_request("不能引用自身")
-    from_project = resolve_target(db, from_type, from_id, user=actor)
-    to_project = resolve_target(db, to_type, to_id, user=actor)
+    from_project = resolve_target(db, from_type, from_id, user=actor, project_id=project_id)
+    to_project = resolve_target(db, to_type, to_id, user=actor, project_id=project_id)
     if from_project.id != to_project.id:
         raise invalid_request("引用双方必须属于同一项目")
     require_project_role(db, actor.id, from_project.id, min_level="editor")
@@ -309,10 +319,11 @@ def _ref_dict(db: Session, r: Reference) -> dict:
 
 
 def list_references(
-    db: Session, user: User, target_type: str, target_id: str, cursor: str | None, limit: int
+    db: Session, user: User, target_type: str, target_id: str, cursor: str | None, limit: int,
+    project_id: uuid.UUID | None = None,
 ) -> dict:
     """双向:from 或 to 命中目标均返回(引用面板)。"""
-    project = resolve_target(db, target_type, target_id, user=user)
+    project = resolve_target(db, target_type, target_id, user=user, project_id=project_id)
     get_accessible_project(db, user.id, project.id, min_level="viewer")
     offset = _decode_offset({"type": target_type, "id": str(target_id)}, cursor, limit)
     rows = db.scalars(

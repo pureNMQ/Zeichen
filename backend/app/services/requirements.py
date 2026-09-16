@@ -88,8 +88,10 @@ def get_requirement_in_project(db: Session, project_id: uuid.UUID, code: str) ->
     return requirement
 
 
-def get_requirement(db: Session, user: User, requirement_id: str) -> Requirement:
-    requirement, _project = resolve_by_code(db, user, "requirement", requirement_id)
+def get_requirement(
+    db: Session, user: User, requirement_id: str, project_id: uuid.UUID | None = None
+) -> Requirement:
+    requirement, _project = resolve_by_code(db, user, "requirement", requirement_id, project_id=project_id)
     return requirement
 
 
@@ -148,8 +150,9 @@ def update_requirement(
     requirement_id: str,
     title: str | None = None,
     description: str | None = None,
+    project_id: uuid.UUID | None = None,
 ) -> Requirement:
-    requirement = get_requirement(db, actor, requirement_id)
+    requirement = get_requirement(db, actor, requirement_id, project_id)
     require_project_role(db, actor.id, requirement.project_id, min_level="editor")
     if title is not None:
         title = title.strip()
@@ -165,9 +168,12 @@ def update_requirement(
     return requirement
 
 
-def set_requirement_status(db: Session, actor: User, requirement_id: str, target: str) -> Requirement:
+def set_requirement_status(
+    db: Session, actor: User, requirement_id: str, target: str,
+    project_id: uuid.UUID | None = None,
+) -> Requirement:
     """通用改状态:任意目标态自由流转,无任何前置校验(同态 conflict)。"""
-    requirement = get_requirement(db, actor, requirement_id)
+    requirement = get_requirement(db, actor, requirement_id, project_id)
     require_project_role(db, actor.id, requirement.project_id, min_level="editor")
     assert_status_valid(requirement.status, target, "需求")
     old = requirement.status
@@ -185,16 +191,19 @@ def set_requirement_status(db: Session, actor: User, requirement_id: str, target
     return requirement
 
 
-def cancel_requirement(db: Session, actor: User, requirement_id: str) -> Requirement:
+def cancel_requirement(
+    db: Session, actor: User, requirement_id: str, project_id: uuid.UUID | None = None
+) -> Requirement:
     """取消需求:set_status("cancelled") 便捷封装。"""
-    return set_requirement_status(db, actor, requirement_id, "cancelled")
+    return set_requirement_status(db, actor, requirement_id, "cancelled", project_id=project_id)
 
 
 def delete_requirement(
-    db: Session, actor: User, requirement_id: str, confirm_task_count: int | None = None
+    db: Session, actor: User, requirement_id: str, confirm_task_count: int | None = None,
+    project_id: uuid.UUID | None = None,
 ) -> None:
     """软删;需求下有任务时需确认任务数(二次确认,规格书 §4.2)。"""
-    requirement = get_requirement(db, actor, requirement_id)
+    requirement = get_requirement(db, actor, requirement_id, project_id)
     require_project_role(db, actor.id, requirement.project_id, min_level="editor")
     task_count = db.scalar(
         select(func.count())
@@ -217,9 +226,15 @@ def delete_requirement(
     db.commit()
 
 
-def restore_requirement(db: Session, actor: User, requirement_id: str) -> Requirement:
+def restore_requirement(
+    db: Session, actor: User, requirement_id: str, project_id: uuid.UUID | None = None
+) -> Requirement:
     require_valid_code("requirement", requirement_id)
-    rows = db.scalars(select(Requirement).where(Requirement.code == requirement_id)).all()
+    stmt = select(Requirement).where(Requirement.code == requirement_id)
+    if project_id is not None:
+        get_accessible_project(db, actor.id, project_id, min_level="viewer")
+        stmt = stmt.where(Requirement.project_id == project_id)
+    rows = db.scalars(stmt).all()
     requirement = next((r for r in rows if r.deleted_at is not None), None)
     if requirement is None:
         raise not_found("已删除的需求不存在")

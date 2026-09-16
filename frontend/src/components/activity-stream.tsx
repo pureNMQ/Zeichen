@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 
-import { api, STATUS_LABEL, type ActivityRow } from '@/lib/api'
+import { api, STATUS_LABEL, withProject, type ActivityRow } from '@/lib/api'
 import { UserAvatar } from '@/components/user-avatar'
 
 const ACTION_LABEL: Record<string, string> = {
@@ -49,7 +49,7 @@ function localizeSummary(summary: string): string {
 export function ActivityStream({ targetType, targetId }: { targetType: string; targetId: string }) {
   const { data, isLoading } = useQuery({
     queryKey: ['activity', targetType, targetId],
-    queryFn: () => api.get<{ items: ActivityRow[] }>(`/targets/${targetType}/${targetId}/activity?limit=50`),
+    queryFn: () => api.get<{ items: ActivityRow[] }>(withProject(`/targets/${targetType}/${targetId}/activity?limit=50`)),
   })
 
   return (

@@ -26,6 +26,7 @@ import {
   api,
   ApiError,
   REQUIREMENT_STATUSES,
+  withProject,
   type FilterCriteria,
   type FilterViewMode,
   type Page,
@@ -43,8 +44,8 @@ const TIME_WINDOWS = [
   { value: '30', label: '近 30 天' },
 ]
 
-export async function moveRequirement(id: string, to: RequirementStatus): Promise<void> {
-  await api.post(`/requirements/${id}/status`, { status: to })
+export async function moveRequirement(id: string, to: RequirementStatus, projectId?: string | null): Promise<void> {
+  await api.post(withProject(`/requirements/${id}/status`, projectId), { status: to })
 }
 
 function RequirementCard({
@@ -208,7 +209,7 @@ export function RequirementsPage() {
   async function doMove(id: string, to: RequirementStatus) {
     setActionError(null)
     try {
-      await moveRequirement(id, to)
+      await moveRequirement(id, to, projectId)
       await qc.invalidateQueries({ queryKey: ['requirements', projectId] })
     } catch (err) {
       setActionError(err instanceof ApiError ? err.message : '状态变更失败')
@@ -225,7 +226,7 @@ export function RequirementsPage() {
     if (!deleteTarget) return
     try {
       setActionError(null)
-      await api.post(`/requirements/${deleteTarget.id}/delete`, {
+      await api.post(withProject(`/requirements/${deleteTarget.id}/delete`, projectId), {
         confirm_task_count: Number(confirmCount),
       })
       setDeleteTarget(null)
@@ -249,14 +250,14 @@ export function RequirementsPage() {
     setRejecting(true)
     setRejectError(null)
     try {
-      await api.post(`/targets/requirement/${rejectTarget.id}/comments`, { body: `打回：${reason}` })
+      await api.post(withProject(`/targets/requirement/${rejectTarget.id}/comments`, projectId), { body: `打回：${reason}` })
     } catch (err) {
       setRejectError(err instanceof ApiError ? err.message : '评论发布失败,请重试')
       setRejecting(false)
       return
     }
     try {
-      await moveRequirement(rejectTarget.id, 'backlog')
+      await moveRequirement(rejectTarget.id, 'backlog', projectId)
       await qc.invalidateQueries({ queryKey: ['requirements', projectId] })
       setRejectTarget(null)
       setRejectReason('')
@@ -520,11 +521,11 @@ function CreateRequirementDialog({ open, onOpenChange }: { open: boolean; onOpen
       try {
         while (remainingRefs.length > 0) {
           const r = remainingRefs[0]
-          await api.post(`/targets/requirement/${created.id}/references`, { from_type: 'requirement', from_id: created.id, to_type: r.toType, to_id: r.toId, type: r.type })
+          await api.post(withProject(`/targets/requirement/${created.id}/references`, projectId), { from_type: 'requirement', from_id: created.id, to_type: r.toType, to_id: r.toId, type: r.type })
           remainingRefs.shift()
         }
         while (remainingFiles.length > 0) {
-          await api.upload(`/targets/requirement/${created.id}/attachments`, remainingFiles[0])
+          await api.upload(withProject(`/targets/requirement/${created.id}/attachments`, projectId), remainingFiles[0])
           remainingFiles.shift()
         }
       } catch {

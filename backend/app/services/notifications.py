@@ -242,7 +242,10 @@ def update_preferences(db: Session, user: User, domains: dict[str, bool], action
     return get_preferences(db, user)
 
 
-def is_watching(db: Session, user: User, target_type: str, target_id) -> bool:
+def is_watching(
+    db: Session, user: User, target_type: str, target_id,
+    project_id: uuid.UUID | None = None,
+) -> bool:
     return (
         db.scalar(
             select(EntityWatch.id).where(
@@ -255,10 +258,13 @@ def is_watching(db: Session, user: User, target_type: str, target_id) -> bool:
     )
 
 
-def watch_entity(db: Session, user: User, target_type: str, target_id) -> None:
+def watch_entity(
+    db: Session, user: User, target_type: str, target_id,
+    project_id: uuid.UUID | None = None,
+) -> None:
     from .polymorphic import resolve_target
 
-    project = resolve_target(db, target_type, target_id, user=user)
+    project = resolve_target(db, target_type, target_id, user=user, project_id=project_id)
     require_project_role(db, user.id, project.id, min_level="viewer")
     if not is_watching(db, user, target_type, target_id):
         db.add(
@@ -272,7 +278,10 @@ def watch_entity(db: Session, user: User, target_type: str, target_id) -> None:
         db.commit()
 
 
-def unwatch_entity(db: Session, user: User, target_type: str, target_id) -> None:
+def unwatch_entity(
+    db: Session, user: User, target_type: str, target_id,
+    project_id: uuid.UUID | None = None,
+) -> None:
     db.execute(
         sa_delete(EntityWatch).where(
             EntityWatch.user_id == user.id,

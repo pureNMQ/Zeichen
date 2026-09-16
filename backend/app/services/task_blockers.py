@@ -97,8 +97,11 @@ def set_blockers(db: Session, actor: User, task_id: str, blocker_ids: list[str] 
     return task
 
 
-def remove_blocker(db: Session, actor: User, task_id: str, blocker_id: str) -> None:
-    task = _load_task(db, actor, task_id, editable=True)
+def remove_blocker(
+    db: Session, actor: User, task_id: str, blocker_id: str,
+    project_id: uuid.UUID | None = None,
+) -> None:
+    task = _load_task(db, actor, task_id, editable=True, project_id=project_id)
     edge = db.scalar(
         select(TaskBlocker).where(
             TaskBlocker.project_id == task.project_id,
@@ -161,13 +164,16 @@ def set_blockers_core(db: Session, actor: User, task: Task, blocker_ids: list[st
     record_activity(db, task.project_id, actor.id, "task", task.code, "blocker", summary)
 
 
-def _load_task(db: Session, user: User, task_id: str, *, editable: bool) -> Task:
+def _load_task(
+    db: Session, user: User, task_id: str, *, editable: bool,
+    project_id: uuid.UUID | None = None,
+) -> Task:
     """目标任务加载:短码寻址 + 未删 + 可见(viewer)/可编辑(editor+)。"""
     from .short_code_lookup import resolve_by_code
     from .short_codes import require_valid_code
 
     require_valid_code("task", task_id)
-    task, _project = resolve_by_code(db, user, "task", task_id)
+    task, _project = resolve_by_code(db, user, "task", task_id, project_id=project_id)
     if task is None:
         raise not_found("任务不存在")
     if editable:

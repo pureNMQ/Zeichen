@@ -98,21 +98,25 @@ def set_status_in_project(
 @router.get("/requirements/{requirement_id}")
 def get_requirement(
     requirement_id: str,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    return service._requirement_dict(db, service.get_requirement(db, user, requirement_id))
+    return service._requirement_dict(
+        db, service.get_requirement(db, user, requirement_id, project_id)
+    )
 
 
 @router.patch("/requirements/{requirement_id}")
 def update_requirement(
     requirement_id: str,
     body: RequirementUpdate,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
     requirement = service.update_requirement(
-        db, user, requirement_id, body.title, body.description
+        db, user, requirement_id, body.title, body.description, project_id=project_id
     )
     return service._requirement_dict(db, requirement)
 
@@ -121,20 +125,24 @@ def update_requirement(
 def set_status(
     requirement_id: str,
     body: StatusBody,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    requirement = service.set_requirement_status(db, user, requirement_id, body.status)
+    requirement = service.set_requirement_status(
+        db, user, requirement_id, body.status, project_id=project_id
+    )
     return service._requirement_dict(db, requirement)
 
 
 @router.post("/requirements/{requirement_id}/cancel")
 def cancel_requirement(
     requirement_id: str,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    requirement = service.cancel_requirement(db, user, requirement_id)
+    requirement = service.cancel_requirement(db, user, requirement_id, project_id=project_id)
     return service._requirement_dict(db, requirement)
 
 
@@ -142,11 +150,13 @@ def cancel_requirement(
 def delete_requirement(
     requirement_id: str,
     body: RequirementDeleteBody | None = None,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
     service.delete_requirement(
-        db, user, requirement_id, body.confirm_task_count if body else None
+        db, user, requirement_id, body.confirm_task_count if body else None,
+        project_id=project_id,
     )
     return {"ok": True}
 
@@ -154,7 +164,10 @@ def delete_requirement(
 @router.post("/requirements/{requirement_id}/restore")
 def restore_requirement(
     requirement_id: str,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    return service._requirement_dict(db, service.restore_requirement(db, user, requirement_id))
+    return service._requirement_dict(
+        db, service.restore_requirement(db, user, requirement_id, project_id=project_id)
+    )

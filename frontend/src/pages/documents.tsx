@@ -12,7 +12,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { ErrorNotification } from '@/components/ui/notification'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { api, ApiError, type DocumentDirectoryRow, type DocumentNode, type DocumentRow, type DocumentType, type DocumentVersionRow, type ReferenceRow } from '@/lib/api'
+import { api, ApiError, type DocumentDirectoryRow, type DocumentNode, type DocumentRow, type DocumentType, type DocumentVersionRow, type ReferenceRow, withProject
+} from '@/lib/api'
 import { filterNodesByTitle } from '@/lib/document-search'
 import { planDocumentMove, rootZoneFirstPointerWithin, type DragKind } from '@/lib/document-tree-dnd'
 import { useCurrentProject, useProjectRole } from '@/lib/current-project'
@@ -154,7 +155,7 @@ function RenameDialog({ node, module, open, onOpenChange, onSaved }: { node: Doc
     if (!node) return
     setSubmitting(true)
     try {
-      const path = node.node_kind === 'directory' ? `/directories/${module}/${node.id}` : `/documents/${module}/${node.id}`
+      const path = withProject(node.node_kind === 'directory' ? `/directories/${module}/${node.id}` : `/documents/${module}/${node.id}`)
       await api.patch(path, node.node_kind === 'directory' ? { name: name.trim() } : { title: name.trim() })
       onOpenChange(false)
       onSaved()
@@ -197,7 +198,7 @@ function ModuleTreeSidebar({ module, selected, selectedNode, onNavigate }: { mod
     if (!plan) return
     setActionError(null)
     try {
-      await api.post(plan.path, plan.body)
+      await api.post(withProject(plan.path), plan.body)
       await invalidate()
     } catch (err) {
       setActionError(err instanceof ApiError ? err.message : '移动失败')
@@ -213,7 +214,7 @@ function ModuleTreeSidebar({ module, selected, selectedNode, onNavigate }: { mod
     if (!plan) return
     setActionError(null)
     try {
-      await api.post(plan.path, plan.body)
+      await api.post(withProject(plan.path), plan.body)
       await qc.invalidateQueries({ queryKey: ['document-tree', projectId, module] })
       if (overData.kind !== 'root' && overData.id) {
         setExpanded((current) => { const next = new Set(current); next.add(overData.id!); return next })
@@ -233,11 +234,11 @@ function ModuleTreeSidebar({ module, selected, selectedNode, onNavigate }: { mod
     onNavigate(`${moduleBase(module)}?mode=new${container ? `&container_id=${container}` : ''}`)
   }
   async function beginDelete(node: DocumentNode) {
-    try { const path = node.node_kind === 'directory' ? `/directories/${module}/${node.id}/delete-impact` : `/documents/${module}/${node.id}/delete-impact`; setDeleteImpact(await api.get(path)); setActionNode(node); setDeleteOpen(true) } catch (err) { setActionError(err instanceof ApiError ? err.message : '无法获取删除影响范围') }
+    try { const path = withProject(node.node_kind === 'directory' ? `/directories/${module}/${node.id}/delete-impact` : `/documents/${module}/${node.id}/delete-impact`); setDeleteImpact(await api.get(path)); setActionNode(node); setDeleteOpen(true) } catch (err) { setActionError(err instanceof ApiError ? err.message : '无法获取删除影响范围') }
   }
   async function confirmDelete() {
     if (!actionNode) return
-    try { const path = actionNode.node_kind === 'directory' ? `/directories/${module}/${actionNode.id}/delete` : `/documents/${module}/${actionNode.id}/delete`; await api.post(path); setDeleteOpen(false); await invalidate(); navigate(moduleBase(module)) } catch (err) { setActionError(err instanceof ApiError ? err.message : '删除失败') }
+    try { const path = withProject(actionNode.node_kind === 'directory' ? `/directories/${module}/${actionNode.id}/delete` : `/documents/${module}/${actionNode.id}/delete`); await api.post(path); setDeleteOpen(false); await invalidate(); navigate(moduleBase(module)) } catch (err) { setActionError(err instanceof ApiError ? err.message : '删除失败') }
   }
   if (!projectId || !currentProject) return null
   return <aside className="flex h-full min-h-0 w-64 shrink-0 flex-col border-r bg-background" aria-label={`${documentLabel(module)}文件组织`}><div className="border-b px-4 py-4"><p className="font-semibold">{documentLabel(module)}</p><p className="mt-1 truncate text-xs text-muted-foreground">{currentProject.name}</p></div><div className="border-b p-3"><Input aria-label="搜索文档" autoComplete="off" placeholder="搜索文档" value={titleFilter} onChange={(event) => setTitleFilter(event.target.value)} /></div>{canEdit && <div className="flex justify-end border-b p-3"><DropdownMenu><DropdownMenuTrigger asChild><Button type="button" size="icon-sm" aria-label="新建"><Plus className="h-4 w-4" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end">{module === 'wiki' ? <><DropdownMenuItem onClick={() => createDocument(null)}>新建 Wiki</DropdownMenuItem>{selected?.kind === 'document' && <DropdownMenuItem onClick={() => createDocument(selected.id)}>新建子 Wiki</DropdownMenuItem>}</> : <><DropdownMenuItem onClick={() => createDocument()}>新建词条</DropdownMenuItem><DropdownMenuItem onClick={() => setDirectoryOpen(true)}>新建目录</DropdownMenuItem></>}</DropdownMenuContent></DropdownMenu></div>}<div className="min-h-0 flex-1 overflow-y-auto p-3"><DndContext sensors={sensors} collisionDetection={rootZoneFirstPointerWithin} onDragStart={() => setDragActive(true)} onDragCancel={() => setDragActive(false)} onDragEnd={(event) => { setDragActive(false); void handleMoveEnd(event) }}><div className="sticky top-0 z-10 -mx-3 mb-1 bg-background px-3 pt-1">{canEdit && <RootDropZone dragActive={dragActive} />}</div><TreeChildren projectId={projectId} module={module} parentId={null} filter={titleFilter} expanded={expanded} onToggle={(id) => setExpanded((current) => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next })} onNavigate={onNavigate} selectedId={selected?.id} canEdit={canEdit} onMoveToRoot={moveToRoot} onRename={(node) => { setActionNode(node); setRenameOpen(true) }} onDelete={(node) => void beginDelete(node)} /></DndContext></div><ErrorNotification message={actionError} /><RenameDialog node={actionNode} module={module} open={renameOpen} onOpenChange={setRenameOpen} onSaved={invalidate} />{module === 'glossary' && <CreateDirectoryDialog projectId={projectId} parentId={selected?.kind === 'directory' ? selected.id : null} open={directoryOpen} onOpenChange={setDirectoryOpen} onCreated={invalidate} />}<Dialog open={deleteOpen} onOpenChange={setDeleteOpen}><DialogContent><DialogHeader><DialogTitle>确认删除</DialogTitle><DialogDescription>将软删除 {deleteImpact?.documents ?? 0} 篇文档和 {deleteImpact?.directories ?? 0} 个目录。</DialogDescription></DialogHeader><DialogFooter><Button variant="outline" onClick={() => setDeleteOpen(false)}>取消</Button><Button variant="destructive" onClick={() => void confirmDelete()}>删除</Button></DialogFooter></DialogContent></Dialog></aside>
@@ -258,7 +259,7 @@ function DocumentEditor({ module, document, containerId, onDirtyChange, onRegist
     setError(null); setSubmitting(true)
     try {
       const payload = { title: title.trim(), content }
-      const saved = document ? await api.patch<DocumentRow>(`/documents/${module}/${document.id}`, payload) : await api.post<DocumentRow>(`/projects/${projectId}/documents/${module}`, { ...payload, doc_type: module, ...(module === 'wiki' ? { parent_id: containerId } : { directory_id: containerId }) })
+      const saved = document ? await api.patch<DocumentRow>(withProject(`/documents/${module}/${document.id}`, projectId), payload) : await api.post<DocumentRow>(`/projects/${projectId}/documents/${module}`, { ...payload, doc_type: module, ...(module === 'wiki' ? { parent_id: containerId } : { directory_id: containerId }) })
       await Promise.all([qc.invalidateQueries({ queryKey: ['document-tree', projectId, module] }), qc.invalidateQueries({ queryKey: ['document-node', module, saved.id] })])
       setDirty(false); onDirtyChange(false); if (!stayOnPage) onSaved(saved); return true
     } catch (err) { setError(err instanceof ApiError ? err.message : '保存失败，请重试'); return false } finally { setSubmitting(false) }
@@ -276,10 +277,10 @@ function DocumentDetail({ module, document, onEdit }: { module: DocumentType; do
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [rollbackTarget, setRollbackTarget] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const { data: versions } = useQuery({ queryKey: ['document-versions', module, document.id], queryFn: () => api.get<{ items: DocumentVersionRow[] }>(`/documents/${module}/${document.id}/versions`), enabled: versionsOpen })
-  const { data: references } = useQuery({ queryKey: ['document-references', module, document.id], queryFn: () => api.get<{ count: number; items: ReferenceRow[] }>(`/documents/${module}/${document.id}/references`) })
-  async function rollback(versionNo: number) { try { await api.post(`/documents/${module}/${document.id}/rollback`, { version_no: versionNo }); setRollbackTarget(null); setVersionsOpen(false); await qc.invalidateQueries({ queryKey: ['document-node'] }) } catch (err) { setError(err instanceof ApiError ? err.message : '回滚失败') } }
-  async function remove() { try { await api.post(`/documents/${module}/${document.id}/delete`); navigate(moduleBase(module)) } catch (err) { setError(err instanceof ApiError ? err.message : '删除失败') } }
+  const { data: versions } = useQuery({ queryKey: ['document-versions', module, document.id], queryFn: () => api.get<{ items: DocumentVersionRow[] }>(withProject(`/documents/${module}/${document.id}/versions`)), enabled: versionsOpen })
+  const { data: references } = useQuery({ queryKey: ['document-references', module, document.id], queryFn: () => api.get<{ count: number; items: ReferenceRow[] }>(withProject(`/documents/${module}/${document.id}/references`)) })
+  async function rollback(versionNo: number) { try { await api.post(withProject(`/documents/${module}/${document.id}/rollback`), { version_no: versionNo }); setRollbackTarget(null); setVersionsOpen(false); await qc.invalidateQueries({ queryKey: ['document-node'] }) } catch (err) { setError(err instanceof ApiError ? err.message : '回滚失败') } }
+  async function remove() { try { await api.post(withProject(`/documents/${module}/${document.id}/delete`)); navigate(moduleBase(module)) } catch (err) { setError(err instanceof ApiError ? err.message : '删除失败') } }
   return <main className="mx-auto w-full max-w-5xl px-6 py-10 sm:px-10"><div className="mx-auto max-w-3xl"><div className="flex flex-wrap items-start justify-between gap-4 border-b pb-5"><div><span className="rounded-md bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">{documentLabel(module)}</span><h1 className="mt-4 text-3xl font-semibold tracking-tight">{document.title}</h1><p className="mt-2 text-sm text-muted-foreground">更新于 {new Date(document.updated_at).toLocaleString()}</p></div>{canEdit && <div className="flex gap-2"><Button variant="destructive" onClick={() => setDeleteOpen(true)}><Trash2 className="mr-2 h-4 w-4" />删除</Button><Button variant="outline" onClick={() => setVersionsOpen(true)}><History className="mr-2 h-4 w-4" />版本</Button><Button onClick={onEdit}><Pencil className="mr-2 h-4 w-4" />编辑</Button></div>}</div><section className="mt-8"><VditorMarkdownViewer markdown={document.content ?? ''} /></section><section className="mt-8 rounded-xl border p-5"><h2 className="font-medium">引用</h2><div className="mt-3 space-y-2 text-sm">{references?.items.length ? references.items.map((reference) => { const outgoing = reference.from_id === document.id; const type = outgoing ? reference.to_type : reference.from_type; const id = outgoing ? reference.to_id : reference.from_id; const title = outgoing ? reference.to_title : reference.from_title; const targetModule = outgoing ? reference.to_module : reference.from_module; const href = referenceHref(type, id, targetModule); return <p key={reference.id}>{outgoing ? '引用至' : '被引用于'} {href ? <a href={href} className="text-primary hover:underline">{title ?? id}</a> : type === 'task' ? <TaskRefLink taskId={id}>{title ?? id}</TaskRefLink> : (title ?? id)}</p> }) : <p className="text-muted-foreground">暂无引用</p>}</div></section><section className="mt-8"><AttachmentList targetType="document" targetId={document.id} /></section></div><ErrorNotification message={error} /><Dialog open={versionsOpen} onOpenChange={setVersionsOpen}><DialogContent><DialogHeader><DialogTitle>版本历史</DialogTitle><DialogDescription>回滚会恢复该版本内容并创建新版本。</DialogDescription></DialogHeader><div className="max-h-96 space-y-2 overflow-y-auto">{versions?.items.map((version) => <div key={version.id} className="flex items-center justify-between rounded border p-3 text-sm"><span>版本 {version.version_no} · {version.title}</span>{canEdit && <Button size="sm" variant="outline" onClick={() => setRollbackTarget(version.version_no)}><RotateCcw className="mr-1.5 h-3.5 w-3.5" />回滚</Button>}</div>)}</div></DialogContent></Dialog><Dialog open={rollbackTarget !== null} onOpenChange={(open) => !open && setRollbackTarget(null)}><DialogContent><DialogHeader><DialogTitle>确认回滚</DialogTitle><DialogDescription>标题和正文会恢复为所选版本。</DialogDescription></DialogHeader><DialogFooter><Button variant="outline" onClick={() => setRollbackTarget(null)}>取消</Button><Button onClick={() => rollbackTarget !== null && void rollback(rollbackTarget)}>确认回滚</Button></DialogFooter></DialogContent></Dialog><Dialog open={deleteOpen} onOpenChange={setDeleteOpen}><DialogContent><DialogHeader><DialogTitle>删除文档</DialogTitle><DialogDescription>此操作会将文档移入已删除状态。</DialogDescription></DialogHeader><DialogFooter><Button variant="outline" onClick={() => setDeleteOpen(false)}>取消</Button><Button variant="destructive" onClick={() => void remove()}>确认删除</Button></DialogFooter></DialogContent></Dialog></main>}
 
 export function DocumentWorkbenchPage({ module, routeNodeKind }: { module: DocumentType; routeNodeKind?: 'document' | 'directory' }) {
@@ -295,8 +296,8 @@ export function DocumentWorkbenchPage({ module, routeNodeKind }: { module: Docum
   const [dirty, setDirty] = useState(false)
   const [pendingUrl, setPendingUrl] = useState<string | null>(null)
   const saveRef = useRef<() => Promise<boolean>>(async () => false)
-  const { data: document, isLoading: documentLoading, error: documentError } = useQuery({ queryKey: ['document-node', module, selected?.id], queryFn: () => api.get<DocumentRow>(`/documents/${module}/${selected?.id}`), enabled: selected?.kind === 'document' })
-  const { data: directory } = useQuery({ queryKey: ['directory-node', module, selected?.id], queryFn: () => api.get<DocumentDirectoryRow>(`/directories/${module}/${selected?.id}`), enabled: selected?.kind === 'directory' && module === 'glossary' })
+  const { data: document, isLoading: documentLoading, error: documentError } = useQuery({ queryKey: ['document-node', module, selected?.id], queryFn: () => api.get<DocumentRow>(withProject(`/documents/${module}/${selected?.id}`)), enabled: selected?.kind === 'document' })
+  const { data: directory } = useQuery({ queryKey: ['directory-node', module, selected?.id], queryFn: () => api.get<DocumentDirectoryRow>(withProject(`/directories/${module}/${selected?.id}`)), enabled: selected?.kind === 'directory' && module === 'glossary' })
   const canEdit = role === 'owner' || role === 'editor'
   function requestNavigation(url: string) { if (dirty) setPendingUrl(url); else navigate(url) }
   async function saveAndNavigate() { if (pendingUrl && await saveRef.current()) { const target = pendingUrl; setPendingUrl(null); navigate(target) } }

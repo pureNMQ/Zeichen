@@ -94,10 +94,13 @@ def create_directory(
 def get_document(
     module: str,
     document_id: str,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    return service._document_dict(db, service.get_document(db, user, document_id, module))
+    return service._document_dict(
+        db, service.get_document(db, user, document_id, module, project_id=project_id)
+    )
 
 
 @router.patch("/documents/{module}/{document_id}")
@@ -105,12 +108,15 @@ def update_document(
     module: str,
     document_id: str,
     body: DocumentUpdate,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    document = service.get_document(db, user, document_id, module)
+    document = service.get_document(db, user, document_id, module, project_id=project_id)
     metadata = body.metadata if "metadata" in body.model_fields_set else service._UNSET
-    saved, warning = service.update_document(db, user, document.code, body.title, body.content, metadata)
+    saved, warning = service.update_document(
+        db, user, document.code, body.title, body.content, metadata, project_id=project_id
+    )
     return service._document_dict(db, saved, warning)
 
 
@@ -119,33 +125,41 @@ def move_document(
     module: str,
     document_id: str,
     body: DocumentMove,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    document = service.get_document(db, user, document_id, module)
-    return service._document_dict(db, service.move_document(db, user, document.code, body.parent_id, body.directory_id))
+    document = service.get_document(db, user, document_id, module, project_id=project_id)
+    return service._document_dict(
+        db,
+        service.move_document(
+            db, user, document.code, body.parent_id, body.directory_id, project_id=project_id
+        ),
+    )
 
 
 @router.get("/documents/{module}/{document_id}/delete-impact")
 def document_delete_impact(
     module: str,
     document_id: str,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    document = service.get_document(db, user, document_id, module)
-    return service.delete_impact_document(db, user, document.code)
+    document = service.get_document(db, user, document_id, module, project_id=project_id)
+    return service.delete_impact_document(db, user, document.code, project_id=project_id)
 
 
 @router.post("/documents/{module}/{document_id}/delete")
 def delete_document(
     module: str,
     document_id: str,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    document = service.get_document(db, user, document_id, module)
-    service.delete_document(db, user, document.code)
+    document = service.get_document(db, user, document_id, module, project_id=project_id)
+    service.delete_document(db, user, document.code, project_id=project_id)
     return {"ok": True}
 
 
@@ -153,24 +167,30 @@ def delete_document(
 def restore_document(
     module: str,
     document_id: str,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    document = service._visible_document(db, user, document_id, include_deleted=True)
+    document = service._visible_document(
+        db, user, document_id, include_deleted=True, project_id=project_id
+    )
     if document.doc_type != module:
         from ..errors import not_found
         raise not_found("文档不存在")
-    return service._document_dict(db, service.restore_document(db, user, document.code))
+    return service._document_dict(
+        db, service.restore_document(db, user, document.code, project_id=project_id)
+    )
 
 
 @router.get("/documents/{module}/{document_id}/versions")
 def list_versions(
     module: str,
     document_id: str,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    return {"items": service.list_versions(db, user, document_id, module)}
+    return {"items": service.list_versions(db, user, document_id, module, project_id=project_id)}
 
 
 @router.post("/documents/{module}/{document_id}/rollback")
@@ -178,30 +198,40 @@ def rollback_document(
     module: str,
     document_id: str,
     body: RollbackBody,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    return service._document_dict(db, service.rollback_document(db, user, document_id, body.version_no, module))
+    return service._document_dict(
+        db,
+        service.rollback_document(
+            db, user, document_id, body.version_no, module, project_id=project_id
+        ),
+    )
 
 
 @router.get("/documents/{module}/{document_id}/references")
 def document_references(
     module: str,
     document_id: str,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    return service.document_references(db, user, document_id, module)
+    return service.document_references(db, user, document_id, module, project_id=project_id)
 
 
 @router.get("/directories/{module}/{directory_id}")
 def get_directory(
     module: str,
     directory_id: str,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    return service._directory_dict(db, service.get_directory(db, user, directory_id, module))
+    return service._directory_dict(
+        db, service.get_directory(db, user, directory_id, module, project_id=project_id)
+    )
 
 
 @router.patch("/directories/{module}/{directory_id}")
@@ -209,11 +239,14 @@ def rename_directory(
     module: str,
     directory_id: str,
     body: DirectoryRename,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    directory = service.get_directory(db, user, directory_id, module)
-    return service._directory_dict(db, service.rename_directory(db, user, directory.code, body.name))
+    directory = service.get_directory(db, user, directory_id, module, project_id=project_id)
+    return service._directory_dict(
+        db, service.rename_directory(db, user, directory.code, body.name, project_id=project_id)
+    )
 
 
 @router.post("/directories/{module}/{directory_id}/move")
@@ -221,33 +254,38 @@ def move_directory(
     module: str,
     directory_id: str,
     body: DirectoryMove,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    directory = service.get_directory(db, user, directory_id, module)
-    return service._directory_dict(db, service.move_directory(db, user, directory.code, body.parent_id))
+    directory = service.get_directory(db, user, directory_id, module, project_id=project_id)
+    return service._directory_dict(
+        db, service.move_directory(db, user, directory.code, body.parent_id, project_id=project_id)
+    )
 
 
 @router.get("/directories/{module}/{directory_id}/delete-impact")
 def directory_delete_impact(
     module: str,
     directory_id: str,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    directory = service.get_directory(db, user, directory_id, module)
-    return service.delete_impact_directory(db, user, directory.code)
+    directory = service.get_directory(db, user, directory_id, module, project_id=project_id)
+    return service.delete_impact_directory(db, user, directory.code, project_id=project_id)
 
 
 @router.post("/directories/{module}/{directory_id}/delete")
 def delete_directory(
     module: str,
     directory_id: str,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    directory = service.get_directory(db, user, directory_id, module)
-    service.delete_directory(db, user, directory.code)
+    directory = service.get_directory(db, user, directory_id, module, project_id=project_id)
+    service.delete_directory(db, user, directory.code, project_id=project_id)
     return {"ok": True}
 
 
@@ -255,11 +293,16 @@ def delete_directory(
 def restore_directory(
     module: str,
     directory_id: str,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    directory = service._editable_directory(db, user, directory_id, include_deleted=True)
+    directory = service._editable_directory(
+        db, user, directory_id, include_deleted=True, project_id=project_id
+    )
     if directory.module_type != module:
         from ..errors import not_found
         raise not_found("目录不存在")
-    return service._directory_dict(db, service.restore_directory(db, user, directory.code))
+    return service._directory_dict(
+        db, service.restore_directory(db, user, directory.code, project_id=project_id)
+    )

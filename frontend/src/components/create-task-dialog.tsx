@@ -19,7 +19,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { api, ApiError, type RequirementRow } from '@/lib/api'
+import { api, ApiError, type RequirementRow, withProject
+} from '@/lib/api'
 import { clearDraft, readDraft, writeDraft } from '@/lib/form-draft'
 import { CreateExtras, type StagedReference } from '@/components/create-extras'
 import { useCurrentProject } from '@/lib/current-project'
@@ -118,11 +119,11 @@ export function CreateTaskDialog({
       try {
         while (remainingRefs.length > 0) {
           const r = remainingRefs[0]
-          await api.post(`/targets/task/${created.id}/references`, { from_type: 'task', from_id: created.id, to_type: r.toType, to_id: r.toId, type: r.type })
+          await api.post(withProject(`/targets/task/${created.id}/references`, projectId), { from_type: 'task', from_id: created.id, to_type: r.toType, to_id: r.toId, type: r.type })
           remainingRefs.shift()
         }
         while (remainingFiles.length > 0) {
-          await api.upload(`/targets/task/${created.id}/attachments`, remainingFiles[0])
+          await api.upload(withProject(`/targets/task/${created.id}/attachments`, projectId), remainingFiles[0])
           remainingFiles.shift()
         }
       } catch {

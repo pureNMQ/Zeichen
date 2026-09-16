@@ -31,6 +31,7 @@ import {
   ApiError,
   REQUIREMENT_STATUSES,
   TASK_STATUSES,
+  withProject,
   type ReferenceRow,
   type RequirementRow,
   type TaskRow,
@@ -148,7 +149,17 @@ export function RequirementDetailPage() {
 
   const { data: req, isLoading, error } = useQuery({
     queryKey: ['requirement', id],
-    queryFn: () => api.get<RequirementRow>(`/requirements/${id}`),
+    // 全局短码解析;跨项目同码(400 invalid_request)时用当前项目重试消歧(REQ-55)
+    queryFn: async () => {
+      try {
+        return await api.get<RequirementRow>(`/requirements/${id}`)
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 400) {
+          return await api.get<RequirementRow>(withProject(`/requirements/${id}`))
+        }
+        throw err
+      }
+    },
   })
   const { data: tasks } = useQuery({
     queryKey: ['requirement-tasks', id],
@@ -157,7 +168,7 @@ export function RequirementDetailPage() {
   })
   const { data: refs } = useQuery({
     queryKey: ['refs', 'requirement', id],
-    queryFn: () => api.get<{ items: ReferenceRow[] }>(`/targets/requirement/${id}/references?limit=50`),
+    queryFn: () => api.get<{ items: ReferenceRow[] }>(withProject(`/targets/requirement/${id}/references?limit=50`, req?.project_id)),
     enabled: !!req,
   })
 
@@ -181,7 +192,7 @@ export function RequirementDetailPage() {
   async function act(path: string, body?: unknown) {
     setActionError(null)
     try {
-      await api.post(path, body)
+      await api.post(withProject(path, req?.project_id), body)
       await qc.invalidateQueries({ queryKey: ['requirement', id] })
       await qc.invalidateQueries({ queryKey: ['activity', 'requirement', id] })
     } catch (err) {
@@ -197,7 +208,7 @@ export function RequirementDetailPage() {
   async function claimPanelTask(taskId: string) {
     setActionError(null)
     try {
-      await api.post(`/tasks/${taskId}/claim`)
+      await api.post(withProject(`/tasks/${taskId}/claim`, req?.project_id))
       await qc.invalidateQueries({ queryKey: ['requirement-tasks', id] })
       await qc.invalidateQueries({ queryKey: ['tasks', req?.project_id] })
     } catch (err) {
@@ -209,7 +220,7 @@ export function RequirementDetailPage() {
     if (status === t.status) return
     setActionError(null)
     try {
-      await api.post(`/tasks/${t.id}/status`, { status })
+      await api.post(withProject(`/tasks/${t.id}/status`, req?.project_id), { status })
       await qc.invalidateQueries({ queryKey: ['requirement-tasks', id] })
       await qc.invalidateQueries({ queryKey: ['tasks', req?.project_id] })
     } catch (err) {
@@ -221,7 +232,7 @@ export function RequirementDetailPage() {
     if (!deleteTarget) return
     setActionError(null)
     try {
-      await api.post(`/tasks/${deleteTarget.id}/delete`)
+      await api.post(withProject(`/tasks/${deleteTarget.id}/delete`, req?.project_id))
       setDeleteTarget(null)
       await qc.invalidateQueries({ queryKey: ['requirement-tasks', id] })
       await qc.invalidateQueries({ queryKey: ['requirements', req?.project_id] })

@@ -13,7 +13,8 @@ vi.mock('@/lib/api', () => {
     status: number
     constructor(status: number, message: string) { super(message); this.status = status }
   }
-  return { ApiError, api: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() } }
+  return {
+  withProject: (path: string) => path, ApiError, api: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() } }
 })
 
 import { api } from '@/lib/api'

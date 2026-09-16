@@ -138,21 +138,29 @@ def _get_directory_raw(db: Session, project_id: uuid.UUID, code: str) -> Documen
     return directory
 
 
-def _visible_document(db: Session, user: User, document_id: str, include_deleted: bool = False) -> Document:
+def _visible_document(
+    db: Session, user: User, document_id: str, include_deleted: bool = False,
+    project_id: uuid.UUID | None = None,
+) -> Document:
     from .short_code_lookup import resolve_by_code
     from .short_codes import require_valid_code
 
     require_valid_code("document", document_id)
     if include_deleted:
-        # 恢复语义:允许已删行,逐项目扫描同码已删文档
+        # 恢复语义:允许已删行,扫描同码已删文档(显式 project_id 时仅限该项目)
         from ..models import Document as _Doc
         from .projects import list_projects
 
-        projects = [p for p, _r in list_projects(db, user)]
+        if project_id is not None:
+            get_accessible_project(db, user.id, project_id, min_level="viewer")
+            project_ids = [project_id]
+        else:
+            projects = [p for p, _r in list_projects(db, user)]
+            project_ids = [p.id for p in projects]
         rows = db.scalars(
             select(_Doc).where(
                 _Doc.code == document_id,
-                _Doc.project_id.in_([p.id for p in projects]),
+                _Doc.project_id.in_(project_ids),
                 _Doc.deleted_at.is_not(None),
             )
         ).all()
@@ -163,17 +171,23 @@ def _visible_document(db: Session, user: User, document_id: str, include_deleted
         document = rows[0]
         get_accessible_project(db, user.id, document.project_id, min_level="viewer")
         return document
-    document, _project = resolve_by_code(db, user, "document", document_id)
+    document, _project = resolve_by_code(db, user, "document", document_id, project_id=project_id)
     return document
 
 
-def _editable_document(db: Session, user: User, document_id: str, include_deleted: bool = False) -> Document:
-    document = _visible_document(db, user, document_id, include_deleted)
+def _editable_document(
+    db: Session, user: User, document_id: str, include_deleted: bool = False,
+    project_id: uuid.UUID | None = None,
+) -> Document:
+    document = _visible_document(db, user, document_id, include_deleted, project_id=project_id)
     require_project_role(db, user.id, document.project_id, min_level="editor")
     return document
 
 
-def _editable_directory(db: Session, user: User, directory_id: str, include_deleted: bool = False) -> DocumentDirectory:
+def _editable_directory(
+    db: Session, user: User, directory_id: str, include_deleted: bool = False,
+    project_id: uuid.UUID | None = None,
+) -> DocumentDirectory:
     from .short_code_lookup import resolve_by_code
     from .short_codes import require_valid_code
 
@@ -181,11 +195,16 @@ def _editable_directory(db: Session, user: User, directory_id: str, include_dele
     if include_deleted:
         from .projects import list_projects
 
-        projects = [p for p, _r in list_projects(db, user)]
+        if project_id is not None:
+            get_accessible_project(db, user.id, project_id, min_level="viewer")
+            project_ids = [project_id]
+        else:
+            projects = [p for p, _r in list_projects(db, user)]
+            project_ids = [p.id for p in projects]
         rows = db.scalars(
             select(DocumentDirectory).where(
                 DocumentDirectory.code == directory_id,
-                DocumentDirectory.project_id.in_([p.id for p in projects]),
+                DocumentDirectory.project_id.in_(project_ids),
                 DocumentDirectory.deleted_at.is_not(None),
             )
         ).all()
@@ -195,25 +214,35 @@ def _editable_directory(db: Session, user: User, directory_id: str, include_dele
             raise invalid_request(f"短码 {directory_id} 在多个项目中存在,请通过项目内接口访问")
         directory = rows[0]
     else:
-        entity, _project = resolve_by_code(db, user, "document_directory", directory_id)
+        entity, _project = resolve_by_code(
+            db, user, "document_directory", directory_id, project_id=project_id
+        )
         directory = entity
     require_project_role(db, user.id, directory.project_id, min_level="editor")
     return directory
 
 
-def get_document(db: Session, user: User, document_id: str, module: str | None = None) -> Document:
-    document = _visible_document(db, user, document_id)
+def get_document(
+    db: Session, user: User, document_id: str, module: str | None = None,
+    project_id: uuid.UUID | None = None,
+) -> Document:
+    document = _visible_document(db, user, document_id, project_id=project_id)
     if module is not None and document.doc_type != module:
         raise not_found("文档不存在")
     return document
 
 
-def get_directory(db: Session, user: User, directory_id: str, module: str | None = None) -> DocumentDirectory:
+def get_directory(
+    db: Session, user: User, directory_id: str, module: str | None = None,
+    project_id: uuid.UUID | None = None,
+) -> DocumentDirectory:
     from .short_code_lookup import resolve_by_code
     from .short_codes import require_valid_code
 
     require_valid_code("document_directory", directory_id)
-    directory, _project = resolve_by_code(db, user, "document_directory", directory_id)
+    directory, _project = resolve_by_code(
+        db, user, "document_directory", directory_id, project_id=project_id
+    )
     get_accessible_project(db, user.id, directory.project_id, min_level="viewer")
     if module is not None and directory.module_type != module:
         raise not_found("目录不存在")
@@ -369,8 +398,9 @@ def update_document(
     title: str | None = None,
     content: str | None = None,
     metadata: object = _UNSET,
+    project_id: uuid.UUID | None = None,
 ) -> tuple[Document, dict | None]:
-    document = _editable_document(db, actor, document_id)
+    document = _editable_document(db, actor, document_id, project_id=project_id)
     if title is not None:
         title = title.strip()
         if not title:
@@ -398,8 +428,9 @@ def move_document(
     document_id: str,
     parent_id: str | None = None,
     directory_id: str | None = None,
+    project_id: uuid.UUID | None = None,
 ) -> Document:
-    document = _editable_document(db, actor, document_id)
+    document = _editable_document(db, actor, document_id, project_id=project_id)
     _validate_location(db, document.project_id, document.doc_type, parent_id, directory_id, document.code)
     _assert_document_title_unique(
         db, document.project_id, document.doc_type, document.title, parent_id, directory_id, {document.code}
@@ -487,8 +518,11 @@ def _assert_directory_name_unique(
         raise conflict("同级目录名称已存在")
 
 
-def rename_directory(db: Session, actor: User, directory_id: str, name: str) -> DocumentDirectory:
-    directory = _editable_directory(db, actor, directory_id)
+def rename_directory(
+    db: Session, actor: User, directory_id: str, name: str,
+    project_id: uuid.UUID | None = None,
+) -> DocumentDirectory:
+    directory = _editable_directory(db, actor, directory_id, project_id=project_id)
     name = name.strip()
     if not name:
         raise invalid_request("目录名称不能为空")
@@ -501,8 +535,11 @@ def rename_directory(db: Session, actor: User, directory_id: str, name: str) -> 
     return directory
 
 
-def move_directory(db: Session, actor: User, directory_id: str, parent_id: str | None) -> DocumentDirectory:
-    directory = _editable_directory(db, actor, directory_id)
+def move_directory(
+    db: Session, actor: User, directory_id: str, parent_id: str | None,
+    project_id: uuid.UUID | None = None,
+) -> DocumentDirectory:
+    directory = _editable_directory(db, actor, directory_id, project_id=project_id)
     _validate_directory_parent(db, directory.project_id, directory.module_type, parent_id, directory.code)
     _assert_directory_name_unique(
         db, directory.project_id, directory.module_type, directory.name, parent_id, {directory.code}
@@ -564,20 +601,26 @@ def _directory_subtree_documents(db: Session, project_id: uuid.UUID, directory_c
     )
 
 
-def delete_impact_document(db: Session, user: User, document_id: str) -> dict:
-    document = _visible_document(db, user, document_id)
+def delete_impact_document(
+    db: Session, user: User, document_id: str, project_id: uuid.UUID | None = None
+) -> dict:
+    document = _visible_document(db, user, document_id, project_id=project_id)
     ids = _wiki_subtree_ids(db, document.project_id, document.code) if document.doc_type == "wiki" else {document.code}
     return {"documents": len(ids), "directories": 0}
 
 
-def delete_impact_directory(db: Session, user: User, directory_id: str) -> dict:
-    directory = get_directory(db, user, directory_id)
+def delete_impact_directory(
+    db: Session, user: User, directory_id: str, project_id: uuid.UUID | None = None
+) -> dict:
+    directory = get_directory(db, user, directory_id, project_id=project_id)
     directory_ids = _directory_subtree_ids(db, directory.project_id, directory.code)
     return {"documents": len(_directory_subtree_documents(db, directory.project_id, directory_ids)), "directories": len(directory_ids)}
 
 
-def delete_document(db: Session, actor: User, document_id: str) -> None:
-    document = _editable_document(db, actor, document_id)
+def delete_document(
+    db: Session, actor: User, document_id: str, project_id: uuid.UUID | None = None
+) -> None:
+    document = _editable_document(db, actor, document_id, project_id=project_id)
     ids = _wiki_subtree_ids(db, document.project_id, document.code) if document.doc_type == "wiki" else {document.code}
     rows = db.scalars(
         select(Document).where(
@@ -597,8 +640,10 @@ def delete_document(db: Session, actor: User, document_id: str) -> None:
     db.commit()
 
 
-def delete_directory(db: Session, actor: User, directory_id: str) -> None:
-    directory = _editable_directory(db, actor, directory_id)
+def delete_directory(
+    db: Session, actor: User, directory_id: str, project_id: uuid.UUID | None = None
+) -> None:
+    directory = _editable_directory(db, actor, directory_id, project_id=project_id)
     directory_ids = _directory_subtree_ids(db, directory.project_id, directory.code)
     document_codes = _directory_subtree_documents(db, directory.project_id, directory_ids)
     timestamp = _now()
@@ -662,8 +707,12 @@ def _validate_restore_directories(db: Session, directories: list[DocumentDirecto
         )
 
 
-def restore_document(db: Session, actor: User, document_id: str) -> Document:
-    document = _editable_document(db, actor, document_id, include_deleted=True)
+def restore_document(
+    db: Session, actor: User, document_id: str, project_id: uuid.UUID | None = None
+) -> Document:
+    document = _editable_document(
+        db, actor, document_id, include_deleted=True, project_id=project_id
+    )
     if document.deleted_at is None:
         raise not_found("已删除的文档不存在")
     ids = _wiki_subtree_ids(db, document.project_id, document.code) if document.doc_type == "wiki" else {document.code}
@@ -680,8 +729,12 @@ def restore_document(db: Session, actor: User, document_id: str) -> Document:
     return document
 
 
-def restore_directory(db: Session, actor: User, directory_id: str) -> DocumentDirectory:
-    directory = _editable_directory(db, actor, directory_id, include_deleted=True)
+def restore_directory(
+    db: Session, actor: User, directory_id: str, project_id: uuid.UUID | None = None
+) -> DocumentDirectory:
+    directory = _editable_directory(
+        db, actor, directory_id, include_deleted=True, project_id=project_id
+    )
     if directory.deleted_at is None:
         raise not_found("已删除的目录不存在")
     directory_ids = _directory_subtree_ids(db, directory.project_id, directory.code)
@@ -792,7 +845,7 @@ def ancestor_path(
     _require_module(module)
     get_accessible_project(db, user.id, project_id, min_level="viewer")
     if node_kind == "document":
-        node = _visible_document(db, user, node_id)
+        node = _visible_document(db, user, node_id, project_id=project_id)
         if node.project_id != project_id or node.doc_type != module:
             raise not_found("文档不存在")
         if module == "wiki":
@@ -806,11 +859,11 @@ def ancestor_path(
             return {"items": [_document_dict(db, item) for item in reversed(chain)]}
         if node.directory_id is None:
             return {"items": [_document_dict(db, node)]}
-        directory = get_directory(db, user, node.directory_id, module)
+        directory = get_directory(db, user, node.directory_id, module, project_id=project_id)
         chain_dirs = _directory_ancestors(db, directory)
         return {"items": [_directory_dict(db, item) for item in chain_dirs] + [_document_dict(db, node)]}
     if node_kind == "directory" and module in DIRECTORY_MODULES:
-        directory = get_directory(db, user, node_id, module)
+        directory = get_directory(db, user, node_id, module, project_id=project_id)
         if directory.project_id != project_id:
             raise not_found("目录不存在")
         return {"items": [_directory_dict(db, item) for item in _directory_ancestors(db, directory)]}
@@ -830,8 +883,11 @@ def _directory_ancestors(db: Session, node: DocumentDirectory) -> list[DocumentD
     return list(reversed(chain))
 
 
-def list_versions(db: Session, user: User, document_id: str, module: str | None = None) -> list[dict]:
-    document = get_document(db, user, document_id, module)
+def list_versions(
+    db: Session, user: User, document_id: str, module: str | None = None,
+    project_id: uuid.UUID | None = None,
+) -> list[dict]:
+    document = get_document(db, user, document_id, module, project_id=project_id)
     versions = db.scalars(
         select(DocumentVersion)
         .where(
@@ -843,8 +899,11 @@ def list_versions(db: Session, user: User, document_id: str, module: str | None 
     return [_version_dict(version) for version in versions]
 
 
-def rollback_document(db: Session, actor: User, document_id: str, version_no: int, module: str | None = None) -> Document:
-    document = _editable_document(db, actor, document_id)
+def rollback_document(
+    db: Session, actor: User, document_id: str, version_no: int, module: str | None = None,
+    project_id: uuid.UUID | None = None,
+) -> Document:
+    document = _editable_document(db, actor, document_id, project_id=project_id)
     if module is not None and document.doc_type != module:
         raise not_found("文档不存在")
     version = db.scalar(
@@ -898,6 +957,9 @@ def _reverse_references(db: Session, document: Document) -> dict:
     return {"count": len(items), "items": items}
 
 
-def document_references(db: Session, user: User, document_id: str, module: str) -> dict:
-    document = get_document(db, user, document_id, module)
+def document_references(
+    db: Session, user: User, document_id: str, module: str,
+    project_id: uuid.UUID | None = None,
+) -> dict:
+    document = get_document(db, user, document_id, module, project_id=project_id)
     return _reverse_references(db, document)
