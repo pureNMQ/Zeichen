@@ -123,9 +123,10 @@ async def set_avatar(db: Session, actor: User, target_id: uuid.UUID, upload: Upl
 
 
 def remove_avatar(db: Session, actor: User, target_id: uuid.UUID) -> User:
-    if actor.id != target_id and not is_admin(db, actor.id):
-        raise permission_denied("只能修改自己的头像")
+    """与 set_avatar 同一判权口径:本人 / admin / 附属 Agent 的主人。"""
     target = get_user(db, target_id)
+    if not _can_edit_profile(db, actor, target):
+        raise permission_denied("只能修改自己的头像")
     attachment = _attachment(db, target)
     if attachment is not None:
         attachment.deleted_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)

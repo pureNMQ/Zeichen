@@ -1,10 +1,12 @@
 """附属 Agent(ADR 0004 / REQ-48):成员自有、权限继承、key 管辖矩阵。"""
 
+import uuid
+
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import ApiKey, ProjectMember
+from app.models import ApiKey, ProjectMember, User
 from app.services import agents as svc
 from app.services import members as members_svc
 from app.services import permissions as perms
@@ -206,6 +208,74 @@ class TestRecreateAfterAgentSoftDeleted:
         with pytest.raises(AppError) as ei:
             svc.create_agent(db, admin, "another-racer")
         assert ei.value.status_code == 409
+
+
+class TestOwnerSelfDeleteAgent:
+    """REQ-52:主人自助删除附属 Agent——软删 + 同事务吊销全部 key。"""
+
+    def test_delete_revokes_keys_and_soft_deletes(self, client, db, world):
+        _admin(client)
+        client.post("/api/my-agent", json={"username": "bye-bot"})
+        key = client.post("/api/my-agent/keys", json={"note": None}).json()
+        resp = client.delete("/api/my-agent")
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {"ok": True}
+        agent = db.scalar(select(User).where(User.username == "bye-bot"))
+        assert agent.deleted_at is not None
+        key_id = uuid.UUID(key["id"])
+        assert db.scalar(select(ApiKey.revoked_at).where(ApiKey.id == key_id)) is not None
+        # 成员页摘要与 my-agent 均回到空态
+        assert client.get("/api/my-agent").json() == {"agent": None}
+
+    def test_recreate_after_delete_needs_new_username(self, client, db, world):
+        _admin(client)
+        client.post("/api/my-agent", json={"username": "old-name"})
+        assert client.delete("/api/my-agent").status_code == 200
+        same = client.post("/api/my-agent", json={"username": "old-name"})
+        assert same.status_code == 409
+        assert "已删除" in same.json()["message"]
+        fresh = client.post("/api/my-agent", json={"username": "fresh-name"})
+        assert fresh.status_code == 201, fresh.text
+
+    def test_delete_without_agent_404(self, client, db, world):
+        _admin(client)
+        assert client.delete("/api/my-agent").status_code == 404
+
+
+class TestOwnerEditsAgentProfile:
+    """REQ-52:主人可改附属 Agent 昵称/头像,含恢复默认头像。"""
+
+    def test_owner_sets_and_removes_agent_avatar(self, client, db, world, tmp_path, monkeypatch):
+        from app.config import get_settings
+
+        monkeypatch.setattr(get_settings(), "attachment_storage_dir", tmp_path)
+        bob = world["member"]
+        svc.create_agent(db, bob, "avatar-bot")
+        agent = svc.get_owned_agent(db, bob.id)
+        _give_bob_password(client, db)
+        login(client, "bob", "bob-pass-1")
+        png = b"\x89PNG\r\n\x1a\n" + b"img"
+        upload = client.post(
+            f"/api/users/{agent.id}/avatar", files={"file": ("a.png", png, "image/png")}
+        )
+        assert upload.status_code == 200, upload.text
+        assert upload.json()["avatar"] is not None
+        removed = client.delete(f"/api/users/{agent.id}/avatar")
+        assert removed.status_code == 200, removed.text
+        assert removed.json()["avatar"] is None
+        # 主人改 Agent 昵称
+        patched = client.patch(f"/api/users/{agent.id}", json={"nickname": "小助手"})
+        assert patched.status_code == 200
+        assert patched.json()["nickname"] == "小助手"
+
+    def test_other_member_cannot_touch_agent_profile(self, client, db, world):
+        bob = world["member"]
+        agent = svc.create_agent(db, world["admin"], "guard-bot")
+        _give_bob_password(client, db)
+        login(client, "bob", "bob-pass-1")
+        assert client.patch(f"/api/users/{agent.id}", json={"nickname": "x"}).status_code == 403
+        assert client.delete(f"/api/users/{agent.id}/avatar").status_code == 403
+        assert client.delete("/api/my-agent").status_code == 404
 
 
 class TestMembersPayload:

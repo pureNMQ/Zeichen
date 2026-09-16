@@ -68,7 +68,10 @@ def create_agent(db: Session, owner: User, username: str) -> User:
         raise invalid_request("用户名不能为空")
     if len(username) > 64:
         raise invalid_request("用户名过长")
-    if db.scalar(select(User).where(User.username == username)) is not None:
+    existing = db.scalar(select(User).where(User.username == username))
+    if existing is not None:
+        if existing.deleted_at is not None:
+            raise conflict("该用户名已被已删除账号占用,请换一个用户名")
         raise conflict("账号已存在")
     agent = User(
         username=username,
@@ -88,6 +91,20 @@ def create_agent(db: Session, owner: User, username: str) -> User:
         raise conflict("账号已存在")
     db.refresh(agent)
     return agent
+
+
+def delete_agent(db: Session, owner: User) -> None:
+    """主人自助删除:软删 Agent 并同事务吊销全部 key(历史署名保留)。
+
+    用户名仍被软删行占用,重建须换用户名(create_agent 的 409 文案已区分)。
+    """
+    agent = require_owned_agent(db, owner.id)
+    now = datetime.now(timezone.utc)
+    agent.deleted_at = now
+    db.query(ApiKey).filter(
+        ApiKey.user_id == agent.id, ApiKey.revoked_at.is_(None)
+    ).update({ApiKey.revoked_at: now})
+    db.commit()
 
 
 def require_owned_agent(db: Session, owner_id: uuid.UUID) -> User:

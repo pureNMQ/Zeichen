@@ -48,6 +48,14 @@ def update_my_agent(
     return {"agent": agents_service.agent_detail(db, agent)}
 
 
+@router.delete("")
+def delete_my_agent(
+    user: User = Depends(current_user), db: Session = Depends(get_db)
+) -> dict:
+    agents_service.delete_agent(db, user)
+    return {"ok": True}
+
+
 @router.post("/keys", status_code=201)
 def issue_key(
     body: KeyIssue, user: User = Depends(current_user), db: Session = Depends(get_db)

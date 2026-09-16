@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ErrorNotification } from '@/components/ui/notification'
-import { UserIdentityLabel } from '@/components/user-avatar'
+import { UserAvatar, UserIdentityLabel } from '@/components/user-avatar'
 import { UserProfileDialog } from '@/components/user-profile-dialog'
 import {
   Card,
@@ -227,6 +227,8 @@ function ManageAgentDialog({ open, onOpenChange }: { open: boolean; onOpenChange
   const [revealFor, setRevealFor] = useState<string | null>(null)
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [profileOpen, setProfileOpen] = useState(false)
+  const [deleteConfirmFor, setDeleteConfirmFor] = useState<MyAgentDetail | null>(null)
   const { data: agent } = useQuery({
     queryKey: ['my-agent'],
     queryFn: () => api.get<{ agent: MyAgentDetail | null }>('/my-agent'),
@@ -244,22 +246,43 @@ function ManageAgentDialog({ open, onOpenChange }: { open: boolean; onOpenChange
     }
   }
 
+  async function deleteAgent() {
+    setError(null)
+    try {
+      await api.delete('/my-agent')
+      setDeleteConfirmFor(null)
+      onOpenChange(false)
+      await qc.invalidateQueries({ queryKey: ['my-agent'] })
+      await qc.invalidateQueries({ queryKey: ['members'] })
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : '删除失败,请重试')
+    }
+  }
+
   const detail = agent?.agent ?? null
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) { setIssuedToken(null); setRevealFor(null); setPassword(''); setError(null) } onOpenChange(v) }}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>管理我的 Agent</DialogTitle>
-          <DialogDescription>明文 key 仅签发时展示一次;回看需输入你的密码。</DialogDescription>
-        </DialogHeader>
-        {detail && (
-          <div className="space-y-4">
-            <div className="flex items-center gap-2 text-sm">
-              <Bot className="h-4 w-4 text-muted-foreground" />
-              <span className="font-medium">{detail.display_name}</span>
-              <span className="text-xs text-muted-foreground">@{detail.username}</span>
-            </div>
+    <>
+      <Dialog open={open} onOpenChange={(v) => { if (!v) { setIssuedToken(null); setRevealFor(null); setPassword(''); setError(null) } onOpenChange(v) }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>管理我的 Agent</DialogTitle>
+            <DialogDescription>明文 key 仅签发时展示一次;回看需输入你的密码。</DialogDescription>
+          </DialogHeader>
+          {detail && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-2 text-sm">
+                  <UserAvatar user={detail} className="h-9 w-9" />
+                  <div className="min-w-0">
+                    <p className="truncate font-medium">{detail.display_name}</p>
+                    <p className="text-xs text-muted-foreground">@{detail.username}</p>
+                  </div>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => setProfileOpen(true)}>
+                  编辑资料
+                </Button>
+              </div>
             <div className="space-y-1.5">
               <Label htmlFor="agent-key-note">签发新 key(备注可选)</Label>
               <div className="flex gap-2">
@@ -346,6 +369,16 @@ function ManageAgentDialog({ open, onOpenChange }: { open: boolean; onOpenChange
               ))}
             </div>
             {error && <p className="text-sm text-destructive">{error}</p>}
+            <div className="space-y-1.5 border-t pt-3">
+              <p className="text-xs font-medium text-muted-foreground">删除附属 Agent</p>
+              <p className="text-xs text-muted-foreground">
+                删除后该 Agent 立即失去 MCP 访问,全部 API key 一并吊销;历史记录保留其署名,不可恢复。
+              </p>
+              <Button variant="ghost" size="sm" className="text-destructive" onClick={() => setDeleteConfirmFor(detail)}>
+                <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                删除 Agent
+              </Button>
+            </div>
           </div>
         )}
         <DialogFooter>
@@ -353,6 +386,31 @@ function ManageAgentDialog({ open, onOpenChange }: { open: boolean; onOpenChange
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {detail && profileOpen && (
+      <UserProfileDialog
+        user={detail}
+        open
+        onOpenChange={(v) => { if (!v) setProfileOpen(false) }}
+        onSaved={() => qc.invalidateQueries({ queryKey: ['my-agent'] })}
+      />
+    )}
+    <Dialog open={deleteConfirmFor !== null} onOpenChange={(v) => { if (!v) setDeleteConfirmFor(null) }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>删除附属 Agent</DialogTitle>
+          <DialogDescription>
+            确认删除 {deleteConfirmFor ? `@${deleteConfirmFor.username}` : ''}?它将立即失去 MCP 访问,全部 API key 一并吊销,且不可恢复;之后可重新创建 Agent,但需换一个用户名。
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setDeleteConfirmFor(null)}>取消</Button>
+          <Button variant="destructive" onClick={() => void deleteAgent()}>
+            确认删除
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   )
 }
 

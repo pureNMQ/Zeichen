@@ -62,6 +62,79 @@ function renderMembers() {
   )
 }
 
+const agentDetail = {
+  id: 'a1',
+  username: 'admin-bot',
+  nickname: null,
+  display_name: 'admin-bot',
+  avatar: null,
+  is_agent: true,
+  created_at: '2026-08-03T00:00:00Z',
+  active_keys: 1,
+  keys: [
+    { id: 'k1', note: '日常', created_at: '2026-08-03T00:00:00Z', revoked_at: null },
+  ],
+}
+
+describe('ManageAgentDialog 自助管理', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    workspaceRole = 'admin'
+  })
+
+  it('可打开 Agent 资料编辑(昵称/头像)', async () => {
+    vi.mocked(api.get).mockImplementation((path: string) => {
+      if (path === '/members') return Promise.resolve(rows)
+      if (path === '/my-agent') return Promise.resolve({ agent: agentDetail })
+      return Promise.resolve({})
+    })
+    renderMembers()
+    const user = (await import('@testing-library/user-event')).default
+
+    await user.click(await screen.findByRole('button', { name: '管理 Agent 与 key' }))
+    await user.click(await screen.findByRole('button', { name: '编辑资料' }))
+
+    expect(await screen.findByRole('dialog', { name: '编辑 admin-bot 的资料' })).toBeInTheDocument()
+    expect(screen.getByLabelText('昵称')).toBeInTheDocument()
+  })
+
+  it('删除 Agent 需确认,确认后调用 DELETE /my-agent', async () => {
+    vi.mocked(api.get).mockImplementation((path: string) => {
+      if (path === '/members') return Promise.resolve(rows)
+      if (path === '/my-agent') return Promise.resolve({ agent: agentDetail })
+      return Promise.resolve({})
+    })
+    vi.mocked(api.delete).mockResolvedValue({ ok: true })
+    renderMembers()
+    const user = (await import('@testing-library/user-event')).default
+
+    await user.click(await screen.findByRole('button', { name: '管理 Agent 与 key' }))
+    await user.click(await screen.findByRole('button', { name: /删除 Agent/ }))
+
+    expect(await screen.findByRole('dialog', { name: '删除附属 Agent' })).toBeInTheDocument()
+    expect(screen.getByText(/需换一个用户名/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '确认删除' }))
+    expect(api.delete).toHaveBeenCalledWith('/my-agent')
+  })
+
+  it('取消删除不调用接口', async () => {
+    vi.mocked(api.get).mockImplementation((path: string) => {
+      if (path === '/members') return Promise.resolve(rows)
+      if (path === '/my-agent') return Promise.resolve({ agent: agentDetail })
+      return Promise.resolve({})
+    })
+    renderMembers()
+    const user = (await import('@testing-library/user-event')).default
+
+    await user.click(await screen.findByRole('button', { name: '管理 Agent 与 key' }))
+    await user.click(await screen.findByRole('button', { name: /删除 Agent/ }))
+    await user.click(await screen.findByRole('button', { name: '取消' }))
+
+    expect(api.delete).not.toHaveBeenCalled()
+  })
+})
+
 describe('MembersPage 成员列表渲染', () => {
   beforeEach(() => {
     vi.clearAllMocks()
