@@ -10,6 +10,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..errors import conflict, invalid_request, not_found, permission_denied
@@ -77,7 +78,14 @@ def create_agent(db: Session, owner: User, username: str) -> User:
         created_by=owner.id,
     )
     db.add(agent)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # 并发窗口内查重漏判,由唯一索引兜底;按库内既成事实回精确 409
+        db.rollback()
+        if get_owned_agent(db, owner.id) is not None:
+            raise conflict("已创建附属 Agent")
+        raise conflict("账号已存在")
     db.refresh(agent)
     return agent
 

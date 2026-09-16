@@ -21,12 +21,13 @@ class User(IdMixin, TimestampMixin, SoftDeleteMixin, CreatedByMixin, Base):
     __table_args__ = (
         CheckConstraint("username <> ''", name="ck_user_username_not_empty"),
         CheckConstraint("owner_id IS NULL OR is_agent", name="ck_user_owner_only_for_agent"),
+        # 软删即释放唯一占位:与 get_owned_agent 的存活判定保持同一谓词
         Index(
             "uq_user_owner_one_agent",
             "owner_id",
             unique=True,
-            postgresql_where=text("owner_id IS NOT NULL"),
-            sqlite_where=text("owner_id IS NOT NULL"),
+            postgresql_where=text("owner_id IS NOT NULL AND deleted_at IS NULL"),
+            sqlite_where=text("owner_id IS NOT NULL AND deleted_at IS NULL"),
         ),
     )
 

@@ -169,6 +169,45 @@ class TestPermissionInheritance:
             svc.create_agent(db, world["agent"], "nested")
 
 
+class TestRecreateAfterAgentSoftDeleted:
+    """REQ-51:软删的附属 Agent 不得继续占用 owner_id 唯一性,主人须可重新创建。"""
+
+    def _soft_delete_owned_agent(self, db, owner):
+        agent = svc.get_owned_agent(db, owner.id)
+        from datetime import datetime, timezone
+
+        agent.deleted_at = datetime.now(timezone.utc)
+        db.commit()
+
+    def test_service_recreate_after_soft_delete(self, db, world):
+        admin = world["admin"]
+        svc.create_agent(db, admin, "gone-bot")
+        self._soft_delete_owned_agent(db, admin)
+        assert svc.get_owned_agent(db, admin.id) is None
+        agent = svc.create_agent(db, admin, "second-bot")
+        assert agent.deleted_at is None
+        assert svc.get_owned_agent(db, admin.id).username == "second-bot"
+
+    def test_api_recreate_after_soft_delete_201(self, client, db, world):
+        _admin(client)
+        assert client.post("/api/my-agent", json={"username": "old-bot"}).status_code == 201
+        self._soft_delete_owned_agent(db, world["admin"])
+        resp = client.post("/api/my-agent", json={"username": "new-bot"})
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["agent"]["username"] == "new-bot"
+
+    def test_late_unique_violation_becomes_conflict(self, db, world, monkeypatch):
+        """并发窗口内查重漏判时,唯一索引兜底转 409 而非 500。"""
+        from app.errors import AppError
+
+        admin = world["admin"]
+        svc.create_agent(db, admin, "race-bot")
+        monkeypatch.setattr(svc, "get_owned_agent", lambda d, owner_id: None)
+        with pytest.raises(AppError) as ei:
+            svc.create_agent(db, admin, "another-racer")
+        assert ei.value.status_code == 409
+
+
 class TestMembersPayload:
     def test_members_list_carries_agent_summary(self, client, db, world):
         svc.create_agent(db, world["admin"], "summary-bot")
