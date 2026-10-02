@@ -315,55 +315,21 @@ function ManageAgentDialog({ open, onOpenChange }: { open: boolean; onOpenChange
                   <div className="min-w-0">
                     <p className="truncate">{k.note || '无备注'}</p>
                     <p className="text-xs text-muted-foreground">
-                      {new Date(k.created_at).toLocaleDateString()}
-                      {k.revoked_at ? ` · 已吊销 ${new Date(k.revoked_at).toLocaleDateString()}` : ' · 活跃'}
+                      {new Date(k.created_at).toLocaleDateString()} · 活跃
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
-                    {!k.revoked_at && (
-                      <>
-                        {revealFor === k.id ? (
-                          <div className="flex items-center gap-1">
-                            <Input
-                              aria-label="你的密码"
-                              type="password"
-                              autoComplete="current-password"
-                              className="h-7 w-32 text-xs"
-                              value={password}
-                              onChange={(e) => setPassword(e.target.value)}
-                              placeholder="你的密码"
-                            />
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() =>
-                                void run(async () => {
-                                  const r = await api.post<{ token: string }>(`/my-agent/keys/${k.id}/reveal`, { password })
-                                  await navigator.clipboard.writeText(r.token).catch(() => undefined)
-                                  setRevealFor(null)
-                                  setPassword('')
-                                  window.alert('明文已复制到剪贴板')
-                                })
-                              }
-                            >
-                              查看
-                            </Button>
-                          </div>
-                        ) : (
-                          <Button variant="ghost" size="sm" onClick={() => { setRevealFor(k.id); setPassword('') }}>
-                            回看
-                          </Button>
-                        )}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-destructive"
-                          onClick={() => void run(() => api.delete(`/my-agent/keys/${k.id}`))}
-                        >
-                          吊销
-                        </Button>
-                      </>
-                    )}
+                    <Button variant="ghost" size="sm" onClick={() => { setRevealFor(k.id); setPassword('') }}>
+                      回看
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-destructive"
+                      onClick={() => void run(() => api.delete(`/my-agent/keys/${k.id}`))}
+                    >
+                      吊销
+                    </Button>
                   </div>
                 </div>
               ))}

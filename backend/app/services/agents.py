@@ -124,14 +124,17 @@ def key_payload(key: ApiKey) -> dict:
 
 
 def agent_detail(db: Session, agent: User) -> dict:
+    """管理弹窗数据源:keys 仅含活跃 key(REQ-53),吊销条目即时消失,与 active_keys 一致。"""
     keys = list(
-        db.scalars(select(ApiKey).where(ApiKey.user_id == agent.id).order_by(ApiKey.created_at.desc())).all()
+        db.scalars(
+            select(ApiKey).where(ApiKey.user_id == agent.id, ApiKey.revoked_at.is_(None))
+            .order_by(ApiKey.created_at.desc())
+        ).all()
     )
-    active = sum(1 for k in keys if k.revoked_at is None)
     return {
         **profile_payload(agent),
         "created_at": agent.created_at.isoformat(),
-        "active_keys": active,
+        "active_keys": len(keys),
         "keys": [key_payload(k) for k in keys],
     }
 

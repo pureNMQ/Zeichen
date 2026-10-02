@@ -98,6 +98,8 @@ class TestKeyJurisdiction:
         assert client.delete(f"/api/my-agent/keys/{key['id']}").status_code == 200
         detail = client.get("/api/my-agent").json()["agent"]
         assert detail["active_keys"] == 0
+        # REQ-53:吊销的 key 条目即时从列表消失,与活跃计数一致
+        assert [k["id"] for k in detail["keys"]] == []
         reveal = client.post(
             f"/api/my-agent/keys/{key['id']}/reveal", json={"password": "admin-pass-1"}
         )
