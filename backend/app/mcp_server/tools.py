@@ -21,8 +21,6 @@ from ..services import repositories as repository_svc
 from ..services import polymorphic as poly_svc
 from ..services import requirements as req_svc
 from ..services import tasks as task_svc
-from ..services import memory as memory_svc
-from ..services import memory_improve_jobs as improve_job_svc
 from ..services import search as search_svc
 from ..services import attachments as attachment_svc
 from . import auth
@@ -212,49 +210,6 @@ def _register_all(mcp) -> None:
         db, actor = dbc()
         repository = repository_svc.restore_repository(db, actor, uuid.UUID(id))
         return repository_svc._repository_dict(repository)
-
-    # ---------- memory.* ----------
-    @mcp.tool(name="memory.remember")
-    @sessioned
-    def memory_remember(project_id: str, session_id: str, content: str, anchor: dict | None = None) -> dict:
-        """向当前项目共享记忆写入会话内容；session_id 为 agent 自己的业务会话 ID。"""
-        db, actor = dbc()
-        return {"result": memory_svc.remember(db, actor, uuid.UUID(project_id), session_id, content, anchor)}
-
-    @mcp.tool(name="memory.recall")
-    @sessioned
-    def memory_recall(project_id: str, query: str, session_id: str | None = None) -> dict:
-        """在当前项目 Dataset 内检索共享记忆。"""
-        db, actor = dbc()
-        return {"result": memory_svc.recall(db, actor, uuid.UUID(project_id), query, session_id)}
-
-    @mcp.tool(name="memory.improve")
-    @sessioned
-    def memory_improve(project_id: str, session_id: str) -> dict:
-        """提交当前 agent 会话的异步蒸馏，立即返回可轮询的 job；不等待 Cognee 完成。"""
-        db, actor = dbc()
-        return {"job": improve_job_svc.submit(db, actor, uuid.UUID(project_id), actor.id, session_id)}
-
-    @mcp.tool(name="memory.improve_status")
-    @sessioned
-    def memory_improve_status(project_id: str, job_id: str) -> dict:
-        """查询异步会话蒸馏任务；仅 status=completed 表示已成功写入长期记忆。"""
-        db, actor = dbc()
-        return {"job": improve_job_svc.get(db, actor, uuid.UUID(project_id), uuid.UUID(job_id))}
-
-    @mcp.tool(name="memory.forget")
-    @sessioned
-    def memory_forget(project_id: str, data_id: str) -> dict:
-        """删除当前项目 Dataset 内的一条记忆。"""
-        db, actor = dbc()
-        return {"result": memory_svc.forget(db, actor, uuid.UUID(project_id), data_id)}
-
-    @mcp.tool(name="memory.list")
-    @sessioned
-    def memory_list(project_id: str, source_id: str | None = None) -> dict:
-        """列出当前项目的共享记忆，可按创建来源过滤。"""
-        db, actor = dbc()
-        return memory_svc.list_memory(db, actor, uuid.UUID(project_id), uuid.UUID(source_id) if source_id else None)
 
     # ---------- requirements.* ----------
     @mcp.tool(name="requirements.create")
@@ -887,8 +842,8 @@ def _register_all(mcp) -> None:
     @mcp.tool(name="search.query")
     @sessioned
     def search_query(query: str, domains: list[str] | None = None) -> dict:
-        """跨我有权限的项目搜索(query 关键词+记忆语义混合)。
-        结果按域分组:requirement/task/document/memory。"""
+        """跨我有权限的项目搜索(query 关键词)。
+        结果按域分组:requirement/task/document。"""
         db, actor = dbc()
         return search_svc.search(db, actor, query, domains)
 

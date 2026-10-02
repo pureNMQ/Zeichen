@@ -1,9 +1,8 @@
 """全局搜索服务测试(规格书 §4.2 search.query 同后端)。"""
 
-import pytest
 from sqlalchemy.orm import Session
 
-from app.models import Project, ProjectMember
+from app.models import Project
 from app.services import documents as doc_svc
 from app.services import requirements as req_svc
 from app.services import search as svc
@@ -68,94 +67,19 @@ class TestCodeSymbolSearchRemoved:
         assert not hasattr(svc, "search_code_symbols")
 
 
-class TestMemorySearch:
-    def test_memory_domain_with_mocked_client(self, db: Session, world: dict, monkeypatch):
-        from app.services import cognee as cognee_module
-        from app.services import memory as memory_svc
+class TestMemorySearchRemoved:
+    """REQ-57:记忆域随记忆系统下线,搜索不再有任何记忆通路。"""
 
-        class FakeClient:
-            def __init__(self):
-                pass
+    def test_memory_search_is_removed(self):
+        assert not hasattr(svc, "search_memory")
 
-            def create_dataset(self, name):
-                return f"ds-{name}"
+    def test_api_rejects_memory_domain(self, client, db, world):
+        from .conftest import login
 
-            def recall(self, *, dataset_id, query, session_id=None):
-                return {"answers": [{"answer": "记忆片段结果"}]}
-
-        monkeypatch.setattr(cognee_module, "CogneeClient", lambda: FakeClient())
-        monkeypatch.setattr(memory_svc, "CogneeClient", lambda: FakeClient())
-        memory_svc.provision_project(db, world["project"].id, FakeClient())
-        db.commit()
-        result = svc.search(db, world["member"], "登录", domains=["memory"])
-        assert result["items"]
-        assert all(item["domain"] == "memory" for item in result["items"])
-
-    def test_memory_recall_falls_back_to_chunks(self, db: Session, world: dict, monkeypatch):
-        from app.services import cognee as cognee_module
-        from app.services import memory as memory_svc
-
-        class FakeClient:
-            def create_dataset(self, name):
-                return f"ds-{name}"
-
-            def recall(self, **kwargs):
-                return {"chunks": [{"text": "chunk 片段一"}, {"text": "chunk 片段二"}]}
-
-        monkeypatch.setattr(cognee_module, "CogneeClient", lambda: FakeClient())
-        monkeypatch.setattr(memory_svc, "CogneeClient", lambda: FakeClient())
-        memory_svc.provision_project(db, world["project"].id, FakeClient())
-        db.commit()
-        result = svc.search(db, world["member"], "登录", domains=["memory"])
-        texts = [item["summary"] for item in result["items"]]
-        assert "chunk 片段一" in texts
-
-    def test_memory_skips_projects_without_dataset(self, db: Session, world: dict, monkeypatch):
-        from app.services import cognee as cognee_module
-        from app.services import memory as memory_svc
-
-        class FakeClient:
-            def create_dataset(self, name):
-                return f"ds-{name}"
-
-            def recall(self, **kwargs):
-                return {"answers": [{"answer": "不该出现"}]}
-
-        monkeypatch.setattr(cognee_module, "CogneeClient", lambda: FakeClient())
-        monkeypatch.setattr(memory_svc, "CogneeClient", lambda: FakeClient())
-        result = svc.search(db, world["member"], "登录", domains=["memory"])
-        assert result["items"] == []
-
-    def test_extract_recall_text_handles_non_dict_payload(self):
-        assert svc._extract_recall_text([]) == []
-        assert svc._extract_recall_text("plain string") == []
-        assert svc._extract_recall_text(None) == []
-
-    def test_memory_domain_no_global_hard_cap(self, db: Session, world: dict, monkeypatch):
-        """REQ-4 移除各域 20 条硬上限后:8 项目 × 每项目 recall 前 3 条 = 24 条全量返回。"""
-        from app.models import MemoryDataset, ProjectMember
-        from app.services import cognee as cognee_module
-        from app.services import memory as memory_svc
-
-        class FakeClient:
-            def create_dataset(self, name):
-                return f"ds-{name}"
-
-            def recall(self, **kwargs):
-                return {"answers": [{"answer": f"片段 {i}"} for i in range(3)]}
-
-        monkeypatch.setattr(cognee_module, "CogneeClient", lambda: FakeClient())
-        monkeypatch.setattr(memory_svc, "CogneeClient", lambda: FakeClient())
-        for i in range(8):
-            other = Project(team_id=world["team"].id, name=f"p{i}")
-            db.add(other)
-            db.commit()
-            db.add(ProjectMember(project_id=other.id, user_id=world["member"].id, role="viewer"))
-            db.add(MemoryDataset(project_id=other.id, cognee_dataset_id=f"ds-{other.id}"))
-            db.commit()
-        result = svc.search(db, world["member"], "登录", domains=["memory"], limit=100)
-        assert len(result["items"]) == 24
-        assert result["next_cursor"] is None
+        login(client, "admin", "admin-pass-1")
+        resp = client.get("/api/search", params={"q": "登录", "domain": "memory"})
+        assert resp.status_code == 400
+        assert resp.json()["code"] == "invalid_request"
 
 
 class TestEmptyScopeAndEdgeGuards:
@@ -170,13 +94,11 @@ class TestEmptyScopeAndEdgeGuards:
         assert svc.search_requirements(db, project_ids, "") == []
         assert svc.search_tasks(db, project_ids, "  ") == []
         assert svc.search_documents(db, project_ids, "") == []
-        assert svc.search_memory(db, project_ids, "  ") == []
 
     def test_domain_functions_short_circuit_on_empty_projects(self, db: Session, world: dict):
         assert svc.search_requirements(db, [], "登录") == []
         assert svc.search_tasks(db, [], "登录") == []
         assert svc.search_documents(db, [], "登录") == []
-        assert svc.search_memory(db, [], "登录") == []
 
     def test_project_names_returns_empty_mapping_without_ids(self, db: Session, world: dict):
         assert svc._project_names(db, []) == {}

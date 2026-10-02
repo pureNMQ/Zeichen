@@ -1,7 +1,6 @@
 """全局搜索服务(规格书 §4.2 search.query / frontend-requirements §2.5)。
 
-- 关键词部分:业务实体(需求/任务/文档)SQL LIKE 检索,跨用户有权限的全部项目
-- 语义部分:记忆域经 cognee recall 检索,同样限定在有权限的项目内
+- 关键词检索:业务实体(需求/任务/文档)SQL LIKE,跨用户有权限的全部项目
 - Web 与 MCP 共用同一后端,结果按域分组合并后走 cursor 分页(services/pagination.py 规范)
 """
 
@@ -143,58 +142,6 @@ def search_documents(db: Session, project_ids: list[uuid.UUID], query: str) -> l
     ]
 
 
-def search_memory(
-    db: Session, project_ids: list[uuid.UUID], query: str, client=None
-) -> list[dict]:
-    """语义检索:对每个有权限项目的 Dataset 调用 cognee recall,汇总相关片段。
-
-    每个项目最多取 recall 前 3 条(相关性截取);跨项目按 project_id 排序保证分页顺序稳定。
-    """
-    if not project_ids or not query.strip():
-        return []
-    from .cognee import CogneeClient
-    from .memory import _dataset
-
-    client = client or CogneeClient()
-    results: list[dict] = []
-    for project_id in sorted(project_ids):
-        try:
-            dataset = _dataset(db, project_id, client, create=False)
-        except Exception:
-            continue
-        try:
-            payload = client.recall(dataset_id=dataset.cognee_dataset_id, query=query)
-        except Exception:
-            continue
-        items = _extract_recall_text(payload)
-        for text in items[:3]:
-            results.append(
-                {
-                    "domain": "memory",
-                    "project_id": str(project_id),
-                    "title": "记忆",
-                    "summary": text,
-                }
-            )
-    return results
-
-
-def _extract_recall_text(payload) -> list[str]:
-    if not isinstance(payload, dict):
-        return []
-    parts: list[str] = []
-    for answer in payload.get("answers") or []:
-        if isinstance(answer, dict):
-            text = answer.get("answer") or answer.get("text")
-            if text:
-                parts.append(str(text))
-    if not parts:
-        for chunk in payload.get("chunks") or []:
-            if isinstance(chunk, dict) and chunk.get("text"):
-                parts.append(str(chunk["text"]))
-    return parts
-
-
 def _cursor_filters(query: str, domains: list[str] | None) -> dict:
     """游标条件哈希绑定查询词与域过滤集合。"""
     return {"q": query, "domains": sorted(set(domains)) if domains else None}
@@ -207,7 +154,6 @@ def search(
     domains: list[str] | None = None,
     cursor: str | None = None,
     limit: int | None = None,
-    client=None,
 ) -> dict:
     """跨域搜索,返回 {items, next_cursor}(cursor 分页,见 services/pagination.py)。
 
@@ -230,8 +176,6 @@ def search(
         items.extend(search_tasks(db, project_ids, query))
     if requested is None or "document" in requested:
         items.extend(search_documents(db, project_ids, query))
-    if requested is None or "memory" in requested:
-        items.extend(search_memory(db, project_ids, query, client))
 
     if items:
         names = _project_names(db, project_ids)

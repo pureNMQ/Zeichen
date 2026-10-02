@@ -117,30 +117,6 @@ class TestSearchCursorPagination:
         assert page2["next_cursor"] is None
 
 
-class TestSearchMemoryDomainPageShape:
-    def test_memory_domain_results_carry_page_shape(self, db: Session, world: dict, monkeypatch):
-        from app.services import cognee as cognee_module
-        from app.services import memory as memory_svc
-
-        class FakeClient:
-            def create_dataset(self, name):
-                return f"ds-{name}"
-
-            def recall(self, **kwargs):
-                return {"answers": [{"answer": f"记忆片段 {i}"} for i in range(3)]}
-
-        monkeypatch.setattr(cognee_module, "CogneeClient", lambda: FakeClient())
-        monkeypatch.setattr(memory_svc, "CogneeClient", lambda: FakeClient())
-        memory_svc.provision_project(db, world["project"].id, FakeClient())
-        db.commit()
-
-        result = svc.search(db, world["member"], NEEDLE, domains=["memory"])
-        assert result["items"]
-        assert all(item["domain"] == "memory" for item in result["items"])
-        assert "next_cursor" in result
-        assert result["next_cursor"] is None
-
-
 class TestSearchApiPagination:
     def test_api_supports_limit_and_cursor_walk(self, client: TestClient, db: Session, world: dict):
         seed_requirements(db, world, 25)

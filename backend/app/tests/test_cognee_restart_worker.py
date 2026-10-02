@@ -17,6 +17,7 @@
 import contextlib
 import inspect
 import subprocess
+import uuid
 from pathlib import Path
 
 import pytest
@@ -192,16 +193,15 @@ def test_persistent_worker_loop_drains_queue_without_manual_trigger(
     assert row.status not in cognee_restart_jobs.ACTIVE_STATUSES
 
 
-def test_failed_restart_error_visible_via_api_job_and_status(client, db, world, monkeypatch, tmp_path):
-    """错误反馈:失败任务经重启任务 API 与运行状态 API 均可感知。"""
-    login(client, "admin", "admin-pass-1")
-    payload = {**CONFIGURATION_VALUES, "llm_endpoint": "https://llm.example.test/v1"}
-    updated = client.put("/api/cognee/configuration", json={**payload, "llm_api_key": "sk-placeholder-key-1111"})
-    assert updated.status_code == 200, updated.text
+def test_failed_restart_error_visible_in_job_and_status(db, world, monkeypatch, tmp_path):
+    """错误反馈:失败任务的 error 经服务层任务查询与运行状态均可感知。
 
-    accepted = client.post("/api/cognee/configuration/restarts", json={"confirmed": True})
-    assert accepted.status_code == 202, accepted.text
-    job = accepted.json()["job"]
+    REQ-57(TASK-127):cognee REST 端点已下线,原 API 面断言改为服务层;worker 本体随 TASK-128 移除。
+    """
+    cognee_configuration.update(
+        db, {**CONFIGURATION_VALUES, "llm_api_key": "sk-placeholder-key-1111"}
+    )
+    job = cognee_restart_jobs.submit(db, world["admin"], confirmed=True)
     assert job["status"] == "queued"
 
     _patch_runtime_paths(monkeypatch, tmp_path)
@@ -210,25 +210,21 @@ def test_failed_restart_error_visible_via_api_job_and_status(client, db, world, 
     _patch_worker_session(monkeypatch, db)
     assert restart_worker.run_once() is True
 
-    detail = client.get(f"/api/cognee/configuration/restarts/{job['id']}")
-    assert detail.status_code == 200, detail.text
-    body = detail.json()["job"]
-    assert body["status"] == "failed"
-    assert body["error"], "失败任务必须经 API 暴露 error"
-    assert body["finished_at"] is not None
+    detail = cognee_restart_jobs.get(db, uuid.UUID(job["id"]))
+    assert detail["status"] == "failed"
+    assert detail["error"], "失败任务必须暴露 error"
+    assert detail["finished_at"] is not None
 
     monkeypatch.setattr(
         cognee_configuration,
         "probe_runtime",
         lambda: {"availability": "reachable", "detail": None, "checked_at": "2026-08-30T00:00:00+00:00"},
     )
-    status = client.get("/api/cognee/configuration/status")
-    assert status.status_code == 200, status.text
-    latest = status.json()["latest_restart"]
+    latest = cognee_configuration.runtime_status(db)["latest_restart"]
     assert latest is not None
     assert latest["status"] == "failed"
     assert latest["status_label"] == "失败"
-    assert latest["error"], "运行状态接口必须携带失败原因"
+    assert latest["error"], "运行状态必须携带失败原因"
 
 
 def test_docker_channel_exposes_only_fixed_cognee_recreation_operation():

@@ -208,13 +208,13 @@ def test_agent_claim_to_requirement_done(mcp_server: dict):
     assert client.session_id is None, "stateless 模式不签发 Mcp-Session-Id"
 
     tools = client.list_tools()
-    assert len(tools) >= 60
+    assert len(tools) >= 50  # 当前注册 64 个;移除 memory.* 后同步放宽下限
     for ns in ("requirements.", "tasks.", "repositories.", "docs.wiki.", "docs.glossary.", "comment.", "ref.", "project.", "agent."):
         assert any(t.startswith(ns) for t in tools), f"缺少 {ns} 工具"
     assert not any(t.startswith("docs.code.") for t in tools), "docs.code.* 工具应随 API 参考模块移除"
     assert "requirements.set_status" in tools and "requirements.complete" not in tools
     assert "tasks.set_status" in tools and "tasks.start" not in tools and "tasks.complete" not in tools
-    assert "memory.improve" in tools and "memory.improve_status" in tools
+    assert not any(t.startswith("memory.") for t in tools), "REQ-57:记忆工具应随记忆系统下线移除"
     for name in (
         "docs.wiki.children", "docs.wiki.ancestors", "docs.wiki.move",
         "docs.glossary.directory_create", "docs.glossary.directory_move",
@@ -228,17 +228,6 @@ def test_agent_claim_to_requirement_done(mcp_server: dict):
     # ADR 0004:agent 附属 admin,继承全项目 owner 级;whoami 透出宿主
     assert me["owner"]["username"] == "admin"
     assert me["project_grants"][0]["role"] == "owner"
-
-    # MCP submission is durable and immediate: it never waits for Cognee.
-    improve_job = client.call("memory.improve", project_id=mcp_server["project_id"], session_id="mcp-queued")
-    assert improve_job["job"]["status"] == "queued"
-    status = client.call(
-        "memory.improve_status",
-        project_id=mcp_server["project_id"],
-        job_id=improve_job["job"]["id"],
-    )
-    assert status["job"]["id"] == improve_job["job"]["id"]
-    assert status["job"]["status"] == "queued"
 
     projects = client.call("project.list")
     assert projects[0]["id"] == mcp_server["project_id"], f"project.list 返回异常: {projects}"
