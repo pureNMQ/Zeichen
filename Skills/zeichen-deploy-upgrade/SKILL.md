@@ -16,7 +16,7 @@ description: 按最小范围在生产环境执行 Zeichen 功能升级，保证�
 
 ## 最小范围热更新
 
-- **只 build/up 本次更新涉及的容器**；postgres / cognee / 与本次无关的容器一律不重建、不重启。
+- **只 build/up 本次更新涉及的容器**；postgres 等与本次无关的容器一律不重建、不重启。
 - 命令必须带完整的生效 compose 组合（`-f docker-compose.yml -f deploy/docker-compose.prod.yml`），禁止裸 `docker compose up`。
 - 破坏性操作（容器重建、镜像变更、restart）执行前先展示具体命令并等待确认；确认一次执行一次，不批量默认。
 - 升级期间禁止直接修改数据库凭据（如 ALTER USER）；凭据问题一律先排查配置与 .env，报告阻塞而不是改库。

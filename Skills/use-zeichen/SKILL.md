@@ -1,6 +1,6 @@
 ---
 name: use-zeichen
-description: 定义使用 Zeichen 协作工具的公共协议，包括项目上下文、协作事实、写入、状态和失败处理。Use before any Skill or agent reads or writes Zeichen projects, requirements, tasks, documents, comments, memory, or activity.
+description: 定义使用 Zeichen 协作工具的公共协议，包括项目上下文、协作事实、写入、状态和失败处理。Use before any Skill or agent reads or writes Zeichen projects, requirements, tasks, documents, comments, or activity.
 ---
 
 # Use Zeichen
@@ -11,7 +11,7 @@ description: 定义使用 Zeichen 协作工具的公共协议，包括项目上�
 
 1. 先确定唯一当前项目。用户给出 Requirement、Task、Wiki 或其它实体时，读取该实体并以其所属项目为准。
 2. 用户未指定项目且当前身份可访问多个项目时，列出可选项目并要求用户选择。
-3. 每次运行只读取和写入当前项目。不得将其他项目的需求、任务、Wiki、评论、记忆或测试证据带入当前项目。
+3. 每次运行只读取和写入当前项目。不得将其他项目的需求、任务、Wiki、评论或测试证据带入当前项目。
 
 ## 行为前置：需求与任务状态确认（强制）
 
@@ -32,9 +32,8 @@ description: 定义使用 Zeichen 协作工具的公共协议，包括项目上�
 
 ## 协作事实与工具
 
-- 需求、任务、状态、评论、活动、Wiki、词典和权限以 Zeichen 工具记录为准；本地仓库、Git、测试输出和记忆只能补充或验证，不能替代协作记录。
+- 需求、任务、状态、评论、活动、Wiki、词典和权限以 Zeichen 工具记录为准；本地仓库、Git、测试输出只能补充或验证，不能替代协作记录。
 - 先读取相关现有记录并查重，再创建或更新协作实体。
-- 记忆用于补充历史上下文；将其作为依据前，用需求、任务、Wiki、评论或可验证证据核对。
 
 ## 列表筛选约定(需求/任务)
 
