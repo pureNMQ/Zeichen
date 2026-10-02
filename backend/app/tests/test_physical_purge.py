@@ -18,7 +18,7 @@
     attachment(行 + storage_path 物理文件删除,配额随之释放)/ repository;
   - 「代码符号」模块已随需求 3f0a80fe(移除 API 参考文档模块)整体删除,当前 schema
     无对应表,本文件省略该类型;
-  - project / user / activity / document_directory / memory 等不在本需求清理枚举内。
+  - project / user / activity / document_directory 等不在本需求清理枚举内。
 - 墓碑(需求已敲定:留墓碑):指向被清理实体的 reference / comment / activity 行保留;
   展示层因 target 缺失渲染「已删除」(reference 面板 target_label 已有该语义);
   记忆锚点不参与业务软删,不在清理范围。

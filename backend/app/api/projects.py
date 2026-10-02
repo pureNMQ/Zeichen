@@ -12,7 +12,6 @@ from ..schemas import (
     ProjectMemberAdd,
     ProjectMemberUpdate,
     ProjectOwnerTransfer,
-    ProjectDelete,
     ProjectUpdate,
 )
 from ..services import projects as projects_service
@@ -132,13 +131,9 @@ def transfer_project_owner(
 @router.delete("/{project_id}")
 def delete_project(
     project_id: uuid.UUID,
-    body: ProjectDelete,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    if not body.confirm_memory_cleanup:
-        from ..errors import invalid_request
-        raise invalid_request("必须确认永久清理项目记忆与会话缓存")
     projects_service.soft_delete_project(db, user, project_id)
     return {"ok": True}
 

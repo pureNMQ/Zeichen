@@ -126,7 +126,7 @@ def mcp_server(tmp_path_factory, request):
     from sqlalchemy import create_engine, select
     from sqlalchemy.orm import Session
 
-    from app.models import ApiKey, Base, MemoryDataset, Project, ProjectMember, Team, User, WorkspaceMember
+    from app.models import ApiKey, Base, Project, ProjectMember, Team, User, WorkspaceMember
     from app.security import generate_api_token, hash_password, token_digest
 
     engine = create_engine(db_url)
@@ -146,7 +146,6 @@ def mcp_server(tmp_path_factory, request):
         project = Project(team_id=team.id, name="E2E")
         db.add(project)
         db.flush()
-        db.add(MemoryDataset(project_id=project.id, cognee_dataset_id="cognee-e2e-dataset"))
         token = generate_api_token()
         db.add(ApiKey(user_id=agent.id, token_hash=token_digest(token), token_encrypted="x", note="e2e"))
         db.commit()

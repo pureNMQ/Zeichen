@@ -5,11 +5,6 @@ from .requirement import Requirement, Task, TaskBlocker
 from .document import Document, DocumentDirectory, DocumentVersion
 from .repository import Repository
 from .polymorphic import Activity, Attachment, Comment, Reference
-from .memory_dataset import MemoryDataset
-from .memory import MemoryGrant
-from .memory_improve_job import MemoryImproveJob
-from .cognee_configuration import CogneeConfiguration
-from .cognee_restart_job import CogneeRestartJob
 from .notification import EntityWatch, Notification, NotificationPreference
 from .filter_view import ProjectFilterView
 from ..services.short_codes import ShortCodeCounter
@@ -34,11 +29,6 @@ __all__ = [
     "Activity",
     "Attachment",
     "Reference",
-    "MemoryDataset",
-    "MemoryGrant",
-    "MemoryImproveJob",
-    "CogneeConfiguration",
-    "CogneeRestartJob",
     "EntityWatch",
     "ShortCodeCounter",
     "Notification",

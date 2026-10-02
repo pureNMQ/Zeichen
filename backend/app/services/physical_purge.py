@@ -2,8 +2,8 @@
 
 - 范围:软删满保留期的 requirement / task / document(级联 document_version)/
   comment / reference / attachment(含 storage_path 物理文件)/ repository;
-  「代码符号」表已随模块移除,project / user / activity / document_directory /
-  memory 不在清理枚举内
+  「代码符号」表已随模块移除,project / user / activity / document_directory
+  不在清理枚举内
 - 边界:deleted_at <= now - retention_days(恰好满 90 天即清),比较放 SQL 侧,
   与 _now() 同一 UTC datetime 绑定格式
 - 只清软删行:deleted_at IS NULL 永不命中;幂等可重跑(重复执行零删除)

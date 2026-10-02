@@ -2,7 +2,7 @@
 
 单职责常驻循环:每轮调用 services.physical_purge.purge_soft_deleted 执行一轮
 清理,随后按 settings.physical_purge_interval_seconds(默认 24h)休眠;
-与 app.workers.memory_improve 同风格,经模块引用调用服务便于测试注入。
+经模块引用调用服务便于测试注入。
 """
 
 import time

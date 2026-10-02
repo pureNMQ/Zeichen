@@ -9,8 +9,7 @@
   `app.services.physical_purge.purge_soft_deleted` 相同形状的报告;
 - `app.workers.physical_purge.run()`:常驻循环,每轮调用 run_once 后按
   `settings.physical_purge_interval_seconds` 休眠(默认 24h);
-- worker 经模块引用调用服务(与 app.workers.memory_improve →
-  services.memory_improve_jobs 的引用风格一致),便于测试注入;
+- worker 经模块引用调用服务,便于测试注入;
 - Settings 新增两个字段:
   - physical_purge_retention_days: int = 90(环境变量 PHYSICAL_PURGE_RETENTION_DAYS)
   - physical_purge_interval_seconds: float = 24 * 60 * 60

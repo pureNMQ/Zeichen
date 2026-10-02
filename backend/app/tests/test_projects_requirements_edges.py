@@ -45,16 +45,6 @@ class TestRequirementEdges:
 
 
 class TestProjectEdges:
-    def test_create_project_rolls_back_when_provision_fails(self, db: Session, world: dict, monkeypatch):
-        def boom(db_session, project_id):
-            raise RuntimeError("cognee down")
-
-        monkeypatch.setattr("app.services.memory.provision_project", boom)
-        with pytest.raises(RuntimeError):
-            proj_svc.create_project(db, world["admin"], "回滚项目", [])
-        assert db.query(Project).filter(Project.name == "回滚项目").count() == 0
-        assert db.query(ProjectMember).count() == 2  # demo 项目原成员
-
     def test_add_member_validation(self, db: Session, world: dict):
         with pytest.raises(AppError) as e:
             proj_svc.add_project_member(db, world["admin"], world["project"].id, world["agent"].id, "dictator")
@@ -132,27 +122,3 @@ class TestProjectEdges:
         }
         assert roles[world["admin"].id] == "editor"
         assert roles[world["member"].id] == "owner"
-
-    def test_soft_delete_project_purges_memory(self, db: Session, world: dict, monkeypatch):
-        from app.models import MemoryDataset
-        from app.services import memory as memory_svc
-
-        class FakeClient:
-            def create_dataset(self, name):
-                return "ds-1"
-
-            def list_sessions(self, dataset_id):
-                return []
-
-            def delete_session(self, session_id):
-                pass
-
-            def delete_dataset(self, dataset_id):
-                pass
-
-        monkeypatch.setattr(memory_svc, "CogneeClient", lambda: FakeClient())
-        memory_svc.provision_project(db, world["project"].id, FakeClient())
-        db.commit()
-        proj_svc.soft_delete_project(db, world["admin"], world["project"].id)
-        assert db.get(Project, world["project"].id).deleted_at is not None
-        assert db.query(MemoryDataset).filter(MemoryDataset.project_id == world["project"].id).count() == 0
