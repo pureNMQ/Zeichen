@@ -5,12 +5,11 @@
 #   docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml ps
 #
 # 本文件做的事(规格书 §8 + research/deployment.md §3.2):
-#   1. 去掉 postgres:5432 / cognee:8000 宿主端口,仅 nginx 暴露 80/443(唯一公网入口)
+#   1. 去掉 postgres:5432 宿主端口,仅 nginx 暴露 80/443(唯一公网入口)
 #   2. SESSION_SECRET / POSTGRES_PASSWORD / 域名类变量全部 ${VAR:?} 守卫,缺失即启动失败
 #   3. SESSION_COOKIE_SECURE=true、WEB_BASE_URL=https://<域名>、MCP 三个 URL/白名单变量
-#   4. cognee 生产安全变量(FASTAPI_USERS_JWT_SECRET 必改、HASH_API_KEY、收紧 CORS 等)
-#   5. 全服务 restart: unless-stopped + deploy.resources.limits(按单机规格预算:
-#      cognee 2G、api/mcp/worker 各 512M、postgres 512M、nginx 128M;swap 2G 兜底见
+#   4. 全服务 restart: unless-stopped + deploy.resources.limits(按单机规格预算:
+#      api/mcp/worker 各 512M、postgres 512M、nginx 128M;swap 2G 兜底见
 #      docs/first-deploy.md §1。cpus/memory 均为上限(ceiling),非预留)
 #
 # 要求:Docker Compose ≥ 2.24(port/volume 列表替换用 !override 标签;deploy 资源上限
@@ -30,40 +29,6 @@ services:
           cpus: "0.5"
           memory: 512M
 
-  cognee:
-    restart: unless-stopped
-    ports: !override []
-    # 生产网络可达,去掉本地受限网络环境的 Kuzu json 扩展挂载(backend/.lbdb-extension),
-    # 其余卷与基础 compose 保持一致。
-    volumes: !override
-      - cognee_data:/app/data
-      - cognee_system:/app/system
-      - cognee_hf_cache:/root/.cache/huggingface
-      - cognee_fastembed_cache:/tmp/fastembed_cache
-    environment:
-      REQUIRE_AUTHENTICATION: "True"
-      # 必须改:cognee 默认 super_secret(research/deployment.md §3.2)
-      FASTAPI_USERS_JWT_SECRET: ${COGNEE_FASTAPI_USERS_JWT_SECRET:?Set COGNEE_FASTAPI_USERS_JWT_SECRET (openssl rand -hex 32)}
-      # API key 以 SHA-256 存储(存量明文 key 会失效,见 research §3.2)
-      HASH_API_KEY: "true"
-      # cognee 1.4.1 会话蒸馏(improve→persist_sessions)会把自身生成的会话文本先落盘到
-      # DATA_ROOT 再重新摄取,该开关为 false 会拒绝这条内部文件路径,蒸馏抛 415
-      # "Local files are not accepted"(REQ bc36ae8b)。Zeichen 从不向 cognee 传客户端
-      # 文件路径,且本服务不对宿主发布端口,放行本地文件仅作用于 cognee 自身存储。
-      ACCEPT_LOCAL_FILE_PATH: "true"
-      # 不摄取公网 URL(关 SSRF 面)
-      ALLOW_HTTP_REQUESTS: "false"
-      # 禁裸 Cypher 查询端点;Zeichen 只用 /remember/entry /recall /improve /sessions,
-      # 不受影响(app/services/cognee.py)
-      ALLOW_CYPHER_QUERY: "false"
-      # 收紧 CORS 为实际前端域名(默认 * 只适合本地)
-      CORS_ALLOWED_ORIGINS: ${COGNEE_CORS_ALLOWED_ORIGINS:?Set COGNEE_CORS_ALLOWED_ORIGINS (e.g. https://zeichen.example.com)}
-    deploy:
-      resources:
-        limits:
-          cpus: "1.5"
-          memory: 2G
-
   api:
     restart: unless-stopped
     environment:
@@ -71,8 +36,6 @@ services:
       SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env (openssl rand -hex 32)}
       SESSION_COOKIE_SECURE: "true"
       WEB_BASE_URL: ${WEB_BASE_URL:?Set WEB_BASE_URL (e.g. https://zeichen.example.com)}
-      # 推荐预置 cognee 服务 API key;留空则退回 COGNEE_SERVICE_EMAIL/PASSWORD 引导
-      COGNEE_SERVICE_API_KEY: ${COGNEE_SERVICE_API_KEY:-}
     deploy:
       resources:
         limits:
@@ -85,11 +48,10 @@ services:
       DATABASE_URL: postgresql+psycopg://zeichen:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/zeichen
       SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env}
       # 公网 Host 白名单必须含 <域名>:443(nginx 的 Host 带端口转发,见 deploy/nginx.conf)
-      MCP_ALLOWED_HOSTS: ${MCP_ALLOWED_HOSTS:?Set MCP_ALLOWED_HOSTS (e.g. 127.0.0.1:*,localhost:*,[::1]:*,zeichen.example.com,zeichen.example.com:443)}
+      MCP_ALLOWED_HOSTS: ${MCP_ALLOWED_HOSTS:?Set MCP_ALLOWED_HOSTS (e.g. 127.0.0.1:*,localhost:*,[::1]*,zeichen.example.com,zeichen.example.com:443)}
       # OAuth 元数据端点公布的公开 URL(RFC 9728 /mcp 的 /.well-known 元数据)
       MCP_ISSUER_URL: ${MCP_ISSUER_URL:?Set MCP_ISSUER_URL (e.g. https://zeichen.example.com/zeichen)}
       MCP_RESOURCE_SERVER_URL: ${MCP_RESOURCE_SERVER_URL:?Set MCP_RESOURCE_SERVER_URL (e.g. https://zeichen.example.com/mcp)}
-      COGNEE_SERVICE_API_KEY: ${COGNEE_SERVICE_API_KEY:-}
     deploy:
       resources:
         limits:
@@ -101,7 +63,6 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://zeichen:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/zeichen
       SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env}
-      COGNEE_SERVICE_API_KEY: ${COGNEE_SERVICE_API_KEY:-}
     deploy:
       resources:
         limits:
@@ -122,22 +83,3 @@ services:
         limits:
           cpus: "0.25"
           memory: 128M
-
-  # restart-worker 与 worker 使用同一套环境覆盖:根 compose 中 DATABASE_URL
-  # 为本地默认值(zeichen:zeichen),部署环境必须引用 .env 变量,否则容器内
-  # PostgreSQL 认证失败、崩溃重启,Cognee 重启队列无人消费。
-  restart-worker:
-    restart: unless-stopped
-    environment:
-      DATABASE_URL: postgresql+psycopg://zeichen:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/zeichen
-      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env}
-      COGNEE_SERVICE_API_KEY: ${COGNEE_SERVICE_API_KEY:-}
-      # 重建与运行栈一致:重启通道按此列表顺序逐个 -f 叠加 compose 文件再
-      # force-recreate cognee,否则 prod 覆盖层注入的 cognee 安全加固
-      # (REQUIRE_AUTHENTICATION 等)在重建后丢失。环境专属覆盖层(ip/dev)
-      # 允许经部署 .env 的 COGNEE_COMPOSE_FILES 覆盖追加。
-      COGNEE_COMPOSE_FILES: ${COGNEE_COMPOSE_FILES:-docker-compose.yml,deploy/docker-compose.prod.yml}
-    volumes:
-      # 通道在容器内按上表 -f 读取覆盖文件,deploy/ 目录必须只读可见
-      # (根 compose 仅挂载根 docker-compose.yml)
-      - ./deploy:/srv/zeichen/deploy:ro

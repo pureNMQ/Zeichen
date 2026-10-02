@@ -4,7 +4,7 @@
 #   * api / mcp:挂载 backend 源码 + uvicorn --reload,改 Python 代码即重载
 #   * worker:挂载源码(无 reload,改代码后 `docker compose restart worker`)
 #   * web:开发态不用静态镜像,改用 frontend-dev 容器跑 vite dev(HMR)
-#   * postgres / cognee:保持现有生产实例(同库热更新,注意误操作风险)
+#   * postgres:保持现有生产实例(同库热更新,注意误操作风险)
 #
 # 用法(仓库根目录,依赖 .env 已配好):
 #   docker compose -f docker-compose.yml -f deploy/docker-compose.ip.yml -f deploy/docker-compose.dev.yml up -d
@@ -54,18 +54,6 @@ services:
         limits:
           cpus: "0.5"
           memory: 1G
-
-  # restart-worker 与 worker 使用同一套环境覆盖:根 compose 中 DATABASE_URL
-  # 为本地默认值(zeichen:zeichen),部署环境必须引用 .env 变量,否则容器内
-  # PostgreSQL 认证失败、崩溃重启,Cognee 重启队列无人消费。
-  restart-worker:
-    restart: unless-stopped
-    environment:
-      DATABASE_URL: postgresql+psycopg://zeichen:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/zeichen
-      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env}
-      COGNEE_SERVICE_API_KEY: ${COGNEE_SERVICE_API_KEY:-}
-      # 本机 4 文件组合(根+prod+ip+dev):通道按此顺序逐个 -f 叠加重建 cognee
-      COGNEE_COMPOSE_FILES: docker-compose.yml,deploy/docker-compose.prod.yml,deploy/docker-compose.ip.yml,deploy/docker-compose.dev.yml
 
 volumes:
   frontend_dev_modules:

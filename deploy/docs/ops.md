@@ -40,8 +40,7 @@ zc ps; curl -fsS https://<域名>/api/health
 
 - `.env` 改动只影响新容器:`zc up -d`(或 `zc restart <服务>`)即可,compose 定义
   改动才需要 `--force-recreate`。
-- 基础镜像一律固定 tag(不追 `latest`/滚动 tag);cognee 走本项目
-  `Dockerfile.cognee` 构建(内部固定 1.4.1-fastembed 版本线),升级即改 Dockerfile
+- 基础镜像一律固定 tag(不追 `latest`/滚动 tag)
   后 `zc up -d --build`。
 - api 容器启动时自动跑 Alembic 迁移(mcp/worker 不迁移,只读共享库)。
 - 升级后务必做一次真实 recall(验证记忆链路)+ 附件下载。
@@ -55,20 +54,12 @@ zc up -d --build
 
 卷不动、数据不丢;前提是数据库 schema 向后兼容(回滚到旧代码前确认没有新迁移依赖)。
 
-> **cognee 安全开关说明(REQ bc36ae8b)**:生产/环境覆盖层中的
-> `ACCEPT_LOCAL_FILE_PATH` 刻意保持为 `"true"`——cognee 1.4.1 的会话蒸馏
-> (improve→persist_sessions)会把自身生成的会话文本先落盘到 DATA_ROOT 再重新摄取,
-> 该开关为 false 会阻断这条内部路径、蒸馏报 415 "Local files are not accepted"。
-> Zeichen 从不向 cognee 传入客户端文件路径,且 cognee 不对宿主发布端口,故放行本地
-> 文件只作用于 cognee 自身存储,不构成外部读文件面;其余加固
-> (`REQUIRE_AUTHENTICATION`/`ALLOW_HTTP_REQUESTS=false`/`ALLOW_CYPHER_QUERY=false`)
-> 保持不变。若未来升级 cognee 修复了该内部路径问题,可重新收紧此开关。
 
 ## 3. 备份 / 恢复
 
 ### 备份
 
-每日自动:postgres 逻辑备份(`pg_dump | gzip`)+ cognee 数据卷 tar(短暂停服几秒)+
+每日自动:postgres 逻辑备份(`pg_dump | gzip`)+
 附件卷 tar → 本地 `/srv/zeichen/backups/` → 上传对象存储桶 `backup/<日期>/`。
 
 - 本地保留 14 天(backup.sh 第一个参数可调),远端保留由桶生命周期规则控制(建议 30 天)。
@@ -82,7 +73,7 @@ cd /srv/zeichen && . ./.env
 deploy/restore.sh --yes latest    # 覆盖式恢复到最新备份(先确认!见脚本头部警告)
 ```
 
-脚本流程:停 api/mcp/worker/web/cognee → 恢复 cognee 卷 → 附件卷 →
+脚本流程:停 api/mcp/worker/web → 恢复附件卷 →
 重建 postgres(dropdb + createdb + 导入)→ 重启并等 api 健康。
 
 ### 恢复演练(每月一次,research/deployment.md §2.2 checklist 第 5 条)
@@ -122,9 +113,8 @@ BACKUP_ROOT=/tmp/zeichen-drill/backups deploy/restore.sh --yes <日期>
 
 | 命令 | 后果 |
 |---|---|
-| `zc down --volumes` | **删除全部数据卷**(pg/cognee/附件/模型缓存),不可恢复 |
+| `zc down --volumes` | **删除全部数据卷**(pg/附件),不可恢复 |
 | `rm -rf /srv/zeichen/backups` | 清空本地备份(未同步到异地的即丢失) |
-| `zc stop cognee` 后忘记 start | cognee 停服期间记忆链路 502(backup.sh 已自动恢复) |
 | 覆盖 `certs/privkey.pem` 前未备份 | 证书不匹配,HTTPS 全挂 |
 | 在恢复演练环境执行 `zc up -d`(非 -p 独立项目名) | 误碰生产容器/卷 |
 
@@ -132,6 +122,6 @@ BACKUP_ROOT=/tmp/zeichen-drill/backups deploy/restore.sh --yes <日期>
 
 - 磁盘:模型缓存(约 200MB)+ 备份(每日 ~百 MB 级,按数据量)+ 附件配额
   (单项目 2GB)。`df -h` 定期看;备份轮转自动清,关注对象存储计费即可。
-- 内存:cognee 2G 上限是 ceiling;实测空闲量级远低于预算,4G 余量充足;突发用量由 2G swap 兜底。
+- 内存:各服务上限为 ceiling;实测空闲量级远低于预算,4G 余量充足;突发用量由 2G swap 兜底。
 - 软删物理清理:业务软删实体按规格书 §8.2 由定时任务清理(周期默认 90 天,
   该任务实现后挂 cron;当前版本为软删保留,可手动用 SQL 审计,勿手删)。
