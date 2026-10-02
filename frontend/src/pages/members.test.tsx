@@ -98,6 +98,59 @@ describe('ManageAgentDialog 自助管理', () => {
     expect(screen.getByLabelText('昵称')).toBeInTheDocument()
   })
 
+  it('签发新 key 用弹窗展示明文并提供复制操作', async () => {
+    vi.mocked(api.get).mockImplementation((path: string) => {
+      if (path === '/members') return Promise.resolve(rows)
+      if (path === '/my-agent') return Promise.resolve({ agent: agentDetail })
+      return Promise.resolve({})
+    })
+    vi.mocked(api.post).mockResolvedValue({ token: 'zk-new-abc123' })
+    renderMembers()
+    const user = (await import('@testing-library/user-event')).default
+
+    await user.click(await screen.findByRole('button', { name: '管理 Agent 与 key' }))
+    await user.click(screen.getByRole('button', { name: '签发' }))
+
+    expect(await screen.findByRole('dialog', { name: 'API key 已签发' })).toBeInTheDocument()
+    expect(screen.getByLabelText('新签发的 API key 明文')).toHaveValue('zk-new-abc123')
+    expect(screen.getByRole('button', { name: '复制' })).toBeInTheDocument()
+  })
+
+  it('回看 key 经密码验证弹窗展示明文,错误密码在弹窗内提示', async () => {
+    vi.mocked(api.get).mockImplementation((path: string) => {
+      if (path === '/members') return Promise.resolve(rows)
+      if (path === '/my-agent') return Promise.resolve({ agent: agentDetail })
+      return Promise.resolve({})
+    })
+    vi.mocked(api.post).mockImplementation((path: string, body?: unknown) => {
+      if (path === '/my-agent/keys/k1/reveal') {
+        const password = (body as { password: string }).password
+        if (password !== 'admin-pass-1') return Promise.reject(new ApiError(403, '密码验证失败'))
+        return Promise.resolve({ token: 'zk-reveal-tok' })
+      }
+      return Promise.resolve({})
+    })
+    renderMembers()
+    const user = (await import('@testing-library/user-event')).default
+
+    await user.click(await screen.findByRole('button', { name: '管理 Agent 与 key' }))
+    await user.click(screen.getByRole('button', { name: '回看' }))
+
+    expect(await screen.findByRole('dialog', { name: '回看 API key' })).toBeInTheDocument()
+    const passwordInput = screen.getByLabelText('你的密码')
+    expect(passwordInput).toHaveAttribute('autocomplete', 'current-password')
+
+    await user.type(passwordInput, 'wrong')
+    await user.click(screen.getByRole('button', { name: '验证并显示' }))
+    expect(await screen.findByText('密码验证失败')).toBeInTheDocument()
+
+    await user.clear(passwordInput)
+    await user.type(passwordInput, 'admin-pass-1')
+    await user.click(screen.getByRole('button', { name: '验证并显示' }))
+    expect(await screen.findByLabelText('回看的 API key 明文')).toHaveValue('zk-reveal-tok')
+    expect(screen.getByRole('button', { name: '复制' })).toBeInTheDocument()
+  })
+
   it('删除 Agent 需确认,确认后调用 DELETE /my-agent', async () => {
     vi.mocked(api.get).mockImplementation((path: string) => {
       if (path === '/members') return Promise.resolve(rows)

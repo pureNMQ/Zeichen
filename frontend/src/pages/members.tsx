@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bot, Copy, KeyRound, Plus, ShieldAlert, Trash2, UserRound } from 'lucide-react'
-import { api, ApiError, type MemberCreateResponse, type MemberRow, type MyAgentDetail, type PasswordSetupLinkResponse, type Role } from '@/lib/api'
+import { api, ApiError, type MemberCreateResponse, type MemberRow, type MyAgentDetail, type MyAgentKey, type PasswordSetupLinkResponse, type Role } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -220,12 +220,112 @@ function CreateAgentDialog({ open, onOpenChange }: { open: boolean; onOpenChange
   )
 }
 
+function TokenOnceBlock({ token, label }: { token: string; label: string }) {
+  const [copied, setCopied] = useState(false)
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(token)
+      setCopied(true)
+    } catch {
+      setCopied(false)
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-medium text-destructive">请立即复制,关闭后将不再显示:</p>
+      <div className="flex gap-2">
+        <Input value={token} readOnly autoComplete="off" aria-label={label} className="font-mono text-xs" />
+        <Button type="button" variant="outline" onClick={() => void copy()}>
+          <Copy className="mr-2 h-4 w-4" />
+          {copied ? '已复制' : '复制'}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function IssuedKeyDialog({ token, onClose }: { token: string; onClose: () => void }) {
+  return (
+    <Dialog open onOpenChange={(v) => { if (!v) onClose() }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>API key 已签发</DialogTitle>
+          <DialogDescription>明文 key 仅展示一次,请立即复制并妥善保存。</DialogDescription>
+        </DialogHeader>
+        <TokenOnceBlock token={token} label="新签发的 API key 明文" />
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>关闭</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function RevealKeyDialog({ target, onDone }: { target: MyAgentKey; onDone: () => void }) {
+  const [password, setPassword] = useState('')
+  const [token, setToken] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+
+  async function submit(e: FormEvent) {
+    e.preventDefault()
+    setError(null)
+    setSubmitting(true)
+    try {
+      const r = await api.post<{ token: string }>(`/my-agent/keys/${target.id}/reveal`, { password })
+      setToken(r.token)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : '回看失败,请重试')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(v) => { if (!v) onDone() }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>回看 API key</DialogTitle>
+          <DialogDescription>
+            {token ?? `输入你的密码以查看「${target.note || '无备注'}」的明文 key。`}
+          </DialogDescription>
+        </DialogHeader>
+        {token ? (
+          <TokenOnceBlock token={token} label="回看的 API key 明文" />
+        ) : (
+          <form onSubmit={submit} className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="reveal-key-password">你的密码</Label>
+              <Input
+                id="reveal-key-password"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+            </div>
+            {error && <p className="text-sm text-destructive">{error}</p>}
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={onDone}>取消</Button>
+              <Button type="submit" disabled={submitting}>
+                {submitting ? '验证中…' : '验证并显示'}
+              </Button>
+            </DialogFooter>
+          </form>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function ManageAgentDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const qc = useQueryClient()
   const [note, setNote] = useState('')
   const [issuedToken, setIssuedToken] = useState<string | null>(null)
-  const [revealFor, setRevealFor] = useState<string | null>(null)
-  const [password, setPassword] = useState('')
+  const [revealFor, setRevealFor] = useState<MyAgentKey | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [profileOpen, setProfileOpen] = useState(false)
   const [deleteConfirmFor, setDeleteConfirmFor] = useState<MyAgentDetail | null>(null)
@@ -263,7 +363,7 @@ function ManageAgentDialog({ open, onOpenChange }: { open: boolean; onOpenChange
 
   return (
     <>
-      <Dialog open={open} onOpenChange={(v) => { if (!v) { setIssuedToken(null); setRevealFor(null); setPassword(''); setError(null) } onOpenChange(v) }}>
+      <Dialog open={open} onOpenChange={(v) => { if (!v) { setIssuedToken(null); setRevealFor(null); setError(null) } onOpenChange(v) }}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>管理我的 Agent</DialogTitle>
@@ -300,12 +400,6 @@ function ManageAgentDialog({ open, onOpenChange }: { open: boolean; onOpenChange
                   签发
                 </Button>
               </div>
-              {issuedToken && (
-                <div className="rounded-md border bg-muted/50 p-2 text-xs">
-                  <p className="mb-1 font-medium text-destructive">请立即复制,关闭后将不再显示:</p>
-                  <code className="break-all">{issuedToken}</code>
-                </div>
-              )}
             </div>
             <div className="space-y-2">
               <p className="text-xs font-medium text-muted-foreground">API key 列表({detail.active_keys} 个活跃)</p>
@@ -319,7 +413,7 @@ function ManageAgentDialog({ open, onOpenChange }: { open: boolean; onOpenChange
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
-                    <Button variant="ghost" size="sm" onClick={() => { setRevealFor(k.id); setPassword('') }}>
+                    <Button variant="ghost" size="sm" onClick={() => setRevealFor(k)}>
                       回看
                     </Button>
                     <Button
@@ -352,6 +446,12 @@ function ManageAgentDialog({ open, onOpenChange }: { open: boolean; onOpenChange
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    {issuedToken && (
+      <IssuedKeyDialog token={issuedToken} onClose={() => setIssuedToken(null)} />
+    )}
+    {revealFor && detail && (
+      <RevealKeyDialog key={revealFor.id} target={revealFor} onDone={() => setRevealFor(null)} />
+    )}
     {detail && profileOpen && (
       <UserProfileDialog
         user={detail}
