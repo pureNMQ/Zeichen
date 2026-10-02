@@ -38,7 +38,6 @@ function mockSearch() {
           { domain: 'requirement', id: 'r1', project_id: 'p1', project_name: 'demo', title: '登录功能', summary: '登录页面设计', status: 'in_progress' },
           { domain: 'task', id: 't1', project_id: 'p1', project_name: 'demo', title: '实现登录', summary: '校验逻辑', status: 'backlog' },
           { domain: 'document', id: 'd1', project_id: 'p1', project_name: 'demo', title: '登录设计文档', summary: '说明', doc_type: 'wiki' },
-          { domain: 'memory', id: 'm1', project_id: 'p1', project_name: 'demo', title: '记忆', summary: '历史记忆片段' },
         ],
       })
     }
@@ -59,7 +58,7 @@ describe('全局搜索页', () => {
     expect(screen.getByRole('heading', { name: /任务/ })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /文档/ })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: /代码符号/ })).not.toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: /记忆/ })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /记忆/ })).not.toBeInTheDocument()
 
     expect(screen.getByRole('link', { name: /登录功能/ })).toHaveAttribute('href', '/requirements/r1')
     // 任务结果为按钮:点击后解析所属需求再跳转(ADR 0003 任务无独立页面)

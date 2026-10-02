@@ -13,7 +13,6 @@ const DOMAIN_LABEL: Record<SearchItem['domain'], string> = {
   requirement: '需求',
   task: '任务',
   document: '文档',
-  memory: '记忆',
 }
 
 const DOMAIN_TABS: { value: 'all' | SearchDomain; label: string }[] = [
@@ -21,7 +20,6 @@ const DOMAIN_TABS: { value: 'all' | SearchDomain; label: string }[] = [
   { value: 'requirement', label: '需求' },
   { value: 'task', label: '任务' },
   { value: 'document', label: '文档' },
-  { value: 'memory', label: '记忆' },
 ]
 
 const STATUS_LABEL: Record<string, string> = {
@@ -110,7 +108,7 @@ export function SearchPage() {
   const items = useMemo(() => data?.pages.flatMap((page) => page.items) ?? [], [data])
   const grouped = useMemo(() => {
     const groups: { domain: SearchItem['domain']; items: SearchItem[] }[] = []
-    const order: SearchItem['domain'][] = ['requirement', 'task', 'document', 'memory']
+    const order: SearchItem['domain'][] = ['requirement', 'task', 'document']
     for (const group of order) {
       const groupItems = items.filter((item) => item.domain === group)
       if (groupItems.length > 0) groups.push({ domain: group, items: groupItems })

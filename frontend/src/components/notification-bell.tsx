@@ -28,9 +28,6 @@ const ACTION_LABEL: Record<string, string> = {
   attachment_delete: '删除附件',
   attachment_restore: '恢复附件',
   reference: '添加引用',
-  memory_remember: '写入记忆',
-  memory_improve: '蒸馏记忆',
-  memory_forget: '删除记忆',
 }
 
 const TARGET_LABEL: Record<string, string> = {

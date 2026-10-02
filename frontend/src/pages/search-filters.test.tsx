@@ -45,7 +45,6 @@ function mockAllDomains() {
       item('r1', '登录功能', 'requirement', 'in_progress'),
       item('t1', '实现登录', 'task', 'backlog'),
       item('d1', '登录设计文档', 'document'),
-      item('m1', '记忆', 'memory'),
     ]
     return Promise.resolve({ items, next_cursor: null })
   })
@@ -63,7 +62,7 @@ describe('全局搜索页域过滤', () => {
     vi.clearAllMocks()
   })
 
-  it('提供全部/需求/任务/文档/记忆域 tab', async () => {
+  it('提供全部/需求/任务/文档域 tab', async () => {
     mockAllDomains()
     renderSearch()
 
@@ -71,7 +70,7 @@ describe('全局搜索页域过滤', () => {
     expect(screen.getByRole('tab', { name: '需求' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: '任务' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: '文档' })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: '记忆' })).toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: '记忆' })).not.toBeInTheDocument()
   })
 
   it('点击域 tab 只请求并展示该域结果,点全部恢复跨域', async () => {
@@ -85,7 +84,6 @@ describe('全局搜索页域过滤', () => {
     expect(await screen.findByRole('link', { name: /登录功能/ })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /实现登录/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /登录设计文档/ })).not.toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: /记忆/ })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('tab', { name: '全部' }))
     await waitFor(() => {

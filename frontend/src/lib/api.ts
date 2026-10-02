@@ -81,45 +81,6 @@ export interface MyAgentDetail extends UserIdentity {
   keys: MyAgentKey[]
 }
 
-export interface CogneeConfiguration {
-  llm_provider: string
-  llm_model: string
-  llm_endpoint: string | null
-  llm_api_key_configured: boolean
-  llm_api_key_display: string | null
-  llm_api_key_source: 'managed' | 'deployment' | 'unconfigured'
-  embedding_provider: string
-  embedding_model: string
-  embedding_dimensions: number | null
-  pending_restart: boolean
-  updated_at: string
-}
-
-export interface CogneeRestartJob {
-  id: string
-  status: 'queued' | 'running' | 'completed' | 'failed'
-  status_label?: string
-  error: string | null
-  created_at: string
-  started_at: string | null
-  finished_at: string | null
-}
-
-export interface CogneeRuntimeStatus {
-  runtime: {
-    availability: 'reachable' | 'unreachable'
-    detail: string | null
-    checked_at: string
-  }
-  latest_restart: {
-    status: CogneeRestartJob['status']
-    status_label: string
-    error: string | null
-    requested_at: string
-    finished_at: string | null
-  } | null
-}
-
 export type WorkflowStatus = 'pending' | 'backlog' | 'in_progress' | 'verifying' | 'done' | 'cancelled'
 // 需求六态(含待确认/验收中,验收上移需求);任务四态(无待确认/验收中,ADR 0003)
 export type RequirementStatus = Exclude<WorkflowStatus, never>
@@ -298,61 +259,6 @@ export interface DocumentVersionRow {
   created_at: string
 }
 
-export interface MemoryItem {
-  id: string
-  data?: string
-  content?: string
-  text?: string
-  created_at?: string
-  updated_at?: string
-  external_metadata?: {
-    source_id?: string
-    source_name?: string
-    source_kind?: string
-    entity_type?: string
-    entity_id?: string
-  }
-}
-
-export interface MemorySession {
-  id?: string
-  session_id?: string
-  business_session_id?: string
-  source_id?: string
-  source_name?: string
-  source_kind?: string
-  effective_status?: string
-  status?: string
-  last_activity_at?: string
-  started_at?: string
-  preview?: string
-}
-
-export interface MemorySessionDetail {
-  session_id: string
-  business_session_id: string
-  source_name?: string
-  status?: string
-  qas: Array<{ time?: string; question?: string; answer?: string }>
-  traces: Array<Record<string, unknown>>
-}
-
-export type MemoryImproveJobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'upstream_busy' | 'timed_out' | 'unknown'
-
-export interface MemoryImproveJob {
-  id: string
-  project_id: string
-  agent_id: string
-  session_id: string
-  status: MemoryImproveJobStatus
-  result?: Record<string, unknown> | unknown[] | null
-  error?: string | null
-  created_at: string
-  started_at?: string | null
-  heartbeat_at?: string | null
-  finished_at?: string | null
-}
-
 export const STATUS_LABEL: Record<WorkflowStatus, string> = {
   pending: '待确认',
   backlog: '待办',
@@ -373,7 +279,7 @@ export interface NotificationRow {
   created_at: string
 }
 
-export type SearchDomain = 'requirement' | 'task' | 'document' | 'memory'
+export type SearchDomain = 'requirement' | 'task' | 'document'
 
 export interface SearchItem {
   domain: SearchDomain

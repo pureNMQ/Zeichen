@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Navigate, Outlet, Route, Routes, useNavigate } from 'react-router-dom'
-import { ShieldAlert } from 'lucide-react'
+import { Navigate, Route, Routes, useNavigate } from 'react-router-dom'
 import { AppShell } from '@/components/app-shell'
 import { api } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
@@ -15,8 +14,6 @@ import { RequirementsPage } from '@/pages/requirements'
 import { RequirementDetailPage } from '@/pages/requirement-detail'
 import { SetPasswordPage } from '@/pages/set-password'
 import { DocumentWorkbenchPage } from '@/pages/documents'
-import { MemoryPage, MemorySessionsPage } from '@/pages/memory'
-import { CogneePage } from '@/pages/cognee'
 import { RepositoriesPage } from '@/pages/repositories'
 import { SearchPage } from '@/pages/search'
 import { ManualPage } from '@/pages/manual'
@@ -82,19 +79,6 @@ function RequireAuth() {
   )
 }
 
-function RequireAdmin() {
-  const { user } = useAuth()
-  if (user?.workspace_role !== 'admin') {
-    return (
-      <div className="flex flex-col items-center gap-3 py-16 text-muted-foreground">
-        <ShieldAlert className="h-10 w-10" />
-        <p className="text-sm">该页面仅工作区管理员可访问</p>
-      </div>
-    )
-  }
-  return <Outlet />
-}
-
 export function App() {
   return (
     <Routes>
@@ -113,14 +97,9 @@ export function App() {
         <Route path="documents/glossary/directory/:id" element={<DocumentWorkbenchPage module="glossary" routeNodeKind="directory" />} />
         <Route path="documents/glossary/term/:id" element={<DocumentWorkbenchPage module="glossary" routeNodeKind="document" />} />
         <Route path="repositories" element={<RepositoriesPage />} />
-        <Route path="memory" element={<MemoryPage />} />
-        <Route path="memory/sessions" element={<MemorySessionsPage />} />
         <Route path="search" element={<SearchPage />} />
         <Route path="manual" element={<ManualPage />} />
         <Route path="members" element={<MembersPage />} />
-        <Route path="cognee" element={<RequireAdmin />}>
-          <Route index element={<CogneePage />} />
-        </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

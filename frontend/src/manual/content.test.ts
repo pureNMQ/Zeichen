@@ -13,7 +13,6 @@ const REQUIRED_TOPICS: Array<{ topic: string; keywords: string[] }> = [
   { topic: '项目与成员角色', keywords: ['项目', '角色'] },
   { topic: '需求/任务状态流转与看板', keywords: ['需求', '任务'] },
   { topic: '文档三模块(Wiki/词典/API)', keywords: ['文档'] },
-  { topic: '记忆管理与蒸馏', keywords: ['记忆'] },
   { topic: '通知与搜索', keywords: ['通知', '搜索'] },
   { topic: 'Agent 与 API key', keywords: ['Agent'] },
   { topic: '权限矩阵', keywords: ['权限'] },
@@ -54,9 +53,9 @@ describe('使用手册内容完整性', () => {
     }
   })
 
-  it('正文覆盖文档三模块、看板、蒸馏、API key 与权限矩阵角色', () => {
+  it('正文覆盖文档三模块、看板、API key 与权限矩阵角色', () => {
     const all = allMarkdown()
-    for (const term of ['Wiki', '词典', 'API', '看板', '蒸馏', 'admin', 'owner', 'editor', 'viewer']) {
+    for (const term of ['Wiki', '词典', 'API', '看板', 'admin', 'owner', 'editor', 'viewer']) {
       expect(all).toContain(term)
     }
     expect(all).toMatch(/api key/i)

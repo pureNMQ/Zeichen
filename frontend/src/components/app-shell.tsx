@@ -41,7 +41,6 @@ import {
 const TEAM_NAV = [
   { to: '/projects', label: '项目' },
   { to: '/members', label: '成员' },
-  { to: '/cognee', label: 'Cognee 管理', adminOnly: true },
 ]
 
 const WORKSPACE_NAV = [
@@ -289,7 +288,6 @@ function GlobalSearchBox() {
 
 export function AppShell() {
   const { user, logout, refresh } = useAuth()
-  const { role } = useCurrentProject()
   const navigate = useNavigate()
   const [pwdOpen, setPwdOpen] = useState(false)
   const [prefsOpen, setPrefsOpen] = useState(false)
@@ -306,9 +304,6 @@ export function AppShell() {
           <NavGroup title="团队功能" items={TEAM_NAV} isAdmin={isAdmin} />
           <div className="mx-3 my-1 border-t" />
           <NavGroup title="工作区" items={WORKSPACE_NAV} isAdmin={isAdmin} />
-          {(role === 'editor' || role === 'owner') && (
-            <GuardedNavLink to="/memory">记忆</GuardedNavLink>
-          )}
           <DocumentNav />
         </nav>
         <ProjectSwitcher />
