@@ -1,9 +1,5 @@
 """Requirement timeline domain. Service methods join the caller's transaction."""
 
-import base64
-import binascii
-import hashlib
-import json
 import re
 from datetime import UTC, datetime
 from typing import Any
@@ -16,7 +12,13 @@ from ..errors import conflict, invalid_request, not_found, permission_denied
 from ..models import Requirement, Task, User
 from ..services.permissions import require_project_role
 from .commands import execute_once
-from .resource_refs import ResourceKind, ResourceRef, parse_uuid
+from .notifications import emit_markdown_notifications
+from .page_cursor import as_utc as _utc
+from .page_cursor import decode_position as _decode
+from .page_cursor import decode_time_position
+from .page_cursor import encode_position as _encode
+from .page_cursor import scope_key
+from .resource_refs import ResourceKind, ResourceRef
 from .timeline_models import TimelineEntry, TimelineRevision
 
 
@@ -105,8 +107,7 @@ def append_entry(
                "reply_to": str(reply_to) if reply_to is not None else None}
 
     def apply() -> dict[str, Any]:
-        if reply_to is not None:
-            _entry(db, scope, reply_to)
+        replied_to = _entry(db, scope, reply_to) if reply_to is not None else None
         entry = _E(
             project_id=scope.project_id, requirement_code=scope.identifier,
             occurred_at=datetime.now(UTC), actor_id=actor.id, kind="manual", latest_version=1,
@@ -116,6 +117,10 @@ def append_entry(
         db.flush()
         db.add(_new_revision(entry, actor, 1, "create", body))
         db.flush()
+        emit_markdown_notifications(
+            db, actor.id, source=scope, source_version=1, body=body, timeline_entry_id=entry.id,
+            reply_author_id=replied_to.actor_id if replied_to else None,
+        )
         return _receipt(entry.id, 1)
 
     return execute_once(db, project_id=scope.project_id, actor_id=actor.id,
@@ -162,11 +167,11 @@ def _mutate_revision(
                "expected_version": expected_version, "body": body, "reason": reason}
 
     def apply() -> dict[str, Any]:
-        latest = db.scalar(
-            select(_R.kind).where(*_revisions(scope), _R.entry_id == entry_id,
-                                  _R.version == expected_version)
-        )
-        if latest == "withdraw":
+        latest = db.execute(
+            select(_R.kind, _R.body).where(*_revisions(scope), _R.entry_id == entry_id,
+                                          _R.version == expected_version)
+        ).one_or_none()
+        if latest is not None and latest.kind == "withdraw":
             raise conflict("此记录已撤回，请追加新记录")
         version = expected_version + 1
         changed = db.execute(
@@ -177,6 +182,11 @@ def _mutate_revision(
             raise conflict("时间轴版本已更新，请重新读取后再操作")
         db.add(_new_revision(entry, actor, version, kind, body, reason))
         db.flush()
+        if body is not None:
+            emit_markdown_notifications(
+                db, actor.id, source=scope, source_version=version, body=body,
+                previous_body=latest.body if latest is not None else None, timeline_entry_id=entry.id,
+            )
         return _receipt(entry_id, version)
 
     return execute_once(db, project_id=scope.project_id, actor_id=actor.id,
@@ -200,11 +210,6 @@ def withdraw_entry(
                             expected_version=expected_version, kind="withdraw", body=None, reason=reason)
 
 
-def _utc(value: datetime) -> datetime:
-    # SQLAlchemy retrieves DateTime(timezone=True) without tzinfo on SQLite.
-    return value.astimezone(UTC) if value.tzinfo is not None else value.replace(tzinfo=UTC)
-
-
 def _datetime_filter(value: datetime | None) -> datetime | None:
     if value is not None and value.utcoffset() is None:
         raise invalid_request("筛选时间必须包含时区")
@@ -212,26 +217,7 @@ def _datetime_filter(value: datetime | None) -> datetime | None:
 
 
 def _list_scope(kind: str, actor: User, scope: ResourceRef, filters: list[Any]) -> str:
-    value = json.dumps([kind, str(actor.id), scope.path, filters], separators=(",", ":"))
-    return hashlib.sha256(value.encode()).hexdigest()
-
-
-def _encode(cursor_scope: str, position: list[Any]) -> str:
-    return base64.urlsafe_b64encode(json.dumps([cursor_scope, position], separators=(",", ":")).encode()).decode()
-
-
-def _decode(cursor_scope: str, cursor: str | None) -> list[Any] | None:
-    if cursor is None:
-        return None
-    try:
-        if not 1 <= len(cursor) <= 512:
-            raise ValueError
-        key, position = json.loads(base64.b64decode(cursor, altchars=b"-_", validate=True))
-        if key != cursor_scope or not isinstance(position, list):
-            raise ValueError
-        return position
-    except (ValueError, TypeError, binascii.Error) as exc:
-        raise invalid_request("时间轴游标无效或与当前筛选条件不匹配") from exc
+    return scope_key(kind, str(actor.id), scope.path, filters)
 
 
 def _limit(limit: int) -> None:
@@ -322,16 +308,9 @@ def list_entries(
         statement = statement.where(_E.occurred_at >= start)
     if end is not None:
         statement = statement.where(_E.occurred_at <= end)
-    position = _decode(cursor_scope, cursor)
+    position = decode_time_position(cursor_scope, cursor)
     if position is not None:
-        try:
-            raw_time, raw_id = position
-            cutoff = datetime.fromisoformat(raw_time)
-            if cutoff.utcoffset() is None:
-                raise ValueError
-            entry_id = parse_uuid(raw_id, "cursor.id")
-        except (ValueError, TypeError) as exc:
-            raise invalid_request("无效的时间轴排序游标") from exc
+        cutoff, entry_id = position
         statement = statement.where(or_(
             _E.occurred_at < cutoff,
             and_(_E.occurred_at == cutoff, _E.id < entry_id),

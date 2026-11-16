@@ -15,6 +15,7 @@ from ..services.pagination import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from ..services.permissions import get_accessible_project, require_project_role
 from ..services.short_codes import allocate_code
 from .commands import execute_once
+from .notifications import emit_markdown_notifications
 from .markdown_refs import extract_markdown_refs
 from .resource_refs import ResourceKind, ResourceRef
 from .wiki_models import Wiki, WikiReference, WikiVersion
@@ -152,6 +153,10 @@ def create_wiki(
         db.add(wiki)
         db.flush()
         _record_snapshot(db, actor_id, project_id, code, 1, content)
+        emit_markdown_notifications(
+            db, actor_id, source=ResourceRef(project_id, ResourceKind.WIKI, code),
+            source_version=1, body=content.body,
+        )
         return _receipt(project_id, code, 1)
 
     return execute_once(
@@ -168,6 +173,7 @@ def _replace(
     if wiki.version_no != expected_version:
         raise conflict(f"Wiki 已更新，当前版本为 {wiki.version_no}，请重新读取后再保存")
     project_id, code = wiki.project_id, wiki.code
+    previous_body = wiki.body
     next_version = expected_version + 1
     saved_code = db.scalar(
         update(Wiki)
@@ -183,6 +189,10 @@ def _replace(
         raise conflict("Wiki 在保存期间已更新或删除，请重新读取")
     db.expire(wiki)
     _record_snapshot(db, actor_id, project_id, code, next_version, content)
+    emit_markdown_notifications(
+        db, actor_id, source=ResourceRef(project_id, ResourceKind.WIKI, code),
+        source_version=next_version, body=content.body, previous_body=previous_body,
+    )
     return _receipt(project_id, code, next_version)
 
 

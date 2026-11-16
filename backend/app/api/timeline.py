@@ -1,42 +1,23 @@
 """Web adapter for the project-scoped requirement timeline."""
 
 from datetime import datetime
-from typing import Callable
 
-from fastapi import APIRouter, Depends, Request
-from fastapi.exceptions import RequestValidationError
-from fastapi.routing import APIRoute
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, StrictInt
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..errors import invalid_request
 from ..models import User
 from ..v2 import timeline as service
 from ..v2.resource_refs import ResourceKind, ResourceRef, parse_uuid
 from .deps import current_user
-
-
-class TimelineRoute(APIRoute):
-    def get_route_handler(self):
-        handle = super().get_route_handler()
-
-        async def validated(request: Request):
-            try:
-                return await handle(request)
-            except RequestValidationError as error:
-                fields = {
-                    str(issue["loc"][-1])[:64] for issue in error.errors()[:8] if issue.get("loc")
-                }
-                raise invalid_request(f"时间轴参数无效：{', '.join(sorted(fields))}") from error
-
-        return validated
+from .v2_transport import V2Route, commit_command
 
 
 router = APIRouter(
     prefix="/api/projects/{project_id}/requirements/{requirement_id}/timeline",
     tags=["requirement timeline"],
-    route_class=TimelineRoute,
+    route_class=V2Route,
 )
 
 
@@ -65,16 +46,6 @@ def _scope(project_id: str, requirement_id: str) -> ResourceRef:
     return ResourceRef(parse_uuid(project_id, "project_id"), ResourceKind.REQUIREMENT, requirement_id)
 
 
-def _commit_command(db: Session, command: Callable[[], dict]) -> dict:
-    try:
-        receipt = command()
-        db.commit()
-        return receipt
-    except Exception:
-        db.rollback()
-        raise
-
-
 @router.get("")
 def list_timeline(
     project_id: str, requirement_id: str, cursor: str | None = None, limit: int = 20,
@@ -94,7 +65,7 @@ def append_timeline(
     project_id: str, requirement_id: str, body: AppendBody,
     user: User = Depends(current_user), db: Session = Depends(get_db),
 ) -> dict:
-    return _commit_command(db, lambda: service.append_entry(
+    return commit_command(db, lambda: service.append_entry(
         db, user, _scope(project_id, requirement_id),
         request_id=parse_uuid(body.request_id, "request_id"), body=body.body, source_task=body.source_task,
         reply_to=parse_uuid(body.reply_to, "reply_to") if body.reply_to is not None else None,
@@ -124,7 +95,7 @@ def revise_timeline_entry(
     project_id: str, requirement_id: str, entry_id: str, body: ReviseBody,
     user: User = Depends(current_user), db: Session = Depends(get_db),
 ) -> dict:
-    return _commit_command(db, lambda: service.revise_entry(
+    return commit_command(db, lambda: service.revise_entry(
         db, user, _scope(project_id, requirement_id), parse_uuid(entry_id, "entry_id"),
         request_id=parse_uuid(body.request_id, "request_id"), expected_version=body.expected_version,
         body=body.body, reason=body.reason,
@@ -136,7 +107,7 @@ def withdraw_timeline_entry(
     project_id: str, requirement_id: str, entry_id: str, body: ChangeBody,
     user: User = Depends(current_user), db: Session = Depends(get_db),
 ) -> dict:
-    return _commit_command(db, lambda: service.withdraw_entry(
+    return commit_command(db, lambda: service.withdraw_entry(
         db, user, _scope(project_id, requirement_id), parse_uuid(entry_id, "entry_id"),
         request_id=parse_uuid(body.request_id, "request_id"),
         expected_version=body.expected_version, reason=body.reason,

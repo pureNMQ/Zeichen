@@ -10,13 +10,15 @@ from .resource_refs import ResourceRef
 _MARKDOWN = MarkdownIt("commonmark").enable("table")
 
 
-def extract_markdown_refs(body: str, project_id: UUID) -> frozenset[ResourceRef]:
+def extract_markdown_refs(body: str, project_id: UUID, *, include_images: bool = True) -> frozenset[ResourceRef]:
     """Index same-project links, independent of display text and fragments."""
     targets: set[ResourceRef] = set()
     for block in _MARKDOWN.parse(body):
         if block.type != "inline":
             continue
         for token in block.children or ():
+            if token.type == "image" and not include_images:
+                continue
             attribute = {"link_open": "href", "image": "src"}.get(token.type)
             if attribute is None:
                 continue

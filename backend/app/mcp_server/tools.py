@@ -25,6 +25,8 @@ from ..services import requirements as req_svc
 from ..services import tasks as task_svc
 from ..services import search as search_svc
 from ..services import attachments as attachment_svc
+from ..v2 import notifications as notification_svc
+from ..v2.resource_refs import parse_uuid as parse_v2_uuid
 from . import auth
 
 _ctx = contextvars.ContextVar[tuple[object, User]]("zeichen_mcp_ctx", default=None)
@@ -769,6 +771,30 @@ def _register_all(mcp) -> None:
             ),
             "project_grants": [{"project_id": str(p.id), "role": role} for p, role in projects],
         }
+
+    # ---------- notifications.* ----------
+    @mcp.tool(name="notifications.list")
+    @sessioned
+    def notifications_list(cursor: str | None = None, limit: int = 20, unread_only: bool = False) -> dict:
+        """读取共享提及/回复通知；列表读取不标记已读，使用 next_cursor 继续。"""
+        db, actor = dbc()
+        return notification_svc.list_notifications(db, actor, cursor=cursor, limit=limit, unread_only=unread_only)
+
+    @mcp.tool(name="notifications.get")
+    @sessioned
+    def notifications_get(id: str) -> dict:
+        """获取一条仍可访问的共享通知；读取详情不标记已读。"""
+        db, actor = dbc()
+        return notification_svc.get_notification(db, actor, parse_v2_uuid(id, "id"))
+
+    @mcp.tool(name="notifications.mark_read")
+    @sessioned
+    def notifications_mark_read(id: str) -> dict:
+        """显式确认共享通知；主人和 Agent 共用第一次确认记录。"""
+        db, actor = dbc()
+        result = notification_svc.mark_read(db, actor, parse_v2_uuid(id, "id"))
+        db.commit()
+        return {"id": result["id"], "read_at": result["read_at"], "read_by_id": result["read_by_id"]}
 
     # ---------- search.* ----------
     @mcp.tool(name="search.query")
