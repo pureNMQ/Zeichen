@@ -19,6 +19,8 @@ vi.mock('@/components/vditor-ir-editor', () => ({
 const a = '11111111-1111-4111-8111-111111111111'
 const b = '22222222-2222-4222-8222-222222222222'
 const denied = '33333333-3333-4333-8333-333333333333'
+const author = '44444444-4444-4444-8444-444444444444'
+const attachment = '55555555-5555-4555-8555-555555555555'
 const timestamp = '2026-11-17T00:00:00Z'
 const projects = [
   { id: a, name: '项目 A', my_role: 'owner', created_at: timestamp },
@@ -35,6 +37,14 @@ function respond(path: string) {
   if (bare === '/api/projects') return Response.json(projects)
   if (bare === `/api/projects/${a}`) return Response.json(projects[0])
   if (bare === `/api/projects/${b}`) return Response.json(projects[1])
+  if (bare === `/api/projects/${a}/completions`) {
+    return Response.json({ items: [personCandidate(a), personCandidate(b)] })
+  }
+  if (bare === `/api/projects/${a}/people/${author}`) return Response.json(personCandidate(a))
+  if (bare === `/api/v2/projects/${a}/files`) {
+    return Response.json({ items: [fileCandidate(a), fileCandidate(b)], next_cursor: null })
+  }
+  if (bare === `/api/v2/projects/${a}/files/${attachment}`) return Response.json(fileCandidate(a))
   if (bare === `/api/projects/${projectId}/requirements/REQ-1` || bare === '/api/requirements/REQ-1') {
     return Response.json({ id: 'REQ-1', project_id: projectId, title: `同码需求 ${name}`, status: 'backlog' })
   }
@@ -51,6 +61,26 @@ function respond(path: string) {
     })
   }
   return Response.json({ items: [] })
+}
+
+function personCandidate(projectId: string) {
+  return {
+    id: author,
+    label: projectId === a ? '橘猫' : '其他项目成员',
+    kind: 'agent',
+    href: `/projects/${projectId}/people/${author}`,
+    detail: 'orange-cat',
+  }
+}
+
+function fileCandidate(projectId: string) {
+  return {
+    id: attachment, project_id: projectId,
+    name: projectId === a ? '橘猫.png' : '其他项目图片',
+    media_type: 'image/png', size: 346,
+    href: `/projects/${projectId}/files/${attachment}`,
+    preview_href: `/api/v2/projects/${projectId}/files/${attachment}/content?inline=true`,
+  }
 }
 
 const fetchMock = vi.fn((path: string) => Promise.resolve(respond(path)))
@@ -127,5 +157,40 @@ describe('canonical project routes', () => {
     open('/requirements/REQ-1')
     expect(await screen.findByRole('heading', { name: /同码需求 A/ })).toBeVisible()
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/requirements/REQ-1', expect.anything()))
+  })
+
+  it('looks up mentions and files from the canonical Wiki editor using its project', async () => {
+    const user = open(`/projects/${a}/wiki/DOC-1?mode=edit`)
+    const editor = await screen.findByRole('textbox', { name: 'Markdown 正文' })
+    await user.type(editor, ' @橘')
+    expect(await screen.findByRole('option', { name: /橘猫 Agent/ })).toBeVisible()
+    expect(screen.queryByRole('option', { name: /其他项目成员/ })).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/projects/${a}/completions?mode=people&q=%E6%A9%98`, expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
+    await user.keyboard('{Enter}{Alt>}{Shift>}K{/Shift}{/Alt}')
+    const search = screen.getByRole('combobox', { name: '查找图片' })
+    await user.type(search, '橘')
+    expect(await screen.findByRole('option', { name: /橘猫.png 文件/ })).toBeVisible()
+    expect(screen.queryByRole('option', { name: /其他项目图片/ })).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/v2/projects/${a}/files?query=%E6%A9%98&limit=20&images_only=true`, expect.anything(),
+    )
+    await user.keyboard('{Enter}')
+    expect(editor).toHaveValue(`正文 A [@橘猫](</projects/${a}/people/${author}>) ![橘猫.png](</projects/${a}/files/${attachment}>) `)
+  })
+
+  it('opens the person chosen by a canonical mention', async () => {
+    open(`/projects/${a}/people/${author}`)
+    expect(await screen.findByRole('heading', { name: '橘猫' })).toBeVisible()
+    expect(screen.getByText('Agent · orange-cat')).toBeVisible()
+  })
+
+  it('opens file references at the stable path and separates preview from download', async () => {
+    open(`/projects/${a}/files/${attachment}`)
+    expect(await screen.findByRole('heading', { name: '橘猫.png' })).toBeVisible()
+    const contentUrl = `/api/v2/projects/${a}/files/${attachment}/content`
+    expect(screen.getByRole('img', { name: '橘猫.png' })).toHaveAttribute('src', `${contentUrl}?inline=true`)
+    expect(screen.getByRole('link', { name: '下载文件' })).toHaveAttribute('href', contentUrl)
   })
 })

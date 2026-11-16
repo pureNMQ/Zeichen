@@ -3,6 +3,7 @@ import Vditor from 'vditor'
 import 'vditor/dist/index.css'
 
 import { cn } from '@/lib/utils'
+import { previewUrlForFileLink } from '@/lib/project-files'
 
 const VDITOR_CDN = 'https://cdn.jsdelivr.net/npm/vditor@3.11.2'
 
@@ -85,6 +86,21 @@ function applyAccessibility(
 
   if (ariaDescribedBy) element.setAttribute('aria-describedby', ariaDescribedBy)
   else element.removeAttribute('aria-describedby')
+}
+
+function bindFilePreviews(target: HTMLElement) {
+  for (const image of target.querySelectorAll<HTMLImageElement>('img[src]')) {
+    const href = image.getAttribute('src') ?? ''
+    const previewUrl = previewUrlForFileLink(href)
+    if (!previewUrl) continue
+    image.addEventListener('error', () => {
+      const link = document.createElement('a')
+      link.href = href
+      link.textContent = image.alt || '查看文件'
+      image.replaceWith(link)
+    }, { once: true })
+    image.src = previewUrl
+  }
 }
 
 export function VditorIrEditor({
@@ -260,6 +276,7 @@ export function VditorMarkdownViewer({
     void Vditor.preview(renderTarget, renderWikiLinks(markdown, wikiLinks), { cdn: VDITOR_CDN, mode: 'light' })
       .then(() => {
         if (cancelled) return
+        bindFilePreviews(renderTarget)
         host.replaceChildren(...renderTarget.childNodes)
         applyAccessibility(host, { ariaLabel, ariaLabelledBy, ariaDescribedBy })
         host.setAttribute('aria-busy', 'false')

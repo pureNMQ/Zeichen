@@ -372,7 +372,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       credentials: 'include',
       headers: options.body && !(options.body instanceof FormData) ? { 'Content-Type': 'application/json' } : undefined,
       ...options,
-      signal: options.signal ?? controller.signal,
+      signal: options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal,
     })
   } finally {
     window.clearTimeout(timeout)
@@ -392,7 +392,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
-  get: <T>(path: string) => request<T>(path),
+  get: <T>(path: string, signal?: AbortSignal) => request<T>(path, { signal }),
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'POST', body: JSON.stringify(body ?? {}) }),
   patch: <T>(path: string, body: unknown) =>

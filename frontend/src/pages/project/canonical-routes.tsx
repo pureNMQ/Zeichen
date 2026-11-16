@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Navigate, Outlet, useLocation, useParams } from 'react-router-dom'
 
+import type { CompletionCandidate } from '@/components/markdown-composer'
 import { ErrorNotification } from '@/components/ui/notification'
 import { api, withProject, type ProjectRow, type TaskRow } from '@/lib/api'
 import { ProjectRouteProvider, useCurrentProject } from '@/lib/current-project'
@@ -38,4 +39,30 @@ export function CanonicalTaskRoute() {
   }
   const path = projectResourceHref(projectId, 'requirements', task.requirement_id)
   return <Navigate replace to={`${path}?task=${encodeURIComponent(task.id)}${hash}`} />
+}
+
+export function CanonicalPersonRoute() {
+  const { id = '' } = useParams()
+  const { projectId } = useCurrentProject()
+  const path = projectId ? projectResourceHref(projectId, 'people', id) : null
+  const { data: person, error, isLoading, isError } = useQuery({
+    queryKey: ['project-person', projectId, id],
+    queryFn: () => api.get<CompletionCandidate>(path!),
+    enabled: !!path,
+    retry: false,
+  })
+
+  if (isLoading) return <p role="status" className="text-sm text-muted-foreground">加载人员…</p>
+  if (isError || !person || person.href !== path) {
+    return <ErrorNotification message={error instanceof Error ? error.message : '项目人员不存在或无访问权限'} />
+  }
+  return (
+    <section className="space-y-2">
+      <h1 className="text-xl font-semibold">{person.label}</h1>
+      <p className="text-sm text-muted-foreground">
+        {person.kind === 'agent' ? 'Agent' : '成员'}
+        {person.detail && person.detail !== person.label && ` · ${person.detail}`}
+      </p>
+    </section>
+  )
 }

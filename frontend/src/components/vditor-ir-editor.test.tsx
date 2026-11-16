@@ -1,4 +1,4 @@
-import { act, render, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const vditorMock = vi.hoisted(() => {
@@ -11,7 +11,7 @@ const vditorMock = vi.hoisted(() => {
     setValue: vi.fn(),
   }
   const constructor = vi.fn(function () { return instance })
-  const preview = vi.fn(() => Promise.resolve())
+  const preview = vi.fn((_target: HTMLElement, _markdown: string) => Promise.resolve())
   Object.assign(constructor, { preview })
   return { constructor, instance, preview }
 })
@@ -118,5 +118,19 @@ describe('VditorMarkdownViewer', () => {
       '**read me**',
       expect.objectContaining({ cdn: 'https://cdn.jsdelivr.net/npm/vditor@3.11.2' }),
     ))
+  })
+
+  it('shows authenticated previews for canonical file images and falls back to a stable link on error', async () => {
+    const href = '/projects/11111111-1111-4111-8111-111111111111/files/22222222-2222-4222-8222-222222222222'
+    vditorMock.preview.mockImplementationOnce(async (target) => {
+      target.innerHTML = `<img src="${href}" alt="预览图片"><img src="https://example.invalid/image.png" alt="外部图片">`
+    })
+    render(<VditorMarkdownViewer markdown={`![预览图片](<${href}>)`} />)
+
+    const image = await screen.findByRole('img', { name: '预览图片' })
+    expect(image).toHaveAttribute('src', `/api/v2${href}/content?inline=true`)
+    expect(screen.getByRole('img', { name: '外部图片' })).toHaveAttribute('src', 'https://example.invalid/image.png')
+    fireEvent.error(image)
+    expect(screen.getByRole('link', { name: '预览图片' })).toHaveAttribute('href', href)
   })
 })
