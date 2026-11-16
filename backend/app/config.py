@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -44,6 +45,11 @@ class Settings(BaseSettings):
     attachment_storage_dir: str = "storage/attachments"
     attachment_max_file_bytes: int = 20 * 1024 * 1024
     attachment_project_quota_bytes: int = 2 * 1024 * 1024 * 1024
+
+    # v2 file-library limits are separately configurable from legacy attachments.
+    file_library_max_file_bytes: int = Field(default=256 * 1024 * 1024, gt=0)
+    file_library_project_quota_bytes: int = Field(default=4 * 1024 * 1024 * 1024, gt=0)
+    file_library_grant_ttl_seconds: int = Field(default=15 * 60, gt=0)
 
     # 软删实体物理清理定时任务(REQ-3 / 规格书 §2.1 / §8.2):
     # 软删满 retention_days 天的实体由定时任务物理清理(恰好满期即清,<= 判定);

@@ -11,6 +11,7 @@ from app.config import get_settings  # noqa: E402
 from app.models import Base  # noqa: E402
 from app.v2 import notification_models, timeline_models  # noqa: E402,F401
 from app.v2.commands import CommandReceipt  # noqa: E402,F401
+from app.v2.file_models import FileAssociation, FileGrant, ProjectFile  # noqa: E402,F401
 from app.v2.wiki_models import Wiki, WikiReference, WikiVersion  # noqa: E402,F401
 
 config = context.config

@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from . import agents, attachments, auth, documents, filter_views, members, notifications, polymorphic, projects, repositories, requirements, search, tasks, users
+from . import agents, attachments, auth, documents, files_v2, filter_views, members, notifications, polymorphic, projects, repositories, requirements, search, tasks, users
 from . import notifications_v2, project_completion, timeline, wiki_v2
 
 api_router = APIRouter()
@@ -16,6 +16,7 @@ api_router.include_router(notifications_v2.router)
 api_router.include_router(notifications.prefs_router)
 api_router.include_router(search.router)
 api_router.include_router(attachments.router)
+api_router.include_router(files_v2.router)
 api_router.include_router(requirements.router)
 api_router.include_router(timeline.router)
 api_router.include_router(tasks.router)

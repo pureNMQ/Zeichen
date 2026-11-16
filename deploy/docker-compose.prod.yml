@@ -36,6 +36,8 @@ services:
       SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env (openssl rand -hex 32)}
       SESSION_COOKIE_SECURE: "true"
       WEB_BASE_URL: ${WEB_BASE_URL:?Set WEB_BASE_URL (e.g. https://zeichen.example.com)}
+      FILE_LIBRARY_MAX_FILE_BYTES: ${FILE_LIBRARY_MAX_FILE_BYTES:-268435456}
+      FILE_LIBRARY_PROJECT_QUOTA_BYTES: ${FILE_LIBRARY_PROJECT_QUOTA_BYTES:-4294967296}
     deploy:
       resources:
         limits:
@@ -47,6 +49,8 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://zeichen:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/zeichen
       SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env}
+      WEB_BASE_URL: ${WEB_BASE_URL:?Set WEB_BASE_URL (e.g. https://zeichen.example.com)}
+      FILE_LIBRARY_GRANT_TTL_SECONDS: ${FILE_LIBRARY_GRANT_TTL_SECONDS:-900}
       # 公网 Host 白名单必须含 <域名>:443(nginx 的 Host 带端口转发,见 deploy/nginx.conf)
       MCP_ALLOWED_HOSTS: ${MCP_ALLOWED_HOSTS:?Set MCP_ALLOWED_HOSTS (e.g. 127.0.0.1:*,localhost:*,[::1]*,zeichen.example.com,zeichen.example.com:443)}
       # OAuth 元数据端点公布的公开 URL(RFC 9728 /mcp 的 /.well-known 元数据)

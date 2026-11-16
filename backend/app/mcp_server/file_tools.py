@@ -1,0 +1,28 @@
+"""v2 file capability tools backed by the same service as the HTTP routes."""
+
+from mcp.server.auth.middleware.auth_context import auth_context_var
+from mcp.types import ToolAnnotations
+
+from ..errors import unauthorized
+from ..v2.files import issue_read_grant
+from ..v2.resource_refs import parse_uuid
+from .tools import dbc, sessioned
+
+
+def register_file_tools(mcp) -> None:
+    @mcp.tool(name="files.authorize_read", annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False,
+    ))
+    @sessioned
+    def authorize_read(project_id: str, file_id: str, inline: bool = False) -> dict:
+        """签发单文件限时读取链接。可用 GET、HEAD、Range；返回到期时间和文件摘要，不返回文件字节。"""
+        db, actor = dbc()
+        auth = auth_context_var.get()
+        if auth is None:
+            raise unauthorized("缺少有效 API key")
+        result = issue_read_grant(
+            db, actor.id, parse_uuid(project_id, "project_id"), parse_uuid(file_id, "file_id"),
+            api_key_id=parse_uuid(auth.access_token.client_id, "api_key_id"), inline=inline,
+        )
+        db.commit()
+        return result
