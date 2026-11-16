@@ -206,11 +206,11 @@ function ModuleTreeSidebar({ selected, onNavigate }: { selected: { id: string; k
   const [deleteImpact, setDeleteImpact] = useState<{ documents: number } | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
-  if (!projectId || !currentProject) return null
   useEffect(() => {
-    if (!selected?.id) return
+    if (!projectId || !selected?.id) return
     void api.get<{ items: DocumentNode[] }>(`/projects/${projectId}/documents/wiki/ancestors/document/${selected.id}`).then((result) => setExpanded((current) => new Set([...current, ...result.items.slice(0, -1).map((node) => node.id)]))).catch(() => undefined)
   }, [projectId, selected?.id])
+  if (!projectId || !currentProject) return null
   async function invalidate() { await Promise.all([qc.invalidateQueries({ queryKey: ['document-tree', projectId] }), qc.invalidateQueries({ queryKey: ['document-node'] })]) }
   function createDocument(parentId: string | null | undefined) {
     const container = parentId === undefined ? (selected?.kind === 'document' ? selected.id : null) : parentId
@@ -367,7 +367,10 @@ function DocumentDetail({ document, onEdit, onNavigate }: { document: DocumentRo
 }
 
 export function DocumentWorkbenchPage({ module }: { module: DocumentType }) {
-  if (module !== 'wiki') return null // REQ-59:wiki 单模块,旧 glossary 入口经路由重定向
+  return module === 'wiki' ? <WikiWorkbenchPage /> : null
+}
+
+function WikiWorkbenchPage() {
   const params = useParams<{ id?: string }>()
   const location = useLocation()
   const navigate = useNavigate()
