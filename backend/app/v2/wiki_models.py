@@ -28,6 +28,7 @@ class Wiki(WikiFields, TimestampMixin, CreatedByMixin, SoftDeleteMixin, Base):
     code: Mapped[str] = mapped_column(String(16), primary_key=True)
     parent_id: Mapped[str | None] = mapped_column(String(16))
     version_no: Mapped[int] = mapped_column(nullable=False)
+    deleted_by: Mapped[UUID | None] = mapped_column(ForeignKey("user.id", ondelete="SET NULL"))
 
 
 class WikiVersion(WikiFields, IdMixin, CreatedAtMixin, CreatedByMixin, Base):

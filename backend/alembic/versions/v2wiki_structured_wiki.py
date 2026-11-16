@@ -1,7 +1,7 @@
 """Add structured Wiki documents and immutable version references.
 
 Revision ID: v2wiki
-Revises: v2base
+Revises: v2timeline
 """
 
 import sqlalchemy as sa
@@ -34,6 +34,7 @@ def upgrade() -> None:
         sa.Column("version_no", sa.Integer(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("deleted_at", sa.DateTime(timezone=True)),
+        sa.Column("deleted_by", sa.Uuid(), sa.ForeignKey("user.id", ondelete="SET NULL")),
         *_fields(),
         sa.ForeignKeyConstraint(["project_id", "parent_id"], ["v2_wiki.project_id", "v2_wiki.code"]),
         sa.CheckConstraint("version_no > 0", name="ck_v2_wiki_version_positive"),

@@ -1,6 +1,7 @@
 """Project-scoped Wiki reads and transactional commands shared by Web and MCP."""
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -8,7 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from sqlalchemy import and_, select, tuple_, update
 from sqlalchemy.orm import Session
 
-from ..errors import conflict, invalid_request, not_found
+from ..errors import AppError, conflict, invalid_request, not_found
+from ..models import Project
 from ..services.pagination import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from ..services.permissions import get_accessible_project, require_project_role
 from ..services.short_codes import allocate_code
@@ -41,11 +43,21 @@ class WikiPatch(BaseModel):
     tags: list[WikiTag] | None = None
 
 
+def visible_wiki_codes(project_id: UUID):
+    visible = select(Wiki.code).where(
+        Wiki.project_id == project_id, Wiki.parent_id.is_(None), Wiki.deleted_at.is_(None),
+    ).cte(recursive=True)
+    return select(visible.union_all(
+        select(Wiki.code).join(visible, Wiki.parent_id == visible.c.code)
+        .where(Wiki.project_id == project_id, Wiki.deleted_at.is_(None)),
+    ).c.code)
+
+
 def _active_wiki(db: Session, project_id: UUID, code: str) -> Wiki:
     ResourceRef(project_id, ResourceKind.WIKI, code)
     wiki = db.scalar(
         select(Wiki)
-        .where(Wiki.project_id == project_id, Wiki.code == code, Wiki.deleted_at.is_(None))
+        .where(Wiki.project_id == project_id, Wiki.code == code, Wiki.code.in_(visible_wiki_codes(project_id)))
         .execution_options(populate_existing=True)
     )
     if wiki is None:
@@ -108,15 +120,30 @@ def _receipt(project_id: UUID, code: str, version: int) -> dict:
     return {"project_id": str(project_id), "id": code, "version": version}
 
 
+def _write_lock(db: Session, actor_id: UUID, project_id: UUID) -> None:
+    require_project_role(db, actor_id, project_id)
+    db.scalar(select(Project.id).where(Project.id == project_id).with_for_update())
+
+
+def _check_title(db: Session, project_id: UUID, parent_id: str | None, title: str, code: str = "") -> None:
+    duplicate = db.scalar(select(Wiki.code).where(
+        Wiki.project_id == project_id, Wiki.parent_id == parent_id, Wiki.title == title,
+        Wiki.deleted_at.is_(None), Wiki.code != code,
+    ).limit(1))
+    if duplicate is not None:
+        raise conflict("目标位置已存在同名 Wiki")
+
+
 def create_wiki(
     db: Session, actor_id: UUID, project_id: UUID, *, request_id: UUID,
     content: WikiContent, parent_id: str | None = None,
 ) -> dict:
-    require_project_role(db, actor_id, project_id)
+    _write_lock(db, actor_id, project_id)
 
     def apply() -> dict:
         if parent_id is not None:
             _active_wiki(db, project_id, parent_id)
+        _check_title(db, project_id, parent_id, content.title)
         code = allocate_code(db, project_id, "document")
         wiki = Wiki(
             project_id=project_id, code=code, created_by=actor_id,
@@ -163,7 +190,7 @@ def update_wiki(
     db: Session, actor_id: UUID, project_id: UUID, code: str, *,
     expected_version: int, patch: WikiPatch,
 ) -> dict:
-    require_project_role(db, actor_id, project_id)
+    _write_lock(db, actor_id, project_id)
     wiki = _active_wiki(db, project_id, code)
     fields = patch.model_dump(exclude_unset=True)
     if not fields:
@@ -172,6 +199,8 @@ def update_wiki(
         if field in fields and fields[field] is None:
             raise invalid_request(f"{field} 不接受 null")
     content = WikiContent.model_validate(wiki).model_copy(update=fields)
+    if content.title != wiki.title:
+        _check_title(db, project_id, wiki.parent_id, content.title, wiki.code)
     return _replace(db, actor_id, wiki, expected_version, content)
 
 
@@ -179,10 +208,73 @@ def restore_wiki_version(
     db: Session, actor_id: UUID, project_id: UUID, code: str, *,
     expected_version: int, from_version: int,
 ) -> dict:
-    require_project_role(db, actor_id, project_id)
+    _write_lock(db, actor_id, project_id)
     wiki = _active_wiki(db, project_id, code)
     previous = _version(db, project_id, code, from_version)
-    return _replace(db, actor_id, wiki, expected_version, WikiContent.model_validate(previous))
+    content = WikiContent.model_validate(previous)
+    if content.title != wiki.title:
+        _check_title(db, project_id, wiki.parent_id, content.title, wiki.code)
+    return _replace(db, actor_id, wiki, expected_version, content)
+
+
+def move_wiki(
+    db: Session, actor_id: UUID, project_id: UUID, code: str, parent_id: str | None, expected_version: int,
+) -> dict:
+    _write_lock(db, actor_id, project_id)
+    wiki = _active_wiki(db, project_id, code)
+    ancestor = _active_wiki(db, project_id, parent_id) if parent_id else None
+    while ancestor is not None:
+        if ancestor.code == code:
+            raise conflict("不能移动到当前 Wiki 或其子节点")
+        ancestor = db.get(Wiki, (project_id, ancestor.parent_id)) if ancestor.parent_id else None
+    _check_title(db, project_id, parent_id, wiki.title, code)
+    receipt = _replace(db, actor_id, wiki, expected_version, WikiContent.model_validate(wiki))
+    wiki.parent_id = parent_id
+    db.flush()
+    return receipt
+
+
+def wiki_delete_impact(db: Session, actor_id: UUID, project_id: UUID, code: str) -> dict:
+    require_project_role(db, actor_id, project_id)
+    wiki = _active_wiki(db, project_id, code)
+    subtree = select(Wiki.code).where(Wiki.project_id == project_id, Wiki.code == code).cte(recursive=True)
+    descendants = subtree.union_all(select(Wiki.code).join(subtree, Wiki.parent_id == subtree.c.code).where(
+        Wiki.project_id == project_id, Wiki.deleted_at.is_(None),
+    ))
+    codes = list(db.scalars(select(descendants.c.code).order_by(descendants.c.code)))
+    return {**_receipt(project_id, code, wiki.version_no), "affected_count": len(codes), "sample": codes[:50]}
+
+
+def delete_wiki(db: Session, actor_id: UUID, project_id: UUID, code: str, confirmed_count: int) -> dict:
+    _write_lock(db, actor_id, project_id)
+    impact = wiki_delete_impact(db, actor_id, project_id, code)
+    if impact["affected_count"] != confirmed_count:
+        raise conflict("Wiki 删除范围已变化，请重新确认")
+    wiki = db.get(Wiki, (project_id, code))
+    wiki.deleted_at = datetime.now(UTC)
+    wiki.deleted_by = actor_id
+    db.flush()
+    return {**impact, "deleted": True}
+
+
+def restore_wiki(db: Session, actor_id: UUID, project_id: UUID, code: str) -> dict:
+    _write_lock(db, actor_id, project_id)
+    ResourceRef(project_id, ResourceKind.WIKI, code)
+    wiki = db.get(Wiki, (project_id, code))
+    if wiki is None or wiki.deleted_at is None:
+        raise not_found("已删除的 Wiki 不存在")
+    if wiki.parent_id is not None:
+        try:
+            _active_wiki(db, project_id, wiki.parent_id)
+        except AppError as error:
+            if error.code != "not_found":
+                raise
+            raise conflict("上级 Wiki 尚未恢复，请先恢复上级") from error
+    _check_title(db, project_id, wiki.parent_id, wiki.title, code)
+    wiki.deleted_at = None
+    wiki.deleted_by = None
+    db.flush()
+    return {**_receipt(project_id, code, wiki.version_no), "restored": True}
 
 
 def read_references(
@@ -220,7 +312,7 @@ def find_reference_uses(
         Wiki, and_(WikiReference.project_id == Wiki.project_id, WikiReference.wiki_code == Wiki.code),
     ).where(
         WikiReference.project_id == target.project_id, WikiReference.target_kind == target.kind.value,
-        WikiReference.target_id == target.identifier, Wiki.deleted_at.is_(None),
+        WikiReference.target_id == target.identifier, Wiki.code.in_(visible_wiki_codes(target.project_id)),
     )
     if not include_history:
         statement = statement.where(current)

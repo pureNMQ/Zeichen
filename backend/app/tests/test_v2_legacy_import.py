@@ -84,3 +84,34 @@ def test_structured_wiki_http_roundtrip_and_stale_version(client, db, world):
     assert history["next_before"] == 2
     assert "body" not in history["items"][0]
     assert client.get(f"{entry}/versions/1").json()["body"] == "old body"
+
+
+def test_wiki_hierarchy_and_recovery_preserve_independent_deletion(client, db, world):
+    from uuid import uuid4
+
+    pid = world["project"].id
+    login(client, "admin", "admin-pass-1")
+    collection = f"/api/v2/projects/{pid}/wiki"
+
+    def create(title, parent_id=None):
+        return client.post(collection, json={
+            "request_id": str(uuid4()), "title": title, "parent_id": parent_id,
+        }).json()["id"]
+
+    parent = create("Parent")
+    child = create("Child", parent)
+    separate = create("Independent", parent)
+    parent_path = f"{collection}/{parent}"
+    child_path = f"{collection}/{child}"
+    assert client.patch(f"{parent_path}/location", json={
+        "expected_version": 1, "parent_id": child,
+    }).status_code == 409
+    assert client.delete(f"{collection}/{separate}", params={"confirmed_count": 1}).status_code == 200
+    assert client.get(f"{parent_path}/delete-impact").json()["affected_count"] == 2
+    assert client.delete(parent_path, params={"confirmed_count": 1}).status_code == 409
+    assert client.delete(parent_path, params={"confirmed_count": 2}).status_code == 200
+    assert client.get(child_path).status_code == 404
+    assert client.post(f"{collection}/trash/{separate}/restore").status_code == 409
+    assert client.post(f"{collection}/trash/{parent}/restore").status_code == 200
+    assert client.get(child_path).status_code == 200
+    assert client.get(f"{collection}/{separate}").status_code == 404

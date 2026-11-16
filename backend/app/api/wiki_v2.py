@@ -8,10 +8,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..errors import invalid_request
+from ..errors import invalid_request, not_found
 from ..models import User
 from ..services.pagination import decode_cursor, encode_cursor
-from ..services.permissions import get_accessible_project
+from ..services.permissions import get_accessible_project, require_project_role
 from ..v2 import wiki as service
 from ..v2.resource_refs import parse_uuid
 from ..v2.wiki_models import Wiki, WikiVersion
@@ -53,6 +53,10 @@ class WikiRestoreVersion(BaseModel):
     expected_version: StrictInt
 
 
+class WikiMove(WikiRestoreVersion):
+    parent_id: str | None
+
+
 def _summary(wiki: Wiki) -> dict:
     return {
         "id": wiki.code, "project_id": str(wiki.project_id), "parent_id": wiki.parent_id,
@@ -74,7 +78,7 @@ def list_documents(
         raise invalid_request("Wiki 每页 1 到 100 项，查询最多 256 字")
     filters = {"project_id": project_id, "kind": "wiki", "q": q}
     offset = decode_cursor(filters, cursor)
-    stmt = select(Wiki).where(Wiki.project_id == scope, Wiki.deleted_at.is_(None))
+    stmt = select(Wiki).where(Wiki.project_id == scope, Wiki.code.in_(service.visible_wiki_codes(scope)))
     if q:
         stmt = stmt.where(Wiki.title.icontains(q, autoescape=True))
     wikis = list(db.scalars(stmt.order_by(Wiki.code).offset(offset).limit(limit + 1)))
@@ -97,6 +101,50 @@ def create_document(
     return receipt
 
 
+@router.get("/trash")
+def list_deleted_wikis(
+    project_id: str, q: str = "", cursor: str | None = None, limit: int = 20,
+    user: User = Depends(current_user), db: Session = Depends(get_db),
+) -> dict:
+    scope = parse_uuid(project_id, "project_id")
+    require_project_role(db, user.id, scope, min_level="editor")
+    q = q.strip()
+    if not 1 <= limit <= 100 or len(q) > 256:
+        raise invalid_request("回收站每页 1 到 100 项，查询最多 256 字")
+    filters = {"project_id": project_id, "kind": "wiki_trash", "q": q}
+    offset = decode_cursor(filters, cursor)
+    stmt = select(Wiki).where(Wiki.project_id == scope, Wiki.deleted_at.is_not(None))
+    if q:
+        stmt = stmt.where(Wiki.title.icontains(q, autoescape=True) | Wiki.code.icontains(q, autoescape=True))
+    rows = list(db.scalars(stmt.order_by(Wiki.deleted_at.desc(), Wiki.code).offset(offset).limit(limit + 1)))
+    return {
+        "items": [{**_summary(row), "deleted_at": row.deleted_at, "deleted_by": row.deleted_by}
+                  for row in rows[:limit]],
+        "next_cursor": encode_cursor(filters, offset + limit, limit) if len(rows) > limit else None,
+    }
+
+
+@router.get("/trash/{code}")
+def get_deleted_wiki(
+    project_id: str, code: str, user: User = Depends(current_user), db: Session = Depends(get_db),
+) -> dict:
+    scope = parse_uuid(project_id, "project_id")
+    require_project_role(db, user.id, scope, min_level="editor")
+    wiki = db.get(Wiki, (scope, code))
+    if wiki is None or wiki.deleted_at is None:
+        raise not_found("已删除的 Wiki 不存在")
+    return {**_summary(wiki), "deleted_at": wiki.deleted_at, "deleted_by": wiki.deleted_by, "body": wiki.body}
+
+
+@router.post("/trash/{code}/restore")
+def restore_document(
+    project_id: str, code: str, user: User = Depends(current_user), db: Session = Depends(get_db),
+) -> dict:
+    receipt = service.restore_wiki(db, user.id, parse_uuid(project_id, "project_id"), code)
+    db.commit()
+    return receipt
+
+
 @router.get("/{code}")
 def get_document(
     project_id: str, code: str, user: User = Depends(current_user), db: Session = Depends(get_db),
@@ -113,6 +161,35 @@ def update_document(
         db, user.id, parse_uuid(project_id, "project_id"), code,
         expected_version=body.expected_version, patch=body.patch,
     )
+    db.commit()
+    return receipt
+
+
+@router.patch("/{code}/location")
+def move_document(
+    project_id: str, code: str, body: WikiMove,
+    user: User = Depends(current_user), db: Session = Depends(get_db),
+) -> dict:
+    receipt = service.move_wiki(
+        db, user.id, parse_uuid(project_id, "project_id"), code, body.parent_id, body.expected_version,
+    )
+    db.commit()
+    return receipt
+
+
+@router.get("/{code}/delete-impact")
+def get_delete_impact(
+    project_id: str, code: str, user: User = Depends(current_user), db: Session = Depends(get_db),
+) -> dict:
+    return service.wiki_delete_impact(db, user.id, parse_uuid(project_id, "project_id"), code)
+
+
+@router.delete("/{code}")
+def delete_document(
+    project_id: str, code: str, confirmed_count: int,
+    user: User = Depends(current_user), db: Session = Depends(get_db),
+) -> dict:
+    receipt = service.delete_wiki(db, user.id, parse_uuid(project_id, "project_id"), code, confirmed_count)
     db.commit()
     return receipt
 
