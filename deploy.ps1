@@ -29,6 +29,13 @@ try {
     $revision = (Invoke-Git rev-parse HEAD).Trim()
     if ($revision -notmatch '^[0-9a-f]{40}$') { throw 'Invalid commit.' }
     Invoke-Git push origin develop
+    # Transfer the exact pushed commit over SSH as well: the server need not
+    # reach GitHub or store GitHub credentials to deploy it.
+    $bundle = Join-Path $PSScriptRoot ".git/release-$revision.bundle"
+    $upload = "/tmp/zeichen-$revision-$([guid]::NewGuid().ToString('N')).bundle"
+    Invoke-Git bundle create $bundle develop
+    & scp -q -o BatchMode=yes -o ClearAllForwardings=yes $bundle "${SshHost}:$upload"
+    if ($LASTEXITCODE -ne 0) { throw 'Could not transfer the release bundle.' }
     $flags = ''
     if ($CheckOnly) { $flags += ' --check-only' }
     if ($AllowMigration) { $flags += ' --allow-migration' }
@@ -37,10 +44,10 @@ try {
     $remoteScript = @"
 set -euo pipefail
 cd '$ServerRoot'
-git fetch origin develop
+git fetch '$upload' refs/heads/develop:refs/remotes/origin/develop
 git merge-base --is-ancestor '$revision' origin/develop
 staging=`$(mktemp -d /tmp/zeichen-release.XXXXXXXX)
-trap 'rm -rf -- "`$staging"' EXIT
+trap 'rm -rf -- "`$staging"; rm -f -- "$upload"' EXIT
 git archive '$revision' | tar -x -C "`$staging"
 umask 077
 mkdir -p '$ServerRoot/.release/logs'
