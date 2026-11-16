@@ -139,3 +139,38 @@ class TestReference:
         svc.delete_reference(db, world["agent"], ref.id)
         page = svc.list_references(db, world["member"], "requirement", r1["id"], None, 20)
         assert page["items"] == []
+
+
+def test_same_code_read_models_and_cursors_stay_in_resolved_project(db, world):
+    a = world["project"]
+    b = Project(team_id=world["team"].id, name="other")
+    db.add(b)
+    db.commit()
+    admin = world["admin"]
+    viewer = world["member"]
+    for project in (b, a):
+        first = req_svc.create_requirement(db, admin, project.id, f"{project.name} first")
+        second = req_svc.create_requirement(db, admin, project.id, f"{project.name} second")
+        assert (first.code, second.code) == ("REQ-1", "REQ-2")
+        svc.create_comment(db, admin, "requirement", first.code, project.name, project.id)
+        svc.create_reference(
+            db, admin, "requirement", first.code, "requirement", second.code, "derives", project.id,
+        )
+
+    args = ("requirement", "REQ-1")
+    for actor in (viewer, admin):
+        comments = svc.list_comments(db, actor, *args, None, 20, a.id)
+        assert [item["body"] for item in comments["items"]] == [a.name]
+        activity = svc.list_activity(db, actor, *args, None, 20, a.id)
+        summaries = [item["summary"] or "" for item in activity["items"]]
+        assert any(f"《{a.name} second》" in summary for summary in summaries)
+        assert not any(f"《{b.name} second》" in summary for summary in summaries)
+        references = svc.list_references(db, actor, *args, None, 20, a.id)
+        assert [item["to_title"] for item in references["items"]] == [f"{a.name} second"]
+
+    for listing in (svc.list_comments, svc.list_activity, svc.list_references):
+        first_page = listing(db, admin, *args, None, 1, a.id)
+        assert first_page["next_cursor"]
+        with pytest.raises(AppError) as caught:
+            listing(db, admin, *args, first_page["next_cursor"], 1, b.id)
+        assert caught.value.code == "invalid_request"

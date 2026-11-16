@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from ..errors import conflict, invalid_request, not_found, permission_denied
 from ..models import Activity, Comment, Document, Project, Reference, Repository, Requirement, Task, User
 from .labels import TARGET_TYPE_CN
-from .pagination import page_result
+from .pagination import decode_cursor, page_result
 from .permissions import get_accessible_project, get_project_role, is_admin, require_project_role
 from .user_profiles import avatar_url, display_name
 
@@ -53,7 +53,7 @@ def resolve_target(
                 Project.id == target_id, Project.deleted_at.is_(None)
             )
         )
-        if project is None:
+        if project is None or (project_id is not None and project.id != project_id):
             raise not_found("目标不存在")
         return project
     if target_type == "repository":
@@ -62,13 +62,12 @@ def resolve_target(
                 Repository.id == target_id, Repository.deleted_at.is_(None)
             )
         )
-        if repo is None:
+        if repo is None or (project_id is not None and repo.project_id != project_id):
             raise not_found("目标不存在")
         return db.scalar(select(Project).where(Project.id == repo.project_id))
-    from .short_codes import require_valid_code
     from .short_code_lookup import resolve_by_code
 
-    entity, project = resolve_by_code(db, user, target_type, target_id, project_id=project_id)
+    _, project = resolve_by_code(db, user, target_type, target_id, project_id=project_id)
     return project
 
 
@@ -92,6 +91,7 @@ def record_activity(
         target_id=str(target_id),
         action=action,
         summary=summary,
+        created_at=_now(),
     )
     db.add(activity)
     from .notifications import notify_activity
@@ -156,6 +156,7 @@ def create_comment(
         author_id=actor.id,
         body=body,
         created_by=actor.id,
+        created_at=_now(),
     )
     db.add(comment)
     record_activity(db, project.id, actor.id, target_type, target_id, "comment", "添加评论")
@@ -171,20 +172,22 @@ def list_comments(
         raise invalid_request("任务已取消评论区,请在关联需求下评论")
     project = resolve_target(db, target_type, target_id, user=user, project_id=project_id)
     get_accessible_project(db, user.id, project.id, min_level="viewer")
-    offset = _decode_offset({"type": target_type, "id": str(target_id)}, cursor, limit)
+    filters = _filters(project.id, target_type, target_id)
+    offset = decode_cursor(filters, cursor)
     rows = db.scalars(
         select(Comment)
         .where(
+            Comment.project_id == project.id,
             Comment.target_type == target_type,
             Comment.target_id == target_id,
             Comment.deleted_at.is_(None),
         )
-        .order_by(Comment.created_at)
+        .order_by(Comment.created_at, Comment.id)
         .offset(offset)
         .limit(limit)
     ).all()
     items = [_comment_dict(db, c) for c in rows]
-    return page_result(items, offset, limit, _filters(target_type, target_id))
+    return page_result(items, offset, limit, filters)
 
 
 def delete_comment(db: Session, actor: User, comment_id: uuid.UUID) -> None:
@@ -208,16 +211,21 @@ def list_activity(
 ) -> dict:
     project = resolve_target(db, target_type, target_id, user=user, project_id=project_id)
     get_accessible_project(db, user.id, project.id, min_level="viewer")
-    offset = _decode_offset({"type": target_type, "id": str(target_id)}, cursor, limit)
+    filters = _filters(project.id, target_type, target_id)
+    offset = decode_cursor(filters, cursor)
     rows = db.scalars(
         select(Activity)
-        .where(Activity.target_type == target_type, Activity.target_id == target_id)
-        .order_by(Activity.created_at)
+        .where(
+            Activity.project_id == project.id,
+            Activity.target_type == target_type,
+            Activity.target_id == target_id,
+        )
+        .order_by(Activity.created_at, Activity.id)
         .offset(offset)
         .limit(limit)
     ).all()
     items = [_activity_dict(db, a) for a in rows]
-    return page_result(items, offset, limit, _filters(target_type, target_id))
+    return page_result(items, offset, limit, filters)
 
 
 def create_reference(
@@ -259,54 +267,44 @@ def create_reference(
         to_id=to_id,
         type=ref_type,
         created_by=actor.id,
+        created_at=_now(),
     )
     db.add(ref)
     to_label = TARGET_TYPE_CN.get(to_type, to_type)
-    to_title = _target_title(db, to_type, to_id)
+    to_title, _ = _target_label(db, from_project.id, to_type, to_id)
     summary = f"引用 {to_label}《{to_title}》" if to_title else f"引用 {to_label}(已删除)"
     record_activity(db, from_project.id, actor.id, from_type, from_id, "reference", summary)
     db.commit()
     return ref
 
 
-def _target_title(db: Session, target_type: str, target_id) -> str | None:
-    """引用目标的当前可读标题;目标不存在或无标题字段时返回 None(短码/UUID 兼容)。"""
+def _target_label(
+    db: Session, project_id: uuid.UUID, target_type: str, target_id: str,
+) -> tuple[str | None, str | None]:
     if target_type == "project":
-        target = db.get(Project, target_id)
-        return target.name if target else None
+        target = db.get(Project, project_id) if target_id == str(project_id) else None
+        return (target.name, None) if target and target.deleted_at is None else (None, None)
     if target_type == "repository":
-        target = db.get(Repository, target_id)
-        return target.name if target else None
+        try:
+            repository_id = uuid.UUID(str(target_id))
+        except ValueError:
+            return None, None
+        target = db.get(Repository, repository_id)
+        if target and target.project_id == project_id and target.deleted_at is None:
+            return target.name, None
+        return None, None
     model = _TARGET_MODELS.get(target_type)
     if model is None:
-        return None
-    target = db.scalar(select(model).where(model.code == target_id).limit(1))
-    if target is None:
-        return None
-    return getattr(target, "title", None) or getattr(target, "name", None)
+        return None, None
+    target = db.get(model, (project_id, target_id))
+    if target is None or target.deleted_at is not None:
+        return None, None
+    return target.title, getattr(target, "doc_type", None)
 
 
 def _ref_dict(db: Session, r: Reference) -> dict:
-    def target_label(target_type: str, target_id) -> tuple[str, str | None]:
-        if target_type == "project":
-            target = db.get(Project, target_id)
-            return (target.name if target else "已删除", None)
-        if target_type == "repository":
-            target = db.get(Repository, target_id)
-            return (target.name if target else "已删除", None)
-        model = _TARGET_MODELS.get(target_type)
-        target = (
-            db.scalar(select(model).where(model.code == target_id).limit(1)) if model else None
-        )
-        if target is None:
-            return ("已删除", None)
-        return (
-            getattr(target, "title", None) or getattr(target, "name", None) or "已删除",
-            getattr(target, "doc_type", None),
-        )
-
-    from_title, from_module = target_label(r.from_type, r.from_id)
-    to_title, to_module = target_label(r.to_type, r.to_id)
+    from_title, from_module = _target_label(db, r.project_id, r.from_type, r.from_id)
+    to_title, to_module = _target_label(db, r.project_id, r.to_type, r.to_id)
     return {
         "id": str(r.id),
         "from_type": r.from_type,
@@ -314,8 +312,8 @@ def _ref_dict(db: Session, r: Reference) -> dict:
         "to_type": r.to_type,
         "to_id": r.to_id,
         "type": r.type,
-        "from_title": from_title,
-        "to_title": to_title,
+        "from_title": from_title or "已删除",
+        "to_title": to_title or "已删除",
         "from_module": from_module,
         "to_module": to_module,
         "created_by": str(r.created_by) if r.created_by else None,
@@ -330,22 +328,24 @@ def list_references(
     """双向:from 或 to 命中目标均返回(引用面板)。"""
     project = resolve_target(db, target_type, target_id, user=user, project_id=project_id)
     get_accessible_project(db, user.id, project.id, min_level="viewer")
-    offset = _decode_offset({"type": target_type, "id": str(target_id)}, cursor, limit)
+    filters = _filters(project.id, target_type, target_id)
+    offset = decode_cursor(filters, cursor)
     rows = db.scalars(
         select(Reference)
         .where(
+            Reference.project_id == project.id,
             Reference.deleted_at.is_(None),
             or_(
                 (Reference.from_type == target_type) & (Reference.from_id == target_id),
                 (Reference.to_type == target_type) & (Reference.to_id == target_id),
             ),
         )
-        .order_by(Reference.created_at)
+        .order_by(Reference.created_at, Reference.id)
         .offset(offset)
         .limit(limit)
     ).all()
     items = [_ref_dict(db, r) for r in rows]
-    return page_result(items, offset, limit, _filters(target_type, target_id))
+    return page_result(items, offset, limit, filters)
 
 
 def delete_reference(db: Session, actor: User, ref_id: uuid.UUID) -> None:
@@ -359,14 +359,8 @@ def delete_reference(db: Session, actor: User, ref_id: uuid.UUID) -> None:
     db.commit()
 
 
-def _filters(target_type: str, target_id: uuid.UUID) -> dict:
-    return {"type": target_type, "id": str(target_id)}
-
-
-def _decode_offset(filters: dict, cursor: str | None, limit: int) -> int:
-    from .pagination import decode_cursor
-
-    return decode_cursor(filters, cursor)
+def _filters(project_id: uuid.UUID, target_type: str, target_id: str) -> dict:
+    return {"project_id": str(project_id), "type": target_type, "id": str(target_id)}
 
 
 def _now():
