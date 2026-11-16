@@ -8,7 +8,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "v2timeline"
-down_revision = "v2base"
+down_revision = "v2projecttrash"
 branch_labels = None
 depends_on = None
 
