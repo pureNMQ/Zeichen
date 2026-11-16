@@ -12,6 +12,10 @@ spec.loader.exec_module(release)
 
 
 class SafetyTests(unittest.TestCase):
+    def test_image_default_command_and_no_mounts_are_valid(self):
+        config = {"services": {name: {"command": None, "volumes": None} for name in release.SERVICES}}
+        release.validate_release_config(config)
+
     def test_shared_ingress_preserves_other_site_and_acme(self):
         old = "HTTP/ACME\nMOCHI\n# ---------- 贼船 Zeichen ----------\nold\n# ---------- 兜底: unchanged"
         release.protect_ingress(old, old.replace("\nold\n", "\nnew\n"))

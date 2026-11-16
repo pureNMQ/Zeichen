@@ -73,8 +73,8 @@ def protect_ingress(old, new):
 def validate_release_config(config):
     for name in SERVICES:
         service = config["services"][name]
-        command = service.get("command", [])
-        if "--reload" in command or any(v.get("type") == "bind" for v in service.get("volumes", [])):
+        command = service.get("command") or []
+        if "--reload" in command or any(v.get("type") == "bind" for v in (service.get("volumes") or [])):
             raise RuntimeError(f"{name}: release must not mount source or use reload")
         if service.get("ports"):
             raise RuntimeError(f"{name}: application ports must remain private")
