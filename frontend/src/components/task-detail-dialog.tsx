@@ -96,6 +96,9 @@ export function TaskDetailDialog({
     await qc.invalidateQueries({ queryKey: ['requirement-tasks', t?.requirement_id] })
     await qc.invalidateQueries({ queryKey: ['tasks', projectId] })
     await qc.invalidateQueries({ queryKey: ['activity', 'task', t?.id] })
+    if (routeProjectId && t?.requirement_id) {
+      void qc.invalidateQueries({ queryKey: ['requirement-timeline', routeProjectId, t.requirement_id] })
+    }
   }
 
   async function act(path: string, body?: unknown) {
@@ -296,9 +299,9 @@ export function TaskDetailDialog({
 
           <ErrorNotification message={error} />
 
-          <div className="rounded-lg border p-2">
-            <ActivityStream targetType="task" targetId={t.id} projectId={routeProjectId} />
-          </div>
+          {!routeProjectId && <div className="rounded-lg border p-2">
+            <ActivityStream targetType="task" targetId={t.id} />
+          </div>}
         </div>
       </DialogContent>
     </Dialog>

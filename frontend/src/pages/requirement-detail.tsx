@@ -8,6 +8,7 @@ import { AttachmentList } from '@/components/attachment-list'
 import { CommentStream } from '@/components/comment-stream'
 import { CreateTaskDialog } from '@/components/create-task-dialog'
 import { Kanban } from '@/components/kanban'
+import { RequirementTimeline } from '@/components/requirement-timeline'
 import { TaskDetailDialog } from '@/components/task-detail-dialog'
 import { TaskRefLink } from '@/components/task-ref-link'
 import { StatusBadge } from '@/components/status-badge'
@@ -203,12 +204,24 @@ function RequirementDetail({ id }: { id: string }) {
 
   function openTask(tid: string) {
     setDialogTaskId(tid)
-    if (deepLinkTask !== tid) setSearchParams({ task: tid }, { replace: true })
+    if (deepLinkTask !== tid) {
+      const params = new URLSearchParams(searchParams)
+      params.set('task', tid)
+      setSearchParams(params, { replace: true })
+    }
   }
 
   function closeTaskDialog() {
     setDialogTaskId(null)
-    if (deepLinkTask) setSearchParams({}, { replace: true })
+    if (deepLinkTask) {
+      const params = new URLSearchParams(searchParams)
+      params.delete('task')
+      setSearchParams(params, { replace: true })
+    }
+  }
+
+  function invalidateTimeline() {
+    if (routeProjectId) void qc.invalidateQueries({ queryKey: ['requirement-timeline', routeProjectId, id] })
   }
 
   async function act(path: string, body?: unknown) {
@@ -217,6 +230,7 @@ function RequirementDetail({ id }: { id: string }) {
       await api.post(withProject(path, req?.project_id), body)
       await qc.invalidateQueries({ queryKey: ['requirement', id] })
       await qc.invalidateQueries({ queryKey: ['activity', 'requirement', id] })
+      invalidateTimeline()
     } catch (err) {
       setActionError(err instanceof ApiError ? err.message : '操作失败')
     }
@@ -233,6 +247,7 @@ function RequirementDetail({ id }: { id: string }) {
       await api.post(withProject(`/tasks/${taskId}/claim`, req?.project_id))
       await qc.invalidateQueries({ queryKey: ['requirement-tasks', id] })
       await qc.invalidateQueries({ queryKey: ['tasks', req?.project_id] })
+      invalidateTimeline()
     } catch (err) {
       setActionError(err instanceof ApiError ? err.message : '认领失败')
     }
@@ -245,6 +260,7 @@ function RequirementDetail({ id }: { id: string }) {
       await api.post(withProject(`/tasks/${t.id}/status`, req?.project_id), { status })
       await qc.invalidateQueries({ queryKey: ['requirement-tasks', id] })
       await qc.invalidateQueries({ queryKey: ['tasks', req?.project_id] })
+      invalidateTimeline()
     } catch (err) {
       setActionError(err instanceof ApiError ? err.message : '状态变更失败')
     }
@@ -417,16 +433,18 @@ function RequirementDetail({ id }: { id: string }) {
       </Card>
 
       <Card>
-        <CardContent className="space-y-6 p-4">
-          <CommentStream targetType="requirement" targetId={req.id} projectId={routeProjectId} canEdit={req.status !== 'cancelled' && (!routeProjectId || canEdit)} />
+        <CardContent className="p-4">
+          {routeProjectId
+            ? <RequirementTimeline projectId={routeProjectId} requirementId={req.id} canWrite={canEdit} />
+            : <CommentStream targetType="requirement" targetId={req.id} canEdit={req.status !== 'cancelled'} />}
         </CardContent>
       </Card>
       <AttachmentList targetType="requirement" targetId={req.id} projectId={routeProjectId} />
-      <Card>
+      {!routeProjectId && <Card>
         <CardContent className="p-4">
-          <ActivityStream targetType="requirement" targetId={req.id} projectId={routeProjectId} />
+          <ActivityStream targetType="requirement" targetId={req.id} />
         </CardContent>
-      </Card>
+      </Card>}
 
       <TaskDetailDialog
         task={dialogTask}
