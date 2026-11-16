@@ -35,4 +35,4 @@ testpaths = ["app/tests"]
 addopts = "-q"
 
 [tool.setuptools]
-packages = ["app", "app.models", "app.tests", "app.workers"]
+packages = ["app", "app.models", "app.tests", "app.v2", "app.workers"]

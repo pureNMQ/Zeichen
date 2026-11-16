@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.config import get_settings  # noqa: E402
 from app.models import Base  # noqa: E402
+from app.v2.commands import CommandReceipt  # noqa: E402,F401
 
 config = context.config
 if config.config_file_name is not None:
