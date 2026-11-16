@@ -233,20 +233,15 @@ class TestAgentEdges:
             agents_svc.create_agent(db, world["admin"], "   ")
         assert e.value.code == "invalid_request"
 
-    def test_reveal_requires_owned_agent(self, db: Session, world: dict):
-        # admin 尚未创建附属 Agent:回看直接 not_found
+    def test_issue_requires_owned_agent(self, db: Session, world: dict):
         with pytest.raises(AppError) as e:
-            agents_svc.reveal_key(db, world["admin"], "admin-pass-1", uuid.uuid4())
+            agents_svc.issue_key(db, world["admin"], None)
         assert e.value.code == "not_found"
 
-    def test_key_lookup_and_reveal_guards(self, db: Session, world: dict):
+    def test_new_key_can_be_revoked_by_admin(self, db: Session, world: dict):
         agent = agents_svc.create_agent(db, world["admin"], "edge-bot")
-        key, _ = agents_svc.issue_key(db, world["admin"], "note")
+        key, issued = agents_svc.issue_key(db, world["admin"], "note")
         assert key.user_id == agent.id
-        with pytest.raises(AppError) as e:
-            agents_svc.reveal_key(db, world["admin"], "wrong-pass", key.id)
-        assert e.value.code == "permission_denied"
-        revealed = agents_svc.reveal_key(db, world["admin"], "admin-pass-1", key.id)
-        assert revealed.startswith("zc_")
+        assert issued.startswith("zc_")
         # admin 紧急吊销(对自己 agent 亦可用)
         assert agents_svc.admin_revoke_keys(db, agent.id) == 1

@@ -87,7 +87,7 @@ class TestEmptyScopeAndEdgeGuards:
         from app.tests.conftest import make_user
 
         lonely = make_user(db, "lonely", role="member")
-        assert svc.search(db, lonely, "登录") == {"items": []}
+        assert svc.search(db, lonely, "登录") == {"items": [], "next_cursor": None}
 
     def test_domain_functions_short_circuit_on_empty_needle(self, db: Session, world: dict):
         project_ids = [world["project"].id]

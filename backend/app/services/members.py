@@ -112,7 +112,9 @@ def update_role(db: Session, actor: User, user_id: uuid.UUID, role: str) -> User
 
 
 def remove_member(db: Session, actor: User, user_id: uuid.UUID) -> None:
-    user = _get_active_user(db, user_id)
+    user = db.scalar(select(User).where(User.id == user_id, User.deleted_at.is_(None)).with_for_update())
+    if user is None:
+        raise not_found("成员不存在")
     team = get_team(db)
     membership = db.scalar(
         select(WorkspaceMember).where(

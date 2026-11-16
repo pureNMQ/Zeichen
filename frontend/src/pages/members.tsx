@@ -171,19 +171,28 @@ function CreateAgentDialog({ open, onOpenChange }: { open: boolean; onOpenChange
   const [username, setUsername] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const inactive = useQuery({
+    queryKey: ['my-agent', 'inactive'],
+    queryFn: () => api.get<Pick<MyAgentDetail, 'id' | 'display_name' | 'username'>[]>('/my-agent/inactive'),
+    enabled: open,
+  })
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
+    await saveAgent(() => api.post('/my-agent', { username: username.trim() }))
+  }
+
+  async function saveAgent(action: () => Promise<unknown>) {
     setError(null)
     setSubmitting(true)
     try {
-      await api.post('/my-agent', { username: username.trim() })
+      await action()
       setUsername('')
       onOpenChange(false)
       await qc.invalidateQueries({ queryKey: ['members'] })
       await qc.invalidateQueries({ queryKey: ['my-agent'] })
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : '创建失败,请重试')
+      setError(err instanceof ApiError ? err.message : '操作失败，请重试')
     } finally {
       setSubmitting(false)
     }
@@ -193,7 +202,7 @@ function CreateAgentDialog({ open, onOpenChange }: { open: boolean; onOpenChange
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>创建我的 Agent</DialogTitle>
+          <DialogTitle>创建或重新启用 Agent</DialogTitle>
           <DialogDescription>每个成员只能创建一个附属 Agent;其权限与你完全一致,随你的角色即时生效。</DialogDescription>
         </DialogHeader>
         <form onSubmit={onSubmit} className="space-y-4">
@@ -215,6 +224,26 @@ function CreateAgentDialog({ open, onOpenChange }: { open: boolean; onOpenChange
             </Button>
           </DialogFooter>
         </form>
+        {inactive.data && inactive.data.length > 0 && (
+          <div className="space-y-2 border-t pt-3">
+            <p className="text-sm font-medium">已停用的 Agent</p>
+            <p className="text-xs text-muted-foreground">重新启用后需要签发新 key。</p>
+            {inactive.data.map((agent) => (
+              <div key={agent.id} className="flex items-center justify-between gap-2">
+                <span className="truncate text-sm">{agent.display_name} · @{agent.username}</span>
+                <Button type="button" size="sm" variant="outline" disabled={submitting}
+                  onClick={() => void saveAgent(() => api.post(`/my-agent/inactive/${agent.id}/reactivate`))}>
+                  重新启用
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+        {inactive.isError && (
+          <Button type="button" variant="outline" onClick={() => void inactive.refetch()}>
+            已停用的 Agent 加载失败，重试
+          </Button>
+        )}
       </DialogContent>
     </Dialog>
   )
@@ -296,7 +325,7 @@ function ManageAgentDialog({ open, onOpenChange }: { open: boolean; onOpenChange
       await qc.invalidateQueries({ queryKey: ['my-agent'] })
       await qc.invalidateQueries({ queryKey: ['members'] })
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : '删除失败,请重试')
+      setError(err instanceof ApiError ? err.message : '停用失败，请重试')
     }
   }
 
@@ -368,13 +397,13 @@ function ManageAgentDialog({ open, onOpenChange }: { open: boolean; onOpenChange
             </div>
             {error && <p className="text-sm text-destructive">{error}</p>}
             <div className="space-y-1.5 border-t pt-3">
-              <p className="text-xs font-medium text-muted-foreground">删除附属 Agent</p>
+              <p className="text-xs font-medium text-muted-foreground">停用附属 Agent</p>
               <p className="text-xs text-muted-foreground">
-                删除后该 Agent 立即失去 MCP 访问,全部 API key 一并吊销;历史记录保留其署名,不可恢复。
+                停用后该 Agent 立即失去 MCP 访问，所有 API key 一并吊销，历史署名保留。
               </p>
               <Button variant="ghost" size="sm" className="text-destructive" onClick={() => setDeleteConfirmFor(detail)}>
                 <Trash2 className="mr-1.5 h-3.5 w-3.5" />
-                删除 Agent
+                停用 Agent
               </Button>
             </div>
           </div>
@@ -398,15 +427,15 @@ function ManageAgentDialog({ open, onOpenChange }: { open: boolean; onOpenChange
     <Dialog open={deleteConfirmFor !== null} onOpenChange={(v) => { if (!v) setDeleteConfirmFor(null) }}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>删除附属 Agent</DialogTitle>
+          <DialogTitle>停用附属 Agent</DialogTitle>
           <DialogDescription>
-            确认删除 {deleteConfirmFor ? `@${deleteConfirmFor.username}` : ''}?它将立即失去 MCP 访问,全部 API key 一并吊销,且不可恢复;之后可重新创建 Agent,但需换一个用户名。
+            确认停用 {deleteConfirmFor ? `@${deleteConfirmFor.username}` : ''}？重新启用后需要签发新 key。
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
           <Button variant="outline" onClick={() => setDeleteConfirmFor(null)}>取消</Button>
           <Button variant="destructive" onClick={() => void deleteAgent()}>
-            确认删除
+            确认停用
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -561,7 +590,7 @@ export function MembersPage() {
                         {!m.agent ? (
                           <Button variant="outline" size="sm" onClick={() => setAgentCreateOpen(true)}>
                             <Bot className="mr-1.5 h-4 w-4" />
-                            创建我的 Agent
+                            创建或重新启用 Agent
                           </Button>
                         ) : (
                           <Button variant="outline" size="sm" onClick={() => setAgentManageOpen(true)}>

@@ -117,6 +117,32 @@ class TestKeyJurisdiction:
 
 
 class TestPermissionInheritance:
+    def test_reactivation_preserves_identity_but_revoked_keys_stay_revoked(self, client, db, world):
+        _admin(client)
+        agent = client.post("/api/my-agent", json={"username": "paused-bot"}).json()["agent"]
+        key = client.post("/api/my-agent/keys", json={}).json()
+        assert client.delete("/api/my-agent").status_code == 200
+        assert client.get("/api/my-agent").json()["agent"] is None
+        inactive = client.get("/api/my-agent/inactive").json()
+        assert [item["id"] for item in inactive] == [agent["id"]]
+
+        path = f"/api/my-agent/inactive/{agent['id']}/reactivate"
+        _give_bob_password(client, db)
+        login(client, "bob", "bob-pass-1")
+        assert client.post(path).status_code == 404
+
+        _admin(client)
+        replacement = client.post("/api/my-agent", json={"username": "temporary-bot"})
+        assert replacement.status_code == 201
+        assert client.post(path).status_code == 409
+        assert client.delete("/api/my-agent").status_code == 200
+
+        restored = client.post(path)
+        assert restored.status_code == 200
+        assert restored.json()["agent"]["id"] == agent["id"]
+        assert restored.json()["agent"]["keys"] == []
+        assert db.get(ApiKey, uuid.UUID(key["id"])).revoked_at is not None
+
     def test_agent_inherits_owner_project_role(self, db, world):
         bob = world["member"]
         agent = svc.create_agent(db, bob, "bob-bot")

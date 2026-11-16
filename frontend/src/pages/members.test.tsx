@@ -114,12 +114,12 @@ describe('ManageAgentDialog 自助管理', () => {
     const issued = await screen.findByRole('dialog', { name: 'API key 已签发' })
     expect(screen.getByLabelText('新签发的 API key 明文')).toHaveValue('zk-new-abc123')
     expect(screen.getByRole('button', { name: '复制' })).toBeInTheDocument()
-    await user.click(within(issued).getByRole('button', { name: '关闭', exact: true }))
+    await user.click(within(issued).getByRole('button', { name: '关闭' }))
     expect(screen.queryByLabelText('新签发的 API key 明文')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '回看' })).not.toBeInTheDocument()
   })
 
-  it('删除 Agent 需确认,确认后调用 DELETE /my-agent', async () => {
+  it('停用 Agent 需确认，确认后调用 DELETE /my-agent', async () => {
     vi.mocked(api.get).mockImplementation((path: string) => {
       if (path === '/members') return Promise.resolve(rows)
       if (path === '/my-agent') return Promise.resolve({ agent: agentDetail })
@@ -130,16 +130,16 @@ describe('ManageAgentDialog 自助管理', () => {
     const user = (await import('@testing-library/user-event')).default
 
     await user.click(await screen.findByRole('button', { name: '管理 Agent 与 key' }))
-    await user.click(await screen.findByRole('button', { name: /删除 Agent/ }))
+    await user.click(await screen.findByRole('button', { name: /停用 Agent/ }))
 
-    expect(await screen.findByRole('dialog', { name: '删除附属 Agent' })).toBeInTheDocument()
-    expect(screen.getByText(/需换一个用户名/)).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '停用附属 Agent' })).toBeInTheDocument()
+    expect(screen.getByText(/重新启用后需要签发新 key/)).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: '确认删除' }))
+    await user.click(screen.getByRole('button', { name: '确认停用' }))
     expect(api.delete).toHaveBeenCalledWith('/my-agent')
   })
 
-  it('取消删除不调用接口', async () => {
+  it('取消停用不调用接口', async () => {
     vi.mocked(api.get).mockImplementation((path: string) => {
       if (path === '/members') return Promise.resolve(rows)
       if (path === '/my-agent') return Promise.resolve({ agent: agentDetail })
@@ -149,10 +149,27 @@ describe('ManageAgentDialog 自助管理', () => {
     const user = (await import('@testing-library/user-event')).default
 
     await user.click(await screen.findByRole('button', { name: '管理 Agent 与 key' }))
-    await user.click(await screen.findByRole('button', { name: /删除 Agent/ }))
+    await user.click(await screen.findByRole('button', { name: /停用 Agent/ }))
     await user.click(await screen.findByRole('button', { name: '取消' }))
 
     expect(api.delete).not.toHaveBeenCalled()
+  })
+
+  it('可以从成员页以原身份重新启用 Agent', async () => {
+    vi.mocked(api.get).mockImplementation((path: string) => {
+      if (path === '/members') return Promise.resolve(rows.map((row) => ({ ...row, agent: null })))
+      if (path === '/my-agent/inactive') return Promise.resolve([agentDetail])
+      return Promise.resolve({})
+    })
+    vi.mocked(api.post).mockResolvedValue({ agent: agentDetail })
+    renderMembers()
+    const user = (await import('@testing-library/user-event')).default
+
+    await user.click(await screen.findByRole('button', { name: '创建或重新启用 Agent' }))
+    const button = await screen.findByRole('button', { name: '重新启用' })
+    await user.click(button)
+
+    expect(api.post).toHaveBeenCalledWith('/my-agent/inactive/a1/reactivate')
   })
 })
 

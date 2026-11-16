@@ -12,6 +12,7 @@ from ..db import get_db
 from ..models import User
 from ..schemas import AgentProfileUpdate, KeyIssue, MyAgentCreate
 from ..services import agents as agents_service
+from ..services.user_profiles import payload as profile_payload
 from .deps import current_user
 
 router = APIRouter(prefix="/api/my-agent", tags=["agents"])
@@ -54,6 +55,22 @@ def delete_my_agent(
 ) -> dict:
     agents_service.delete_agent(db, user)
     return {"ok": True}
+
+
+@router.get("/inactive")
+def list_inactive_agents(user: User = Depends(current_user), db: Session = Depends(get_db)) -> list[dict]:
+    return [
+        {**profile_payload(agent), "deactivated_at": agent.deleted_at.isoformat()}
+        for agent in agents_service.list_inactive_agents(db, user)
+    ]
+
+
+@router.post("/inactive/{agent_id}/reactivate")
+def reactivate_agent(
+    agent_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)
+) -> dict:
+    agent = agents_service.reactivate_agent(db, user, agent_id)
+    return {"agent": agents_service.agent_detail(db, agent)}
 
 
 @router.post("/keys", status_code=201)

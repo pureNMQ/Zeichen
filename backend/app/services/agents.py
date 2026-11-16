@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from ..errors import conflict, invalid_request, not_found, permission_denied
 from ..models import ApiKey, User
 from ..security import generate_api_token, token_digest
+from .permissions import get_workspace_member
 from .user_profiles import payload as profile_payload
 
 
@@ -52,9 +53,18 @@ def is_owner_of(db: Session, owner_id: uuid.UUID, agent_id: uuid.UUID) -> bool:
     )
 
 
-def create_agent(db: Session, owner: User, username: str) -> User:
+def _lock_owner(db: Session, owner: User) -> None:
     if owner.is_agent:
-        raise permission_denied("附属 Agent 不能再创建 Agent")
+        raise permission_denied("仅人类成员可管理附属 Agent")
+    active_owner = db.scalar(
+        select(User.id).where(User.id == owner.id, User.deleted_at.is_(None)).with_for_update()
+    )
+    if active_owner is None or get_workspace_member(db, owner.id) is None:
+        raise permission_denied("当前账号不是有效的工作区成员")
+
+
+def create_agent(db: Session, owner: User, username: str) -> User:
+    _lock_owner(db, owner)
     if get_owned_agent(db, owner.id) is not None:
         raise conflict("已创建附属 Agent")
     username = username.strip()
@@ -88,17 +98,44 @@ def create_agent(db: Session, owner: User, username: str) -> User:
 
 
 def delete_agent(db: Session, owner: User) -> None:
-    """主人自助删除:软删 Agent 并同事务吊销全部 key(历史署名保留)。
-
-    用户名仍被软删行占用,重建须换用户名(create_agent 的 409 文案已区分)。
-    """
+    """停用附属 Agent 并在同一事务中吊销全部 key。"""
+    _lock_owner(db, owner)
     agent = require_owned_agent(db, owner.id)
     now = datetime.now(timezone.utc)
     agent.deleted_at = now
-    db.query(ApiKey).filter(
-        ApiKey.user_id == agent.id, ApiKey.revoked_at.is_(None)
-    ).update({ApiKey.revoked_at: now})
+    _revoke_agent_keys(db, agent.id, now)
     db.commit()
+
+
+def _revoke_agent_keys(db: Session, agent_id: uuid.UUID, now: datetime) -> int:
+    return db.query(ApiKey).filter(
+        ApiKey.user_id == agent_id, ApiKey.revoked_at.is_(None)
+    ).update({ApiKey.revoked_at: now})
+
+
+def list_inactive_agents(db: Session, owner: User) -> list[User]:
+    return list(db.scalars(
+        select(User)
+        .where(User.owner_id == owner.id, User.is_agent.is_(True), User.deleted_at.is_not(None))
+        .order_by(User.deleted_at.desc(), User.id)
+    ))
+
+
+def reactivate_agent(db: Session, owner: User, agent_id: uuid.UUID) -> User:
+    _lock_owner(db, owner)
+    agent = db.scalar(
+        select(User).where(User.id == agent_id, User.is_agent.is_(True), User.owner_id == owner.id)
+    )
+    if agent is None:
+        raise not_found("附属 Agent 不存在")
+    if agent.deleted_at is None:
+        return agent
+    if get_owned_agent(db, owner.id) is not None:
+        raise conflict("已有启用的附属 Agent，请先停用它")
+    _revoke_agent_keys(db, agent.id, datetime.now(timezone.utc))
+    agent.deleted_at = None
+    db.commit()
+    return agent
 
 
 def require_owned_agent(db: Session, owner_id: uuid.UUID) -> User:
@@ -134,6 +171,7 @@ def agent_detail(db: Session, agent: User) -> dict:
 
 
 def issue_key(db: Session, owner: User, note: str | None) -> tuple[ApiKey, str]:
+    _lock_owner(db, owner)
     agent = require_owned_agent(db, owner.id)
     token = generate_api_token()
     key = ApiKey(
@@ -162,10 +200,6 @@ def admin_revoke_keys(db: Session, agent_id: uuid.UUID) -> int:
     if agent is None or not agent.is_agent:
         raise not_found("Agent 不存在")
     now = datetime.now(timezone.utc)
-    revoked = (
-        db.query(ApiKey)
-        .filter(ApiKey.user_id == agent.id, ApiKey.revoked_at.is_(None))
-        .update({ApiKey.revoked_at: now})
-    )
+    revoked = _revoke_agent_keys(db, agent.id, now)
     db.commit()
     return revoked
