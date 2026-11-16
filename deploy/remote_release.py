@@ -230,6 +230,10 @@ class Release:
             run(["docker", "run", "--rm", "--network", name, "--memory", "1024m", "--cpus", "1",
                  "-e", f"ZEICHEN_TEST_POSTGRES_URL=postgresql+psycopg://postgres:release-test-only@{name}/zeichen",
                  image, "python", "-m", "pytest", "app/tests/test_wiki_merge_migration.py"])
+            run(["docker", "exec", name, "createdb", "-U", "postgres", "zeichen_v2_candidate"])
+            run(["docker", "run", "--rm", "--network", name, "--memory", "1024m", "--cpus", "1",
+                 "-e", f"ZEICHEN_TEST_V2_POSTGRES_URL=postgresql+psycopg://postgres:release-test-only@{name}/zeichen_v2_candidate",
+                 image, "python", "-m", "pytest", "app/tests/test_v2_postgres_rehearsal.py"])
         finally:
             subprocess.run(["docker", "rm", "-f", name], stdout=subprocess.DEVNULL)
             subprocess.run(["docker", "network", "rm", name], stdout=subprocess.DEVNULL)
