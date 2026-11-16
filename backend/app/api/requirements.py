@@ -15,7 +15,6 @@ from ..schemas import (
 )
 from ..services import requirements as service
 from ..services.pagination import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
-from ..services.permissions import require_project_role
 from .deps import current_user
 
 router = APIRouter(prefix="/api", tags=["requirements"])
@@ -71,27 +70,7 @@ def set_status_in_project(
     db: Session = Depends(get_db),
 ) -> dict:
     """项目内改状态(ADR 0002):跨项目同码时优先使用,避免消歧歧义。"""
-    requirement = service.get_requirement_in_project(db, project_id, requirement_id)
-    require_project_role(db, user.id, project_id, min_level="editor")
-    from ..services.workflow import assert_status_valid
-
-    assert_status_valid(requirement.status, body.status, "需求")
-    from ..services.labels import STATUS_CN
-
-    old = requirement.status
-    requirement.status = body.status
-    from ..services.polymorphic import record_activity
-
-    record_activity(
-        db,
-        project_id,
-        user.id,
-        "requirement",
-        requirement.code,
-        "status",
-        f"{STATUS_CN[old]} → {STATUS_CN[body.status]}",
-    )
-    db.commit()
+    requirement = service.set_requirement_status(db, user, requirement_id, body.status, project_id=project_id)
     return service._requirement_dict(db, requirement)
 
 

@@ -17,6 +17,8 @@ from sqlalchemy.orm import Session
 
 from ..errors import conflict, invalid_request, not_found, permission_denied
 from ..models import Requirement, Task, User
+from ..v2.resource_refs import ResourceKind, ResourceRef
+from ..v2.timeline import record_system_event
 from . import task_blockers
 from .labels import STATUS_CN
 from .pagination import page_result
@@ -253,6 +255,14 @@ def set_task_status(
 ) -> Task:
     """通用改状态:任意目标态自由流转,无任何前置校验;已指派任务走所有权守卫。"""
     task = _get_editable(db, actor, task_id, project_id)
+    task = db.scalar(
+        select(Task)
+        .where(Task.project_id == task.project_id, Task.code == task.code, Task.deleted_at.is_(None))
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if task is None:
+        raise not_found("任务不存在")
     _require_owner(db, actor, task)
     assert_status_valid(task.status, target, "任务")
     old = task.status
@@ -265,6 +275,11 @@ def set_task_status(
         task.code,
         "status",
         f"{STATUS_CN[old]} → {STATUS_CN[target]}",
+    )
+    record_system_event(
+        db, actor.id, ResourceRef(task.project_id, ResourceKind.REQUIREMENT, task.requirement_id),
+        event_type="task.status_changed", event_data={"before": old, "after": target},
+        source_task=task.code,
     )
     db.commit()
     return task
@@ -297,23 +312,31 @@ def claim_task(
     if task.status in TERMINAL:
         raise conflict("任务已结束,无法认领")
     try:
-        result = db.execute(
+        requirement_code = db.execute(
             update(Task)
             .where(
                 Task.project_id == task.project_id,
                 Task.code == task.code,
                 Task.assignee_id.is_(None),
+                Task.deleted_at.is_(None),
+                Task.status.not_in(TERMINAL),
             )
             .values(assignee_id=actor.id)
-        )
+            .returning(Task.requirement_id)
+        ).scalar_one_or_none()
     except OperationalError:
         db.rollback()
         raise conflict("并发认领冲突,请重试")
-    if result.rowcount != 1:
+    if requirement_code is None:
         db.rollback()
         raise conflict("任务已被认领")
     db.flush()
     record_activity(db, task.project_id, actor.id, "task", task.code, "claim", "认领任务")
+    record_system_event(
+        db, actor.id, ResourceRef(task.project_id, ResourceKind.REQUIREMENT, requirement_code),
+        event_type="task.claimed", event_data={"before": None, "after": str(actor.id)},
+        source_task=task.code,
+    )
     db.commit()
     return task
 

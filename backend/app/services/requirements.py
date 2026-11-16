@@ -14,6 +14,8 @@ from sqlalchemy.orm import Session
 
 from ..errors import conflict, invalid_request, not_found
 from ..models import Requirement, Task, User
+from ..v2.resource_refs import ResourceKind, ResourceRef
+from ..v2.timeline import record_system_event
 from .labels import STATUS_CN
 from .pagination import page_result
 from .permissions import get_accessible_project, require_project_role
@@ -175,6 +177,15 @@ def set_requirement_status(
     """通用改状态:任意目标态自由流转,无任何前置校验(同态 conflict)。"""
     requirement = get_requirement(db, actor, requirement_id, project_id)
     require_project_role(db, actor.id, requirement.project_id, min_level="editor")
+    requirement = db.scalar(
+        select(Requirement)
+        .where(Requirement.project_id == requirement.project_id, Requirement.code == requirement.code,
+               Requirement.deleted_at.is_(None))
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if requirement is None:
+        raise not_found("需求不存在")
     assert_status_valid(requirement.status, target, "需求")
     old = requirement.status
     requirement.status = target
@@ -186,6 +197,10 @@ def set_requirement_status(
         requirement.code,
         "status",
         f"{STATUS_CN[old]} → {STATUS_CN[target]}",
+    )
+    record_system_event(
+        db, actor.id, ResourceRef(requirement.project_id, ResourceKind.REQUIREMENT, requirement.code),
+        event_type="requirement.status_changed", event_data={"before": old, "after": target},
     )
     db.commit()
     return requirement
