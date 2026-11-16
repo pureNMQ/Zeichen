@@ -213,14 +213,15 @@ class Release:
     def test_migration(self, image):
         # Disposable Postgres on a separate INTERNAL network. No production
         # credentials, volumes or networks are passed to either test container.
-        name = "zeichen-verify-" + self.directory.name.lower()
+        name = "zeichen-verify-" + digest(self.directory.name.encode())[:24]
         run(["docker", "network", "create", "--internal", name])
         try:
             run(["docker", "run", "-d", "--name", name, "--network", name,
                  "--memory", "256m", "--tmpfs", "/var/lib/postgresql/data",
                  "-e", "POSTGRES_PASSWORD=release-test-only", "-e", "POSTGRES_DB=zeichen", "postgres:16-alpine"])
             for attempt in range(30):
-                ready = subprocess.run(["docker", "exec", name, "pg_isready", "-U", "postgres", "-d", "zeichen"],
+                ready = subprocess.run(["docker", "exec", name, "pg_isready", "-h", "127.0.0.1",
+                                        "-U", "postgres", "-d", "zeichen"],
                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 if ready.returncode == 0:
                     break

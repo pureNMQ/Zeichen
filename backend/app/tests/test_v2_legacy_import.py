@@ -1,11 +1,39 @@
+from hashlib import sha256
+
 from sqlalchemy import func, select
 
-from app.models import Activity, Comment, Document, DocumentVersion, Requirement, Task
+from app.models import Activity, Attachment, Comment, Document, DocumentVersion, Requirement, Task
 from app.tests.conftest import login
 from app.v2.import_legacy_timeline import import_timeline
 from app.v2.import_legacy_wiki import import_wiki
+from app.v2 import import_legacy_files
+from app.v2.file_models import FileAssociation, ProjectFile
 from app.v2.timeline_models import TimelineEntry, TimelineRevision
 from app.v2.wiki_models import Wiki, WikiReference, WikiVersion
+
+
+def test_legacy_files_keep_bytes_original_uuid_and_independent_usage(tmp_path, db, world, monkeypatch):
+    pid = world["project"].id
+    payload = b"%PDF-1.7\nsynthetic fixture"
+    attachment = Attachment(project_id=pid, target_type="requirement", target_id="REQ-1",
+                            file_name="manual.pdf", size=len(payload), storage_path="unreliable-old-path")
+    db.add(attachment)
+    db.commit()
+    legacy = tmp_path / "legacy"
+    source = legacy / str(pid) / f"{attachment.id}.bin"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(payload)
+    target = tmp_path / "v2" / str(pid) / f"{attachment.id}.bin"
+    monkeypatch.setattr(import_legacy_files, "file_path", lambda project, ident: target)
+    counts, exceptions = import_legacy_files.import_files(db, legacy)
+    assert counts == {"files_imported": 1, "associations_imported": 1}
+    assert not exceptions
+    row = db.get(ProjectFile, (pid, attachment.id))
+    assert row.sha256 == sha256(payload).hexdigest()
+    assert row.media_type == "application/pdf"
+    assert db.get(FileAssociation, (pid, attachment.id, "requirements", "REQ-1")) is not None
+    assert source.read_bytes() == target.read_bytes() == payload
+    assert import_legacy_files.import_files(db, legacy)[0] == {"already_imported": 1}
 
 
 def test_import_history_preserves_source_and_does_not_guess_reparented_task(db, world):
