@@ -17,7 +17,7 @@ from ..models import ApiKey, Project, User
 from ..services.pagination import MAX_PAGE_SIZE, decode_cursor, encode_cursor
 from ..services.permissions import get_accessible_project
 from .commands import execute_once
-from .file_models import FileGrant, ProjectFile
+from .file_models import FileGrant, FileUploadGrant, ProjectFile
 from .file_storage import StagedFile, file_path, supports_preview
 from .resource_refs import ResourceKind, ResourceRef
 
@@ -32,6 +32,27 @@ class FileState(StrEnum):
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _transfer_url(project_id: UUID, item_id: UUID, token: str) -> str:
+    base = get_settings().web_base_url.rstrip("/")
+    origin = urlsplit(base)
+    local = origin.hostname in {"localhost", "127.0.0.1", "::1"}
+    if not origin.hostname or origin.username is not None or origin.path or origin.query or origin.fragment or not (
+        origin.scheme == "https" or (local and origin.scheme == "http")
+    ):
+        raise conflict("文件授权需要配置 HTTPS 公网地址")
+    return f"{base}{TRANSFER_PATH}/{project_id}/{item_id}?grant={token}"
+
+
+def _digest(token: str) -> str:
+    if not _GRANT_TOKEN.fullmatch(token):
+        raise not_found("文件授权不存在或已失效")
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _expires_at() -> datetime:
+    return _now() + timedelta(seconds=get_settings().file_library_grant_ttl_seconds)
 
 
 def require_file_access(db: Session, actor_id: UUID, project_id: UUID, *, edit: bool = False) -> User:
@@ -206,27 +227,19 @@ def issue_read_grant(
     if actor.is_agent and (api_key_id is None or not _active_key(db, actor_id, api_key_id)):
         raise not_found("文件不存在或不可用")
     row = _file(db, project_id, file_id, FileState.ACTIVE, lock=True)
-    base = get_settings().web_base_url.rstrip("/")
-    origin = urlsplit(base)
-    local = origin.hostname in {"localhost", "127.0.0.1", "::1"}
-    if not origin.hostname or origin.username is not None or origin.path or origin.query or origin.fragment or not (
-        origin.scheme == "https" or (local and origin.scheme == "http")
-    ):
-        raise conflict("文件授权需要配置 HTTPS 公网地址")
     token = secrets.token_urlsafe(32)
-    expires_at = _now() + timedelta(seconds=get_settings().file_library_grant_ttl_seconds)
-    db.add(FileGrant(digest=hashlib.sha256(token.encode()).hexdigest(), project_id=project_id,
+    access_url = _transfer_url(project_id, file_id, token)
+    expires_at = _expires_at()
+    db.add(FileGrant(digest=_digest(token), project_id=project_id,
                      file_id=file_id, actor_id=actor_id, api_key_id=api_key_id, expires_at=expires_at, inline=inline))
     db.flush()
-    return {**file_summary(row), "access_url": f"{base}{TRANSFER_PATH}/{project_id}/{file_id}?grant={token}",
+    return {**file_summary(row), "access_url": access_url,
             "expires_at": expires_at.isoformat()}
 
 
 def redeem_read_grant(db: Session, project_id: UUID, file_id: UUID, token: str) -> tuple[ProjectFile, bool]:
-    if not _GRANT_TOKEN.fullmatch(token):
-        raise not_found("文件授权不存在或已失效")
     grant = db.scalar(select(FileGrant).where(
-        FileGrant.digest == hashlib.sha256(token.encode()).hexdigest(), FileGrant.project_id == project_id,
+        FileGrant.digest == _digest(token), FileGrant.project_id == project_id,
         FileGrant.file_id == file_id, FileGrant.expires_at > _now(),
     ))
     if grant is None:
@@ -235,3 +248,53 @@ def redeem_read_grant(db: Session, project_id: UUID, file_id: UUID, token: str) 
     if actor.is_agent and (grant.api_key_id is None or not _active_key(db, actor.id, grant.api_key_id)):
         raise not_found("文件授权不存在或已失效")
     return _file(db, project_id, file_id, FileState.ACTIVE), grant.inline
+
+
+def issue_upload_grant(
+    db: Session, actor_id: UUID, project_id: UUID, *, api_key_id: UUID, name: str, size: int,
+) -> dict:
+    actor = require_file_access(db, actor_id, project_id, edit=True)
+    if not actor.is_agent or not _active_key(db, actor_id, api_key_id):
+        raise not_found("文件授权不存在或已失效")
+    if size < 1:
+        raise invalid_request("上传字节数必须大于零")
+    maximum = get_settings().file_library_max_file_bytes
+    if size > maximum:
+        raise conflict(f"文件超过单文件上限 ({maximum} 字节)")
+    name = _file_name(name)
+    token = secrets.token_urlsafe(32)
+    upload_id = uuid4()
+    upload_url = _transfer_url(project_id, upload_id, token)
+    expires_at = _expires_at()
+    db.add(FileUploadGrant(id=upload_id, project_id=project_id, actor_id=actor_id,
+                           api_key_id=api_key_id, digest=_digest(token), name=name,
+                           expected_size=size, expires_at=expires_at))
+    db.flush()
+    return {"project_id": str(project_id), "upload_id": str(upload_id), "upload_url": upload_url,
+            "expires_at": expires_at.isoformat(), "method": "PUT", "content_length": size}
+
+
+def _upload_grant(db: Session, project_id: UUID, upload_id: UUID, token: str) -> FileUploadGrant:
+    grant = db.scalar(select(FileUploadGrant).where(
+        FileUploadGrant.id == upload_id, FileUploadGrant.project_id == project_id,
+        FileUploadGrant.digest == _digest(token), FileUploadGrant.expires_at > _now(),
+    ))
+    if grant is None:
+        raise not_found("文件授权不存在或已失效")
+    if not _active_key(db, grant.actor_id, grant.api_key_id):
+        raise not_found("文件授权不存在或已失效")
+    require_file_access(db, grant.actor_id, project_id, edit=True)
+    if grant.expected_size > get_settings().file_library_max_file_bytes:
+        raise conflict("授权期间单文件上传上限已调整，请重新申请")
+    return grant
+
+
+def upload_grant_size(db: Session, project_id: UUID, upload_id: UUID, token: str) -> int:
+    return _upload_grant(db, project_id, upload_id, token).expected_size
+
+
+def store_granted_upload(db: Session, project_id: UUID, upload_id: UUID, token: str, staged: StagedFile) -> dict:
+    grant = _upload_grant(db, project_id, upload_id, token)
+    if staged.size != grant.expected_size:
+        raise invalid_request("上传字节数与授权不一致")
+    return store_file(db, grant.actor_id, project_id, name=grant.name, request_id=grant.id, staged=staged)

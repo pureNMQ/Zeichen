@@ -107,13 +107,14 @@ class StagedFile:
 
 
 @contextmanager
-def stage_file() -> Iterator[StagedFile]:
+def stage_file(*, byte_limit: int | None = None) -> Iterator[StagedFile]:
     scratch = _root() / ".staging"
     scratch.mkdir(exist_ok=True, parents=True)
     stream = NamedTemporaryFile(dir=scratch, suffix=".part", delete=False)
     path = Path(stream.name)
     try:
-        yield StagedFile(stream, path, get_settings().file_library_max_file_bytes)
+        limit = get_settings().file_library_max_file_bytes if byte_limit is None else byte_limit
+        yield StagedFile(stream, path, limit)
     finally:
         stream.close()
         path.unlink(missing_ok=True)

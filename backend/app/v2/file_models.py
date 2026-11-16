@@ -61,3 +61,20 @@ class FileGrant(CreatedAtMixin, Base):
     api_key_id: Mapped[UUID | None] = mapped_column(ForeignKey("api_key.id", ondelete="CASCADE"))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     inline: Mapped[bool] = mapped_column(nullable=False)
+
+
+class FileUploadGrant(CreatedAtMixin, Base):
+    __tablename__ = "v2_file_upload_grant"
+    __table_args__ = (
+        CheckConstraint("expected_size > 0", name="ck_v2_file_upload_size_positive"),
+        Index("ix_v2_file_upload_grant_expiry", "expires_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True)
+    project_id: Mapped[UUID] = mapped_column(ForeignKey("project.id", ondelete="CASCADE"), nullable=False)
+    digest: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    actor_id: Mapped[UUID] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    api_key_id: Mapped[UUID] = mapped_column(ForeignKey("api_key.id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    expected_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

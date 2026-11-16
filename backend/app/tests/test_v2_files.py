@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.api.files_v2 import _TransferLogFilter
 from app.config import get_settings
+from app.db import get_db
 from app.main import app
 from app.models import ApiKey, ProjectMember
 from app.security import generate_api_token, token_digest
@@ -18,7 +19,7 @@ from app.tests.conftest import login
 from app.tests.test_mcp_e2e import RawMcpClient, mcp_server  # noqa: F401
 from app.v2 import files
 from app.v2.file_models import FileGrant
-from app.v2.file_storage import file_path, stage_file
+from app.v2.file_storage import file_path
 
 PNG = b"\x89PNG\r\n\x1a\nexample body"
 
@@ -158,19 +159,35 @@ def test_uvicorn_file_grant_access_log_excludes_query():
     assert "temporary" not in record.getMessage()
 
 
-def test_mcp_file_grant_returns_link_without_file_bytes(mcp_server, storage):
+def test_mcp_file_grants_transfer_bytes_outside_tool_arguments(mcp_server, storage, monkeypatch):
     client = RawMcpClient(mcp_server["url"], mcp_server["token"])
     client.initialize()
-    project_id, actor_id = UUID(mcp_server["project_id"]), UUID(mcp_server["agent_id"])
+    project_id = mcp_server["project_id"]
     db_path = mcp_server["log_file"].parent / "e2e.db"
-    engine = create_engine(f"sqlite:///{db_path.as_posix()}")
+    engine = create_engine(f"sqlite:///{db_path.as_posix()}", connect_args={"check_same_thread": False})
+
+    def transfer_db():
+        with Session(engine, expire_on_commit=False) as db:
+            yield db
+
+    monkeypatch.setitem(app.dependency_overrides, get_db, transfer_db)
     try:
-        with Session(engine) as db, db.begin(), stage_file() as staged:
-            staged.write(PNG)
-            row = files.store_file(db, actor_id, project_id, name="image.png", request_id=uuid4(), staged=staged)
-        grant = client.call("files.authorize_read", project_id=str(project_id), file_id=row["id"])
-        assert grant["id"] == row["id"]
-        assert "expires_at" in grant and "?grant=" in grant["access_url"]
-        assert "content" not in grant and mcp_server["token"] not in grant["access_url"]
+        upload = client.call("files.prepare_upload", project_id=project_id, name="image.png", size=len(PNG))
+        assert upload["method"] == "PUT" and upload["content_length"] == len(PNG)
+        assert mcp_server["token"] not in upload["upload_url"]
+        with TestClient(app) as no_cookie:
+            upload_url = _local_url(upload["upload_url"])
+            assert no_cookie.put(upload_url, content=PNG[:-1]).status_code == 400
+            assert no_cookie.put(upload_url, content=PNG + b"x").status_code == 409
+            uploaded = no_cookie.put(upload_url, content=iter((PNG[:8], PNG[8:])))
+            assert uploaded.status_code == 201, uploaded.text
+            row = uploaded.json()
+            assert no_cookie.put(upload_url, content=PNG).json() == row
+            assert no_cookie.put(upload_url, content=PNG[:-1] + b"x").status_code == 409
+            grant = client.call("files.authorize_read", project_id=project_id, file_id=row["id"])
+            assert grant["id"] == row["id"]
+            assert "expires_at" in grant and "?grant=" in grant["access_url"]
+            assert "content" not in grant and mcp_server["token"] not in grant["access_url"]
+            assert no_cookie.get(_local_url(grant["access_url"])).content == PNG
     finally:
         engine.dispose()

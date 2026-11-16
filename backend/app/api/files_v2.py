@@ -1,6 +1,8 @@
 """Cookie-authenticated library and short-lived no-cookie read transport."""
 
 import logging
+from collections.abc import Callable
+from functools import partial
 from typing import Annotated
 from uuid import UUID
 
@@ -65,9 +67,9 @@ def file_limits(project_id: UUID, actor: Annotated[User, Depends(current_user)],
             "project_quota_bytes": settings.file_library_project_quota_bytes}
 
 
-def _save_upload(db: Session, actor_id: UUID, project_id: UUID, name: str, request_id: UUID, staged: StagedFile) -> dict:
+def _save_upload(db: Session, save: Callable[[StagedFile], dict], staged: StagedFile) -> dict:
     try:
-        saved = files.store_file(db, actor_id, project_id, name=name, request_id=request_id, staged=staged)
+        saved = save(staged)
     except Exception:
         db.rollback()
         staged.discard_uncommitted_bytes()
@@ -78,6 +80,23 @@ def _save_upload(db: Session, actor_id: UUID, project_id: UUID, name: str, reque
     return saved
 
 
+async def _receive_upload(request: Request, db: Session, byte_limit: int, save: Callable[[StagedFile], dict]) -> dict:
+    length = request.headers.get("content-length")
+    if length is not None:
+        if not length.isascii() or not length.isdigit() or len(length) > 20:
+            raise invalid_request("Content-Length 无效")
+        if int(length) > byte_limit:
+            raise conflict("文件超过本次上传字节上限")
+    # Release the initial authorization transaction while receiving the body;
+    # the save command checks the current authorizer again before writing.
+    await run_in_threadpool(db.rollback)
+    with stage_file(byte_limit=byte_limit) as staged:
+        async for chunk in request.stream():
+            if chunk:
+                await run_in_threadpool(staged.write, chunk)
+        return await run_in_threadpool(_save_upload, db, save, staged)
+
+
 @router.post(_LIBRARY, status_code=201)
 async def upload_file(
     project_id: UUID, request: Request,
@@ -86,20 +105,10 @@ async def upload_file(
 ) -> dict:
     actor_id = actor.id
     await run_in_threadpool(files.require_file_access, db, actor_id, project_id, edit=True)
-    length = request.headers.get("content-length")
-    if length is not None:
-        if not length.isascii() or not length.isdigit() or len(length) > 20:
-            raise invalid_request("Content-Length 无效")
-        if int(length) > get_settings().file_library_max_file_bytes:
-            raise conflict("文件超过单文件上限")
-    # Release the initial authorization transaction while receiving the body;
-    # store_file rechecks the actor's access immediately before writing.
-    await run_in_threadpool(db.rollback)
-    with stage_file() as staged:
-        async for chunk in request.stream():
-            if chunk:
-                await run_in_threadpool(staged.write, chunk)
-        return await run_in_threadpool(_save_upload, db, actor_id, project_id, name, request_id, staged)
+    def save(staged: StagedFile) -> dict:
+        return files.store_file(db, actor_id, project_id, name=name, request_id=request_id, staged=staged)
+
+    return await _receive_upload(request, db, get_settings().file_library_max_file_bytes, save)
 
 
 @router.get(_LIBRARY + "/{file_id}")
@@ -159,3 +168,10 @@ def download_file(project_id: UUID, file_id: UUID, actor: Annotated[User, Depend
 def download_by_grant(project_id: UUID, file_id: UUID, grant: str, db: Annotated[Session, Depends(get_db)]) -> FileResponse:
     row, inline = files.redeem_read_grant(db, project_id, file_id, grant)
     return _send_file(row, inline=inline)
+
+
+@router.put("/file-transfers/{project_id}/{upload_id}", status_code=201)
+async def upload_by_grant(project_id: UUID, upload_id: UUID, grant: str, request: Request,
+                          db: Annotated[Session, Depends(get_db)]) -> dict:
+    size = await run_in_threadpool(files.upload_grant_size, db, project_id, upload_id, grant)
+    return await _receive_upload(request, db, size, partial(files.store_granted_upload, db, project_id, upload_id, grant))
