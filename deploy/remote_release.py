@@ -257,6 +257,7 @@ class Release:
         if (backup / "postgres.dump").stat().st_size == 0:
             raise RuntimeError("Database backup is empty")
         self.record["backup"] = str(backup)
+        self.record["rollback_services"] = self.previous_services
         self.save("backed_up")
 
     def reload_gateway(self, text):

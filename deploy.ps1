@@ -53,6 +53,6 @@ umask 077
 mkdir -p '$ServerRoot/.release/logs'
 python3 -u "`$staging/deploy/remote_release.py" --root '$ServerRoot' --commit '$revision'$flags 2>&1 | tee '$ServerRoot/.release/logs/'`$(date -u +%Y%m%dT%H%M%SZ)'-$revision.log'
 "@
-    $remoteScript.Replace("`r", '') | & ssh -o BatchMode=yes -o ClearAllForwardings=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=4 $SshHost 'bash -s'
+    $remoteScript.Replace("`r", '') | & ssh -o BatchMode=yes -o ClearAllForwardings=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=4 $SshHost 'tr -d ''\r'' | bash -s'
     if ($LASTEXITCODE -ne 0) { throw "Remote release failed ($LASTEXITCODE). See the remote release log; production is never updated after a failed check." }
 } finally { Pop-Location }
