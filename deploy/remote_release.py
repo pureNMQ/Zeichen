@@ -41,8 +41,10 @@ def worktree_changes(root):
 
 
 def write_json(path, value):
-    path.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n")
-    path.chmod(0o600)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n")
+    temporary.chmod(0o600)
+    temporary.replace(path)
 
 
 def digest(data):

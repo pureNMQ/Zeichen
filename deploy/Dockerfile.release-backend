@@ -3,13 +3,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 WORKDIR /srv/zeichen
 ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 COPY backend/pyproject.toml ./
+COPY backend/requirements.release.txt ./
 COPY backend/app ./app
 COPY backend/alembic ./alembic
 COPY backend/alembic.ini ./
-RUN pip install --index-url "${PIP_INDEX_URL}" .
+RUN pip install --index-url "${PIP_INDEX_URL}" -c requirements.release.txt .
 
 FROM base AS test
-RUN pip install --index-url "${PIP_INDEX_URL}" '.[dev]'
+RUN pip install --index-url "${PIP_INDEX_URL}" -c requirements.release.txt '.[dev]'
 COPY . /workspace
 ENV PYTHONPATH=/workspace/backend DATABASE_URL=sqlite:// SESSION_SECRET=test-session-secret-0123456789abcdef
 WORKDIR /workspace/backend

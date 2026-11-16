@@ -46,6 +46,23 @@ Zeichen(贼船)把软件开发的规格、需求、任务、词典与调研集�
 
 ## 快速开始
 
+### 本机开发、远端发布（现有线上实例）
+
+在 PowerShell 7 中提交 `develop` 上的修改，然后执行：
+
+```powershell
+.\deploy.ps1             # 推送 GitHub，经 SSH 远端测试、构建、备份并发布
+.\deploy.ps1 -CheckOnly  # 只验证和构建，不切换线上服务
+```
+
+本机只需 Git、SSH 和 PowerShell，不需运行 Docker、数据库或开发服务器。
+服务器按提交保存镜像，API/MCP 无源码挂载和热重载，Zeichen 前端为独立容器。
+共享 Nginx 与 PostgreSQL 不重建；MochiSite 配置与文件受到发布前检查保护。
+发布证据及备份保存在服务器 `/srv/zeichen/.release/`，其中包含私密配置，不可提交。
+新数据库迁移默认阻止发布；审阅迁移并确认影响后显式加 `-AllowMigration`。
+失败时仅在数据库版本未变化时自动恢复旧应用，不自动降级或还原数据库。
+详细运维说明及部署日志在 Zeichen 项目 Wiki 的 REQ-60 记录中。
+
 ### 方式一:Docker Compose 一键起(推荐)
 
 ```bash
