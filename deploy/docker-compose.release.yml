@@ -1,0 +1,30 @@
+# Applied LAST, with root + prod + server-specific overrides. Never start web
+# or postgres from the release command: the shared gateway and data stay put.
+services:
+  api:
+    image: ${ZEICHEN_BACKEND_IMAGE:?Release image required}
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    volumes: !override
+      - attachments:/srv/zeichen/storage/attachments
+  mcp:
+    image: ${ZEICHEN_BACKEND_IMAGE:?Release image required}
+    command: ["uvicorn", "app.mcp_server.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    volumes: !override
+      - attachments:/srv/zeichen/storage/attachments
+  worker:
+    image: ${ZEICHEN_BACKEND_IMAGE:?Release image required}
+    command: ["python", "-m", "app.workers.main"]
+    volumes: !override []
+  frontend:
+    image: ${ZEICHEN_FRONTEND_IMAGE:?Release image required}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M

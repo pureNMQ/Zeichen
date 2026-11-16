@@ -57,3 +57,6 @@ Thumbs.db
 certs/
 
 backups/
+
+# Private release state (resolved Compose contains secrets and database backups)
+/.release/

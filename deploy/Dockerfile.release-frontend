@@ -1,0 +1,16 @@
+FROM node:24-alpine AS test
+WORKDIR /workspace/frontend
+ARG NPM_REGISTRY=https://registry.npmjs.org
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --registry="${NPM_REGISTRY}"
+COPY frontend/ ./
+COPY backend/pyproject.toml /workspace/backend/pyproject.toml
+CMD ["sh", "-c", "npm test -- --maxWorkers=1 && npm run lint"]
+
+FROM test AS build
+RUN npm run build
+
+FROM nginx:1.27-alpine AS runtime
+COPY deploy/frontend-release.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /workspace/frontend/dist /usr/share/nginx/html
+EXPOSE 80
