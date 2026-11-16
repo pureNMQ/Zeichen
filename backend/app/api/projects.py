@@ -43,6 +43,35 @@ def create_project(
     )
     return {"id": str(project.id), "name": project.name, "my_role": "owner"}
 
+@router.get("/trash")
+def list_deleted_projects(
+    q: str = "", cursor: str | None = None, limit: int = 20,
+    user: User = Depends(current_user), db: Session = Depends(get_db),
+) -> dict:
+    return projects_service.list_deleted_projects(db, user, q=q, cursor=cursor, limit=limit)
+
+
+@router.get("/trash/{project_id}")
+def get_deleted_project(
+    project_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db),
+) -> dict:
+    return projects_service.project_delete_impact(db, user, project_id, deleted=True)
+
+
+@router.post("/trash/{project_id}/restore")
+def restore_project(
+    project_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db),
+) -> dict:
+    return projects_service.restore_project(db, user, project_id)
+
+
+@router.get("/{project_id}/delete-impact")
+def get_project_delete_impact(
+    project_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db),
+) -> dict:
+    return projects_service.project_delete_impact(db, user, project_id)
+
+
 @router.get("/{project_id}")
 def get_project(
     project_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)

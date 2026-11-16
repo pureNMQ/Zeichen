@@ -726,6 +726,27 @@ def _register_all(mcp) -> None:
         project, role = project_svc.get_project(db, actor, _parse_uuid(id, "id"))
         return {"id": str(project.id), "name": project.name, "my_role": role}
 
+    @mcp.tool(name="trash.projects_list")
+    @sessioned
+    def trash_projects_list(q: str = "", cursor: str | None = None, limit: int = 20) -> dict:
+        """列出当前管理员或项目负责人有权恢复的已删除项目。"""
+        db, actor = dbc()
+        return project_svc.list_deleted_projects(db, actor, q=q, cursor=cursor, limit=limit)
+
+    @mcp.tool(name="trash.projects_get")
+    @sessioned
+    def trash_projects_get(id: str) -> dict:
+        """查看已删除项目的删除信息和业务对象数量。"""
+        db, actor = dbc()
+        return project_svc.project_delete_impact(db, actor, _parse_uuid(id, "id"), deleted=True)
+
+    @mcp.tool(name="trash.projects_restore")
+    @sessioned
+    def trash_projects_restore(id: str) -> dict:
+        """恢复项目及随项目暂时隐藏的活动内容；独立删除项保持删除。"""
+        db, actor = dbc()
+        return project_svc.restore_project(db, actor, _parse_uuid(id, "id"))
+
     @mcp.tool(name="agent.whoami")
     @sessioned
     def agent_whoami() -> dict:

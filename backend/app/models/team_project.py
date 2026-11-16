@@ -48,6 +48,9 @@ class Project(IdMixin, TimestampMixin, SoftDeleteMixin, CreatedByMixin, Base):
         Uuid, ForeignKey("team.id", ondelete="CASCADE"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String(128), nullable=False)
+    deleted_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
 
     team: Mapped[Team] = relationship(back_populates="projects")
     members: Mapped[list["ProjectMember"]] = relationship(back_populates="project")

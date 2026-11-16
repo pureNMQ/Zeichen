@@ -3,11 +3,12 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from ..errors import conflict, invalid_request, not_found, permission_denied
-from ..models import Project, ProjectMember, User, WorkspaceMember
+from ..models import Attachment, Document, Project, ProjectMember, Repository, Requirement, Task, User, WorkspaceMember
+from .pagination import decode_cursor, encode_cursor
 from .permissions import effective_user_id, get_accessible_project, get_project_role, get_team, is_admin, require_workspace_admin
 from ..security import verify_password
 
@@ -216,4 +217,82 @@ def transfer_project_owner(
 def soft_delete_project(db: Session, actor: User, project_id: uuid.UUID) -> None:
     project = get_accessible_project(db, actor.id, project_id, min_level="owner")
     project.deleted_at = datetime.now(timezone.utc)
+    project.deleted_by = actor.id
     db.commit()
+
+
+def _owned_deleted_projects(db: Session, actor: User):
+    team = get_team(db)
+    stmt = select(Project).where(Project.team_id == team.id, Project.deleted_at.is_not(None))
+    principal_id = effective_user_id(db, actor.id)
+    if principal_id is None:
+        return stmt.where(False)
+    if is_admin(db, principal_id):
+        return stmt
+    return stmt.join(ProjectMember, ProjectMember.project_id == Project.id).where(
+        ProjectMember.user_id == principal_id, ProjectMember.role == "owner"
+    )
+
+
+def _trash_item(project: Project) -> dict:
+    return {
+        "id": str(project.id),
+        "name": project.name,
+        "deleted_at": project.deleted_at.isoformat(),
+        "deleted_by": str(project.deleted_by) if project.deleted_by else None,
+    }
+
+
+def list_deleted_projects(
+    db: Session, actor: User, *, q: str = "", cursor: str | None = None, limit: int = 20,
+) -> dict:
+    q = q.strip()
+    if not 1 <= limit <= 100 or len(q) > 128:
+        raise invalid_request("每页 1 到 100 项，名称筛选最多 128 字")
+    filters = {"actor": str(actor.id), "kind": "project_trash", "q": q}
+    offset = decode_cursor(filters, cursor)
+    stmt = _owned_deleted_projects(db, actor)
+    if q:
+        stmt = stmt.where(Project.name.icontains(q, autoescape=True))
+    projects = list(db.scalars(stmt.order_by(Project.deleted_at.desc(), Project.id).offset(offset).limit(limit + 1)))
+    return {
+        "items": [_trash_item(project) for project in projects[:limit]],
+        "next_cursor": encode_cursor(filters, offset + limit, limit) if len(projects) > limit else None,
+    }
+
+
+def project_delete_impact(db: Session, actor: User, project_id: uuid.UUID, *, deleted: bool = False) -> dict:
+    if deleted:
+        project = db.scalar(_owned_deleted_projects(db, actor).where(Project.id == project_id))
+        if project is None:
+            raise not_found("已删除项目不存在或无权限")
+    else:
+        project = get_accessible_project(db, actor.id, project_id, min_level="owner")
+    counts = {}
+    for name, model in (
+        ("requirements", Requirement), ("tasks", Task), ("wiki", Document),
+        ("attachments", Attachment), ("repositories", Repository),
+    ):
+        query = select(func.count()).select_from(model).where(
+            model.project_id == project_id, model.deleted_at.is_(None)
+        )
+        if model is Task:
+            query = query.join(Requirement, (Requirement.project_id == Task.project_id)
+                               & (Requirement.code == Task.requirement_id)).where(Requirement.deleted_at.is_(None))
+        counts[name] = db.scalar(query)
+    metadata = _trash_item(project) if deleted else {"id": str(project.id), "name": project.name}
+    return {**metadata, "affected": counts}
+
+
+def restore_project(db: Session, actor: User, project_id: uuid.UUID) -> dict:
+    project = db.scalar(_owned_deleted_projects(db, actor).where(Project.id == project_id))
+    if project is None:
+        raise not_found("已删除项目不存在或无权限")
+    recovered = db.execute(
+        update(Project).where(Project.id == project_id, Project.deleted_at.is_not(None))
+        .values(deleted_at=None, deleted_by=None)
+    ).rowcount
+    if recovered != 1:
+        raise conflict("项目删除状态已变化，请刷新")
+    db.commit()
+    return {"id": str(project_id), "restored": True}

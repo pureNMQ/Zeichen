@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus, FolderOpen } from 'lucide-react'
+import { Plus, FolderOpen, Trash2 } from 'lucide-react'
 import { api, ApiError, type ProjectRow } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
@@ -78,9 +78,150 @@ function CreateProjectDialog({ open, onOpenChange }: { open: boolean; onOpenChan
   )
 }
 
+type ProjectTrashRow = { id: string; name: string; deleted_at: string; deleted_by: string | null }
+type ProjectImpact = {
+  affected: Record<'requirements' | 'tasks' | 'wiki' | 'attachments' | 'repositories', number>
+}
+
+function ProjectImpactSummary({ impact }: { impact: ProjectImpact }) {
+  const { requirements, tasks, wiki, attachments, repositories } = impact.affected
+  return (
+    <p className="text-sm text-muted-foreground">
+      {requirements} 个需求、{tasks} 个任务、{wiki} 篇 Wiki、{attachments} 个附件、{repositories} 条仓库登记
+    </p>
+  )
+}
+
+function ProjectRemovalDialog({ project, onClose }: { project: ProjectRow; onClose: () => void }) {
+  const qc = useQueryClient()
+  const [error, setError] = useState<string | null>(null)
+  const [pending, setPending] = useState(false)
+  const impact = useQuery({
+    queryKey: ['project-delete-impact', project.id],
+    queryFn: () => api.get<ProjectImpact>(`/projects/${project.id}/delete-impact`),
+  })
+
+  async function remove() {
+    setPending(true)
+    setError(null)
+    try {
+      await api.delete(`/projects/${project.id}`)
+      await qc.invalidateQueries({ queryKey: ['projects'] })
+      await qc.invalidateQueries({ queryKey: ['project-trash'] })
+      onClose()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '删除失败，请重试')
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open && !pending) onClose() }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>删除项目「{project.name}」</DialogTitle>
+          <DialogDescription>项目和其中仍有效的内容将暂时隐藏，可从项目回收站恢复。</DialogDescription>
+        </DialogHeader>
+        {impact.isLoading && <p role="status">正在查询影响范围…</p>}
+        {impact.data && <ProjectImpactSummary impact={impact.data} />}
+        {impact.isError && <Button variant="outline" onClick={() => void impact.refetch()}>重新查询影响范围</Button>}
+        {error && <p className="text-sm text-destructive">{error}</p>}
+        <DialogFooter>
+          <Button variant="outline" disabled={pending} onClick={onClose}>取消</Button>
+          <Button variant="destructive" disabled={pending || !impact.data} onClick={() => void remove()}>移入回收站</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function ProjectTrash({ onClose }: { onClose: () => void }) {
+  const qc = useQueryClient()
+  const [query, setQuery] = useState('')
+  const [cursor, setCursor] = useState<string | null>(null)
+  const [selected, setSelected] = useState<ProjectTrashRow | null>(null)
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const page = useQuery({
+    queryKey: ['project-trash', query, cursor],
+    queryFn: () => {
+      const params = new URLSearchParams({ q: query })
+      if (cursor) params.set('cursor', cursor)
+      return api.get<{ items: ProjectTrashRow[]; next_cursor: string | null }>(`/projects/trash?${params}`)
+    },
+  })
+  const impact = useQuery({
+    queryKey: ['project-trash', 'detail', selected?.id],
+    queryFn: () => api.get<ProjectImpact>(`/projects/trash/${selected?.id}`),
+    enabled: !!selected,
+  })
+
+  async function restore(project: ProjectTrashRow) {
+    setPending(true)
+    setError(null)
+    try {
+      await api.post(`/projects/trash/${project.id}/restore`)
+      setSelected(null)
+      setCursor(null)
+      await qc.invalidateQueries({ queryKey: ['project-trash'] })
+      await qc.invalidateQueries({ queryKey: ['projects'] })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '恢复失败，请重试')
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open && !pending) onClose() }}>
+      <DialogContent className="max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>项目回收站</DialogTitle>
+          <DialogDescription>可查看并恢复你有权限管理的已删除项目。</DialogDescription>
+        </DialogHeader>
+        <Input aria-label="筛选项目名称" placeholder="按名称筛选" autoComplete="off" maxLength={128}
+          value={query} onChange={(event) => { setQuery(event.target.value); setCursor(null); setSelected(null) }} />
+        {page.isLoading && <p role="status">加载中…</p>}
+        {page.isError && <Button variant="outline" onClick={() => void page.refetch()}>重新加载回收站</Button>}
+        {page.data?.items.length === 0 && <p className="text-sm text-muted-foreground">没有匹配的已删除项目。</p>}
+        {page.data?.items.map((item) => (
+          <div key={item.id} className="rounded-md border p-3">
+            <div className="flex justify-between gap-2">
+              <div>
+                <p className="font-medium">{item.name}</p>
+                <p className="text-xs text-muted-foreground">删除于 {new Date(item.deleted_at).toLocaleString()}</p>
+              </div>
+              <Button variant="outline" size="sm" disabled={pending} onClick={() => { setSelected(item); setError(null) }}>
+                查看
+              </Button>
+            </div>
+            {selected?.id === item.id && (
+              <div className="mt-3 space-y-2">
+                {impact.isLoading && <p role="status">正在查询影响范围…</p>}
+                {impact.isError && <Button variant="outline" onClick={() => void impact.refetch()}>重新查询影响范围</Button>}
+                {impact.data && <ProjectImpactSummary impact={impact.data} />}
+                {error && <p className="text-sm text-destructive">{error}</p>}
+                <Button size="sm" disabled={pending || !impact.data} onClick={() => void restore(item)}>恢复项目</Button>
+              </div>
+            )}
+          </div>
+        ))}
+        <DialogFooter>
+          {cursor && <Button variant="outline" onClick={() => { setCursor(null); setSelected(null) }}>返回首页</Button>}
+          {page.data?.next_cursor && <Button variant="outline"
+            onClick={() => { setCursor(page.data.next_cursor); setSelected(null) }}>下一页</Button>}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 export function ProjectsPage() {
   const { user } = useAuth()
   const [createOpen, setCreateOpen] = useState(false)
+  const [trashOpen, setTrashOpen] = useState(false)
+  const [deleteProject, setDeleteProject] = useState<ProjectRow | null>(null)
   const {
     data: projects,
     isLoading,
@@ -101,12 +242,16 @@ export function ProjectsPage() {
               : '仅显示你已加入的项目'}
           </p>
         </div>
-        {user?.workspace_role === 'admin' && (
-          <Button onClick={() => setCreateOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            新建项目
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => setTrashOpen(true)}>
+            <Trash2 className="mr-2 h-4 w-4" />项目回收站
           </Button>
-        )}
+          {user?.workspace_role === 'admin' && (
+            <Button onClick={() => setCreateOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />新建项目
+            </Button>
+          )}
+        </div>
       </div>
 
       {isLoading && <p className="text-sm text-muted-foreground">加载中…</p>}
@@ -141,12 +286,16 @@ export function ProjectsPage() {
               >
                 基础信息 / 成员授权 →
               </Link>
+              {p.my_role === 'owner' && <Button variant="ghost" size="sm"
+                onClick={() => setDeleteProject(p)}>删除项目</Button>}
             </CardContent>
           </Card>
         ))}
       </div>
 
       <CreateProjectDialog open={createOpen} onOpenChange={setCreateOpen} />
+      {trashOpen && <ProjectTrash onClose={() => setTrashOpen(false)} />}
+      {deleteProject && <ProjectRemovalDialog project={deleteProject} onClose={() => setDeleteProject(null)} />}
     </div>
   )
 }
