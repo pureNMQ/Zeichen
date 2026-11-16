@@ -1,4 +1,4 @@
-# 贼船 Zeichen 后端容器(API / MCP / 记忆蒸馏 worker 共用镜像)
+# 贼船 Zeichen 后端容器(API / MCP / worker 共用镜像)
 # 构建上下文 = 仓库根;entrypoint 由 compose 按服务指定。
 FROM python:3.12-slim
 

@@ -35,6 +35,7 @@ export interface MemberRow extends UserIdentity {
   is_bootstrap: boolean
   is_self: boolean
   has_password: boolean
+  agent: MemberAgentSummary | null
 }
 
 export interface MemberCreateResponse extends MemberRow {
@@ -58,75 +59,39 @@ export interface ProjectMemberRow extends UserIdentity {
   is_current_user?: boolean
 }
 
-export interface ProjectGrant {
-  project_id: string
-  name: string
-  role: ProjectRole
-}
-
-export interface AgentRow extends UserIdentity {
+export interface MemberAgentSummary {
+  id: string
+  username: string
+  nickname: string | null
+  display_name: string
   created_at: string
-  grants: ProjectGrant[]
-  key_count: number
   active_keys: number
 }
 
-export interface AgentKey {
+export interface MyAgentKey {
   id: string
   note: string | null
   created_at: string
   revoked_at: string | null
 }
 
-export interface CogneeConfiguration {
-  llm_provider: string
-  llm_model: string
-  llm_endpoint: string | null
-  llm_api_key_configured: boolean
-  llm_api_key_display: string | null
-  llm_api_key_source: 'managed' | 'deployment' | 'unconfigured'
-  embedding_provider: string
-  embedding_model: string
-  embedding_dimensions: number | null
-  pending_restart: boolean
-  updated_at: string
-}
-
-export interface CogneeRestartJob {
-  id: string
-  status: 'queued' | 'running' | 'completed' | 'failed'
-  status_label?: string
-  error: string | null
+export interface MyAgentDetail extends UserIdentity {
   created_at: string
-  started_at: string | null
-  finished_at: string | null
-}
-
-export interface CogneeRuntimeStatus {
-  runtime: {
-    availability: 'reachable' | 'unreachable'
-    detail: string | null
-    checked_at: string
-  }
-  latest_restart: {
-    status: CogneeRestartJob['status']
-    status_label: string
-    error: string | null
-    requested_at: string
-    finished_at: string | null
-  } | null
+  active_keys: number
+  keys: MyAgentKey[]
 }
 
 export type WorkflowStatus = 'pending' | 'backlog' | 'in_progress' | 'verifying' | 'done' | 'cancelled'
-// 需求五态(含待确认,无验收中);任务保留原五态(无待确认)
-export type RequirementStatus = Exclude<WorkflowStatus, 'verifying'>
-export type TaskStatus = Exclude<WorkflowStatus, 'pending'>
+// 需求六态(含待确认/验收中,验收上移需求);任务四态(无待确认/验收中,ADR 0003)
+export type RequirementStatus = Exclude<WorkflowStatus, never>
+export type TaskStatus = Exclude<WorkflowStatus, 'pending' | 'verifying'>
 
-export const REQUIREMENT_STATUSES: RequirementStatus[] = ['pending', 'backlog', 'in_progress', 'done', 'cancelled']
-export const EXECUTION_REQUIREMENT_STATUSES: RequirementStatus[] = ['backlog', 'in_progress', 'done', 'cancelled']
-export const TASK_STATUSES: TaskStatus[] = ['backlog', 'in_progress', 'verifying', 'done', 'cancelled']
+export const REQUIREMENT_STATUSES: RequirementStatus[] = ['pending', 'backlog', 'in_progress', 'verifying', 'done', 'cancelled']
+export const EXECUTION_REQUIREMENT_STATUSES: RequirementStatus[] = ['backlog', 'in_progress', 'verifying', 'done', 'cancelled']
+export const TASK_STATUSES: TaskStatus[] = ['backlog', 'in_progress', 'done', 'cancelled']
 
 export interface RequirementRow {
+  /** 实体短码(ADR 0002):REQ-n */
   id: string
   title: string
   description: string | null
@@ -136,15 +101,24 @@ export interface RequirementRow {
   created_at: string
   updated_at: string
   task_count: number
+  done_task_count?: number
+}
+
+export interface TaskBlockerSummary {
+  id: string
+  title: string
+  status: TaskStatus
+  resolved: boolean
 }
 
 export interface TaskRow {
+  /** 实体短码(ADR 0002):TASK-n */
   id: string
   title: string
   description: string | null
   status: TaskStatus
   project_id: string
-  requirement_id: string | null
+  requirement_id: string | null // 必挂需求(ADR 0003);旧数据直查可为空,UI 仍容忍
   assignee_id: string | null
   assignee: string | null
   assignee_username?: string | null
@@ -152,6 +126,8 @@ export interface TaskRow {
   created_by: string | null
   created_at: string
   updated_at: string
+  blocked?: boolean
+  blocked_by?: TaskBlockerSummary[]
 }
 
 export interface CommentRow {
@@ -197,21 +173,29 @@ export interface Page<T> {
   next_cursor: string | null
 }
 
-export type DocumentType = 'wiki' | 'glossary'
+// 个人筛选视图(T3):仅类型,运行期擦除;运行时符号见页面/组件实现
+export type FilterViewMode = 'board' | 'list'
 
-export type CodeSymbolKind = 'class' | 'struct' | 'interface' | 'enum' | 'function' | 'constructor' | 'method' | 'field' | 'property' | 'constant'
+export interface FilterCriteria {
+  statuses?: string[]
+  updated_within_days?: number
+  keyword?: string
+  assignee_id?: string
+  view_mode?: FilterViewMode
+}
 
-export interface CodeLibrary {
+export interface FilterViewRow {
   id: string
   project_id: string
+  user_id: string
+  entity_type: 'requirement' | 'task'
   name: string
-  language: string
-  package: string
-  version: string | null
+  criteria: FilterCriteria
   created_at: string
   updated_at: string
-  deleted_at: string | null
 }
+
+export type DocumentType = 'wiki'
 
 export type RepositoryVcsType = 'git' | 'svn' | 'other'
 
@@ -230,54 +214,37 @@ export interface RepositoryRow {
   deleted_at: string | null
 }
 
-export interface CodeEnumMember {
-  position: number
-  name: string
-  assigned_value: string | null
-  summary: string | null
+// REQ-59:溯源标识(人名或 agent 名+其主人,ADR 0004)
+export interface AuthorIdentity {
+  id: string
+  username: string
+  nickname: string | null
+  is_agent: boolean
+  owner: { id: string; username: string; nickname: string | null } | null
 }
 
-export interface CodeSymbol {
-  id: string
-  library_id: string
-  owner_symbol_id: string | null
-  kind: CodeSymbolKind
-  name: string
-  qualified_name: string
-  namespace: string | null
-  summary: string
-  remarks?: string
-  accessibility: 'public' | 'protected' | 'internal' | 'private'
-  source_declaration: string | null
-  since_version: string | null
-  deprecated: boolean
-  definition: Record<string, unknown> & { members?: CodeEnumMember[] }
-  members?: Array<{
-    id: string
-    kind: CodeSymbolKind
-    name: string
-    qualified_name: string
-    summary: string
-    signature: string
-    deprecated: boolean
-  }>
-  signature: string
-  revision: number
-  created_at: string
-  updated_at: string
-  deleted_at: string | null
+// REQ-59:[[双链]]聚合(outgoing 含断链;incoming=谁链我)
+export interface WikiLinkOutgoing {
+  raw_text: string
+  display: string | null
+  section: string | null
+  to_code: string | null
+  to_title: string | null
+  broken: boolean
 }
 
-export interface CodeTreeNode {
-  node_kind: 'library' | 'namespace' | 'member_group' | 'symbol'
-  id: string
-  title: string
-  language?: string
-  package?: string
-  symbol_kind?: CodeSymbolKind
-  summary?: string
-  signature?: string
-  children: CodeTreeNode[]
+export interface WikiLinkIncoming {
+  from_code: string
+  from_title: string
+  raw_text: string
+  display: string | null
+  section: string | null
+}
+
+export interface WikiLinks {
+  outgoing: WikiLinkOutgoing[]
+  incoming: WikiLinkIncoming[]
+  broken_count: number
 }
 
 export interface DocumentRow {
@@ -289,31 +256,45 @@ export interface DocumentRow {
   metadata: Record<string, unknown>
   project_id: string
   created_by: string | null
+  author: AuthorIdentity | null
   created_at: string
   updated_at: string
   deleted_at: string | null
   parent_id: string | null
-  directory_id: string | null
   has_children: boolean
-  reference_warning?: { count: number; items: ReferenceRow[] }
+  links?: WikiLinks
+  reference_warning?: { count: number; items: { raw_text: string; reason: string; display: string | null }[] }
 }
 
-export interface DocumentDirectoryRow {
+export type DocumentNode = DocumentRow
+
+// REQ-59:INDEX 投影行(与检索结果同构)
+export interface WikiIndexRow {
   id: string
-  node_kind: 'directory'
-  name: string
   title: string
-  module_type: Exclude<DocumentType, 'wiki'>
-  project_id: string
-  parent_id: string | null
-  created_by: string | null
-  created_at: string
+  doc_kind: string | null
+  summary: string
+  missing_summary: boolean
   updated_at: string
-  deleted_at: string | null
-  has_children: boolean
+  author: AuthorIdentity | null
 }
 
-export type DocumentNode = DocumentRow | DocumentDirectoryRow
+export interface WikiIndexSection {
+  kind: string | null
+  label: string
+  items: WikiIndexRow[]
+}
+
+export interface WikiIndex {
+  project_id: string
+  total: number
+  sections: WikiIndexSection[]
+  lint: {
+    missing_kind: { id: string; title: string }[]
+    missing_summary: { id: string; title: string }[]
+    broken_links: { from: string; from_title: string | null; raw_text: string }[]
+  }
+}
 
 export interface DocumentVersionRow {
   id: string
@@ -322,62 +303,8 @@ export interface DocumentVersionRow {
   content: string
   metadata: DocumentRow['metadata']
   created_by: string | null
+  author: AuthorIdentity | null
   created_at: string
-}
-
-export interface MemoryItem {
-  id: string
-  data?: string
-  content?: string
-  text?: string
-  created_at?: string
-  updated_at?: string
-  external_metadata?: {
-    source_id?: string
-    source_name?: string
-    source_kind?: string
-    entity_type?: string
-    entity_id?: string
-  }
-}
-
-export interface MemorySession {
-  id?: string
-  session_id?: string
-  business_session_id?: string
-  source_id?: string
-  source_name?: string
-  source_kind?: string
-  effective_status?: string
-  status?: string
-  last_activity_at?: string
-  started_at?: string
-  preview?: string
-}
-
-export interface MemorySessionDetail {
-  session_id: string
-  business_session_id: string
-  source_name?: string
-  status?: string
-  qas: Array<{ time?: string; question?: string; answer?: string }>
-  traces: Array<Record<string, unknown>>
-}
-
-export type MemoryImproveJobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'upstream_busy' | 'timed_out' | 'unknown'
-
-export interface MemoryImproveJob {
-  id: string
-  project_id: string
-  agent_id: string
-  session_id: string
-  status: MemoryImproveJobStatus
-  result?: Record<string, unknown> | unknown[] | null
-  error?: string | null
-  created_at: string
-  started_at?: string | null
-  heartbeat_at?: string | null
-  finished_at?: string | null
 }
 
 export const STATUS_LABEL: Record<WorkflowStatus, string> = {
@@ -400,7 +327,7 @@ export interface NotificationRow {
   created_at: string
 }
 
-export type SearchDomain = 'requirement' | 'task' | 'document' | 'code_symbol' | 'memory'
+export type SearchDomain = 'requirement' | 'task' | 'document'
 
 export interface SearchItem {
   domain: SearchDomain
@@ -412,6 +339,9 @@ export interface SearchItem {
   status?: string
   doc_type?: string
   kind?: string
+  /** REQ-59:文档域命中片段(首个命中词上下文);其余域无此字段 */
+  snippet?: string | null
+  doc_kind?: string | null
 }
 
 export interface AttachmentRow {
@@ -423,6 +353,14 @@ export interface AttachmentRow {
   created_by: string | null
   created_at: string
   deleted_at: string | null
+}
+
+// 短码跨项目消歧(REQ-55):全局短码端点附带当前项目,后端在指定项目内解析。
+// 显式 projectId 优先(实体行自带 project_id,最精确);否则回退当前项目(localStorage)。
+export function withProject(path: string, projectId?: string | null): string {
+  const pid = projectId ?? localStorage.getItem('zeichen.currentProjectId')
+  if (!pid) return path
+  return `${path}${path.includes('?') ? '&' : '?'}project_id=${encodeURIComponent(pid)}`
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {

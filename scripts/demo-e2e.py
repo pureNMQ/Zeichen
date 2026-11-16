@@ -4,7 +4,7 @@
     python scripts/demo-e2e.py [base_url]
 
 覆盖:人类 Web 登录 → 建项目 → 建需求 → agent 经 MCP 认领任务 → 完成任务 →
-需求验收 → 记忆写入与 recall 演示。脚本幂等:已初始化的工作区直接登录。
+需求验收。脚本幂等:已初始化的工作区直接登录。
 
 退出码:0 = 全链路演示成功;1 = 任一步失败(打印失败点)。
 """
@@ -209,35 +209,13 @@ def main() -> None:
         fail(f"需求验收失败: {done}")
     ok("需求 → done(验收完成)")
 
-    step("记忆写入与 recall 演示(经 API,含 cognee 全链路)")
-    try:
-        remembered = s.call(
-            "POST", f"/projects/{pid}/memory/remember",
-            json={"session_id": "demo-session", "content": "演示项目的登录方案已评审通过,统一走账号密码会话。"},
-        )
-        data_id = remembered["result"].get("data_id") or remembered.get("data_id")
-        ok(f"记忆写入 {data_id or '(已入队)'}")
-        recall = s.call("POST", f"/projects/{pid}/memory/recall", json={"query": "登录方案"})["result"]
-        if isinstance(recall, list):
-            answers = recall
-        else:
-            answers = recall.get("answers") or recall.get("items") or []
-        if answers:
-            first = answers[0]
-            text = str(first.get("answer") or first.get("text") or first)[:80] if isinstance(first, dict) else str(first)[:80]
-            ok(f"recall 命中 {len(answers)} 条: {text}")
-        else:
-            ok("recall 返回(命中 0 条,记忆尚未蒸馏属正常;improve 蒸馏后可达)")
-    except Exception as exc:  # noqa: BLE001 - 演示脚本对记忆链路宽松降级
-        ok(f"记忆链路跳过(不阻塞演示): {exc}")
-
     step("清理:软删演示实体")
     try:
         s.call("POST", f"/requirements/{rid}/delete", json={"confirm_task_count": 1})
     except RuntimeError as exc:
         if "conflict" not in str(exc):
             raise
-    s.call("DELETE", f"/projects/{pid}", json={"confirm_memory_cleanup": True})
+    s.call("DELETE", f"/projects/{pid}")
     ok("需求与项目已软删")
 
     print("\n" + "=" * 56)

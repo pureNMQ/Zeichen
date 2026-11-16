@@ -16,7 +16,7 @@ depends_on = None
 
 
 def _target_values(include_repository: bool) -> str:
-    values = ["requirement", "task", "document", "code_symbol"]
+    values = ["requirement", "task", "document"]
     if include_repository:
         values.append("repository")
     values.extend(["project", "user"])

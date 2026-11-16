@@ -135,8 +135,8 @@ if (-not (Test-DockerReady)) {
     Wait-ForDocker
 }
 
-Write-Host 'Starting PostgreSQL and Cognee...'
-$composeExitCode = Invoke-NativeCommand 'docker' 'compose' 'up' '-d' 'postgres' 'cognee'
+Write-Host 'Starting PostgreSQL...'
+$composeExitCode = Invoke-NativeCommand 'docker' 'compose' 'up' '-d' 'postgres'
 if ($composeExitCode -ne 0) {
     throw "Could not start the Docker Compose services (exit $composeExitCode)."
 }
@@ -163,13 +163,6 @@ finally {
 
 Start-ServiceProcess -Name 'api' -Port $ApiPort -Executable $python -Arguments @('-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', "$ApiPort") -WorkingDirectory $backendRoot
 Start-ServiceProcess -Name 'mcp' -Port $McpPort -Executable $python -Arguments @('-m', 'uvicorn', 'app.mcp_server.main:app', '--host', '127.0.0.1', '--port', "$McpPort") -WorkingDirectory $backendRoot
-# Cognee improve can exceed an MCP request timeout. Keep it in a durable worker
-# process; the MCP tool only submits/polls jobs.
-Start-ServiceProcess -Name 'memory-improve-worker' -Port 0 -Executable $python -Arguments @('-m', 'app.workers.memory_improve') -WorkingDirectory $backendRoot
-Start-ServiceProcess -Name 'cognee-restart-worker' -Port 0 -Executable $python -Arguments @('-m', 'app.workers.cognee_restart') -WorkingDirectory $backendRoot
-if (-not (Test-WorkerProcess -Module 'app.workers.cognee_restart')) {
-    throw 'Cognee restart worker did not remain running. Check .scratch\cognee-restart-worker.stderr.log.'
-}
 Start-ServiceProcess -Name 'frontend' -Port $FrontendPort -Executable 'npm.cmd' -Arguments @('run', 'dev', '--', '--host', '127.0.0.1', '--port', "$FrontendPort") -WorkingDirectory $frontendRoot
 
 Write-Host ''

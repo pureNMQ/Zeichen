@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..errors import conflict, invalid_request, not_found, permission_denied
-from ..models import PasswordSetupToken, ProjectMember, User, WorkspaceMember
+from ..models import ApiKey, PasswordSetupToken, ProjectMember, User, WorkspaceMember
 from ..security import generate_password_setup_token, token_digest
 from .permissions import get_team
 
@@ -129,4 +129,14 @@ def remove_member(db: Session, actor: User, user_id: uuid.UUID) -> None:
     db.query(ProjectMember).filter(ProjectMember.user_id == user_id).delete()
     db.query(PasswordSetupToken).filter(PasswordSetupToken.user_id == user_id).delete()
     user.deleted_at = datetime.now(timezone.utc)
+    # ADR 0004:主人被移除时,其附属 Agent 随之停用并吊销全部 key(同事务)
+    now = user.deleted_at
+    owned_agents = db.scalars(
+        select(User).where(User.owner_id == user_id, User.deleted_at.is_(None))
+    ).all()
+    for agent in owned_agents:
+        agent.deleted_at = now
+        db.query(ApiKey).filter(ApiKey.user_id == agent.id, ApiKey.revoked_at.is_(None)).update(
+            {ApiKey.revoked_at: now}
+        )
     db.commit()

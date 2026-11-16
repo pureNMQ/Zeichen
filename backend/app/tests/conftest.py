@@ -77,24 +77,31 @@ def make_user(
 
 @pytest.fixture()
 def world(db: Session) -> dict:
-    """已引导的工作区:admin 有密码,member/agent 无密码,project 已建。"""
+    """已引导的工作区:admin 有密码,member/agent 无密码,project 已建。
+
+    ADR 0004 附属化:agent 由专属人类主人 carol 持有,项目 editor 角色挂在 carol
+    名下,agent 判权经继承解析(与线上附属模型一致)。
+    """
     db.add(Team(name="贼船"))
     db.commit()
     admin = make_user(db, "admin", role="admin", with_password="admin-pass-1")
     admin.is_bootstrap = True
     db.commit()
     member = make_user(db, "bob", role="member")
+    agent_owner = make_user(db, "a-owner", role="member")
     agent = make_user(db, "agent-a", role=None, is_agent=True)
+    agent.owner_id = agent_owner.id
     project = Project(team_id=db.query(Team).first().id, name="demo")
     db.add(project)
     db.commit()
     db.add(ProjectMember(project_id=project.id, user_id=member.id, role="viewer"))
-    db.add(ProjectMember(project_id=project.id, user_id=agent.id, role="editor"))
+    db.add(ProjectMember(project_id=project.id, user_id=agent_owner.id, role="editor"))
     db.commit()
     return {
         "team": db.query(Team).first(),
         "admin": admin,
         "member": member,
+        "agent_owner": agent_owner,
         "agent": agent,
         "project": project,
     }

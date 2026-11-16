@@ -1,6 +1,6 @@
 # 贼船 Zeichen — 首次部署(单机 Docker Compose 全栈)
 
-目标:单机 Docker Compose 全栈(nginx → web/api/mcp/worker/cognee/postgres),
+目标:单机 Docker Compose 全栈(nginx → web/api/mcp/worker/postgres),
 唯一公网入口 80/443(TLS),数据全部在命名卷,每日备份到异地对象存储。
 参考:docs/spec.md §8、research/deployment.md。
 
@@ -110,27 +110,23 @@ chmod 600 .env
 # 逐项填写,生成随机值:
 openssl rand -hex 32    # SESSION_SECRET
 openssl rand -hex 24    # POSTGRES_PASSWORD
-openssl rand -hex 32    # COGNEE_FASTAPI_USERS_JWT_SECRET
 ```
 
-必填变量清单(缺失时 `up` 直接报错):`DEEPSEEK_API_KEY`、`SESSION_SECRET`、
+必填变量清单(缺失时 `up` 直接报错):`SESSION_SECRET`、
 `POSTGRES_PASSWORD`、`WEB_BASE_URL`、`MCP_ALLOWED_HOSTS`(含 `<域名>:443`)、
-`MCP_ISSUER_URL`、`MCP_RESOURCE_SERVER_URL`、`COGNEE_FASTAPI_USERS_JWT_SECRET`、
-`COGNEE_CORS_ALLOWED_ORIGINS`。
+`MCP_ISSUER_URL`、`MCP_RESOURCE_SERVER_URL`。
 
 ## 7. 首次启动
 
 ```bash
 cd /srv/zeichen
 docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d --build
-docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml ps   # 六个服务
-docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml logs -f cognee   # 首次:嵌入模型下载
+docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml ps   # 五个服务
 ```
 
 要点:
 
-- api 容器会自动跑 `alembic upgrade head` 建表;cognee 首次写入记忆时下载
-  embedding 模型(sentence-transformers/all-MiniLM-L6-v2,~90MB,已持久化到卷)。
+- api 容器会自动跑 `alembic upgrade head` 建表。
 - 之后统一别名:`alias zc='docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml'`。
 
 ## 8. 首用户引导与验收

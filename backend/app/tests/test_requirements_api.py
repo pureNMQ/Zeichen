@@ -52,10 +52,6 @@ def test_requirement_crud_and_status_loop(client: TestClient, world: dict):
     # 任务开工不影响需求(仍待办)
     assert client.get(f"/api/requirements/{rid}").json()["status"] == "backlog"
 
-    resp = client.post(f"/api/tasks/{tid}/status", json={"status": "verifying"})
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "verifying"
-
     resp = client.post(f"/api/tasks/{tid}/status", json={"status": "done"})
     assert resp.status_code == 200
     assert resp.json()["status"] == "done"
@@ -81,7 +77,7 @@ def test_requirement_crud_and_status_loop(client: TestClient, world: dict):
     assert actions == ["create", "update", "status", "status"]
     task_activity = client.get(f"/api/targets/task/{tid}/activity").json()["items"]
     assert [a["action"] for a in task_activity] == [
-        "create", "claim", "status", "status", "status",
+        "create", "claim", "status", "status",
     ]
 
     # 评论 + 引用
@@ -131,16 +127,15 @@ def test_requirement_and_task_descriptions_are_short_single_line(client: TestCli
         assert response.status_code == 400
         assert response.json()["code"] == "invalid_request"
 
-    response = client.post(
-        f"/api/projects/{pid}/tasks", json={"title": "非法任务", "description": "x" * 513}
-    )
-    assert response.status_code == 400
-    assert response.json()["code"] == "invalid_request"
-    response = client.post(
-        f"/api/projects/{pid}/tasks", json={"title": "非法任务", "description": "第一行\r\n第二行"}
-    )
-    assert response.status_code == 400
-    assert response.json()["code"] == "invalid_request"
+    rid = client.post(f"/api/projects/{pid}/requirements", json={"title": "任务挂载需求"}).json()["id"]
+    client.post(f"/api/requirements/{rid}/status", json={"status": "backlog"})
+    for description in ("c" * 513, "第一行\r\n第二行"):
+        response = client.post(
+            f"/api/projects/{pid}/tasks",
+            json={"title": "非法任务", "description": description, "requirement_id": rid},
+        )
+        assert response.status_code == 400
+        assert response.json()["code"] == "invalid_request"
 
 
 def test_error_four_piece_shape(client: TestClient, world: dict, db):
@@ -165,7 +160,7 @@ def test_error_four_piece_shape(client: TestClient, world: dict, db):
     assert resp.json() == {"code": "permission_denied", "message": resp.json()["message"]}
 
     # 不存在 → not_found(非成员视角 404,不泄露存在性)
-    resp = client.get(f"/api/requirements/{uuid.uuid4()}")
+    resp = client.get("/api/requirements/REQ-999")
     assert resp.status_code == 404
     assert resp.json()["code"] == "not_found"
 

@@ -1,10 +1,12 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query'
 import { FolderOpen, LayoutGrid, List, Plus } from 'lucide-react'
 
 import { Kanban } from '@/components/kanban'
 import { StatusSelect } from '@/components/status-select'
+import { StatusFilterPopover } from '@/components/status-filter-popover'
+import { FilterViewSwitcher, type ViewDef } from '@/components/filter-view-switcher'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -18,22 +20,32 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { ErrorNotification } from '@/components/ui/notification'
-import { api, ApiError, EXECUTION_REQUIREMENT_STATUSES, REQUIREMENT_STATUSES, type RequirementRow, type RequirementStatus } from '@/lib/api'
+import {
+  api,
+  ApiError,
+  REQUIREMENT_STATUSES,
+  withProject,
+  type FilterCriteria,
+  type FilterViewMode,
+  type Page,
+  type RequirementRow,
+  type RequirementStatus,
+} from '@/lib/api'
 import { useCurrentProject, useProjectRole } from '@/lib/current-project'
+import { clearDraft, readDraft, writeDraft } from '@/lib/form-draft'
+import { CreateExtras, type StagedReference } from '@/components/create-extras'
 
-const FILTERS: (RequirementStatus | 'all')[] = ['all', ...REQUIREMENT_STATUSES]
+const TIME_WINDOWS = [
+  { value: '', label: '不限' },
+  { value: '3', label: '近 3 天' },
+  { value: '7', label: '近 7 天' },
+  { value: '30', label: '近 30 天' },
+]
 
-const STATUS_TEXT: Record<RequirementStatus, string> = {
-  pending: '待确认',
-  backlog: '待办',
-  in_progress: '实现中',
-  done: '已完成',
-  cancelled: '已取消',
-}
-
-export async function moveRequirement(id: string, to: RequirementStatus): Promise<void> {
-  await api.post(`/requirements/${id}/status`, { status: to })
+export async function moveRequirement(id: string, to: RequirementStatus, projectId?: string | null): Promise<void> {
+  await api.post(withProject(`/requirements/${id}/status`, projectId), { status: to })
 }
 
 function RequirementCard({
@@ -42,17 +54,20 @@ function RequirementCard({
   onStatus,
   onDelete,
   canDelete,
+  onReject,
 }: {
   r: RequirementRow
   canEdit: boolean
   onStatus: (r: RequirementRow, s: string) => void
   onDelete: (r: RequirementRow) => void
   canDelete: boolean
+  onReject?: (r: RequirementRow) => void
 }) {
   return (
     <Card>
       <CardContent className="space-y-2 p-3">
         <Link to={`/requirements/${r.id}`} className="block text-sm font-medium hover:text-primary">
+          <span className="mr-1.5 rounded bg-muted px-1 py-0.5 font-mono text-[10px] text-muted-foreground">{r.id}</span>
           {r.title}
         </Link>
         <div className="flex items-center gap-2">
@@ -62,17 +77,33 @@ function RequirementCard({
             onSelect={(s) => onStatus(r, s)}
             disabled={!canEdit}
           />
-          <Badge variant="outline">{r.task_count} 任务</Badge>
+          <Badge variant="outline" title="已完成任务数/总任务数">
+            {r.done_task_count ?? 0}/{r.task_count} 任务
+          </Badge>
         </div>
-        {canDelete && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 px-2 text-xs text-muted-foreground"
-            onClick={() => onDelete(r)}
-          >
-            删除
-          </Button>
+        {(canDelete || (canEdit && onReject && r.status === 'verifying')) && (
+          <div className="flex items-center gap-1">
+            {canDelete && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-xs text-muted-foreground"
+                onClick={() => onDelete(r)}
+              >
+                删除
+              </Button>
+            )}
+            {canEdit && onReject && r.status === 'verifying' && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-xs text-destructive"
+                onClick={() => onReject(r)}
+              >
+                打回
+              </Button>
+            )}
+          </div>
         )}
       </CardContent>
     </Card>
@@ -95,29 +126,90 @@ export function RequirementsPage() {
   const qc = useQueryClient()
   const role = useProjectRole()
   const canEdit = role === 'editor' || role === 'owner'
-  const [view, setView] = useState<'list' | 'board'>('list')
-  const [filter, setFilter] = useState<RequirementStatus | 'all'>('all')
+
+  // 筛选条件(服务端下推)与视图状态
+  const [statuses, setStatuses] = useState<string[]>([])
+  const [updatedWithinDays, setUpdatedWithinDays] = useState('3')
+  const [keywordInput, setKeywordInput] = useState('')
+  const [keyword, setKeyword] = useState('')
+  const [viewMode, setViewMode] = useState<FilterViewMode>('board')
+  const [activeViewId, setActiveViewId] = useState('recent')
+
   const [createOpen, setCreateOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<RequirementRow | null>(null)
   const [confirmCount, setConfirmCount] = useState('')
   const [actionError, setActionError] = useState<string | null>(null)
+  const [rejectTarget, setRejectTarget] = useState<RequirementRow | null>(null)
+  const [rejectReason, setRejectReason] = useState('')
+  const [rejectError, setRejectError] = useState<string | null>(null)
+  const [rejecting, setRejecting] = useState(false)
 
-  const { data: page, isLoading, error } = useQuery({
-    queryKey: ['requirements', projectId],
-    queryFn: () =>
-      api.get<{ items: RequirementRow[]; next_cursor: string | null }>(
-        `/projects/${projectId}/requirements?limit=100`,
-      ),
+  const keywordTimer = useRef<number | null>(null)
+
+  function handleKeywordChange(value: string) {
+    setKeywordInput(value)
+    if (keywordTimer.current !== null) window.clearTimeout(keywordTimer.current)
+    keywordTimer.current = window.setTimeout(() => {
+      keywordTimer.current = null
+      setKeyword(value)
+    }, 300)
+  }
+
+  function applyView(def: ViewDef) {
+    if (keywordTimer.current !== null) {
+      window.clearTimeout(keywordTimer.current)
+      keywordTimer.current = null
+    }
+    const c = def.criteria ?? {}
+    setStatuses(c.statuses ?? [])
+    setUpdatedWithinDays(c.updated_within_days != null ? String(c.updated_within_days) : '')
+    const kw = c.keyword ?? ''
+    setKeywordInput(kw)
+    setKeyword(kw)
+    setViewMode(def.view_mode)
+    setActiveViewId(def.id)
+  }
+
+  const criteria: FilterCriteria = {
+    view_mode: viewMode,
+    ...(statuses.length > 0 ? { statuses: [...statuses] } : {}),
+    ...(updatedWithinDays !== '' ? { updated_within_days: Number(updatedWithinDays) } : {}),
+    ...(keyword.trim() !== '' ? { keyword: keyword.trim() } : {}),
+  }
+
+  const {
+    data: pageData,
+    isLoading,
+    error,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
+    queryKey: ['requirements', projectId, { statuses, updatedWithinDays, keyword }],
+    queryFn: ({ pageParam }) => {
+      const params = new URLSearchParams()
+      for (const s of statuses) params.append('status', s)
+      if (updatedWithinDays !== '') params.set('updated_within_days', updatedWithinDays)
+      const kw = keyword.trim()
+      if (kw !== '') params.set('keyword', kw)
+      params.set('limit', '20')
+      if (pageParam != null && pageParam !== '') params.set('cursor', String(pageParam))
+      return api.get<Page<RequirementRow>>(
+        `/projects/${projectId}/requirements?${params.toString()}`,
+      )
+    },
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
     enabled: !!projectId,
   })
 
-  const items = (page?.items ?? []).filter((r) => filter === 'all' || r.status === filter)
-  const boardItems = items.filter((r) => r.status !== 'pending')
+  const items = (pageData?.pages ?? []).flatMap((p) => p.items)
+  const boardItems = items
 
   async function doMove(id: string, to: RequirementStatus) {
     setActionError(null)
     try {
-      await moveRequirement(id, to)
+      await moveRequirement(id, to, projectId)
       await qc.invalidateQueries({ queryKey: ['requirements', projectId] })
     } catch (err) {
       setActionError(err instanceof ApiError ? err.message : '状态变更失败')
@@ -134,7 +226,7 @@ export function RequirementsPage() {
     if (!deleteTarget) return
     try {
       setActionError(null)
-      await api.post(`/requirements/${deleteTarget.id}/delete`, {
+      await api.post(withProject(`/requirements/${deleteTarget.id}/delete`, projectId), {
         confirm_task_count: Number(confirmCount),
       })
       setDeleteTarget(null)
@@ -145,12 +237,47 @@ export function RequirementsPage() {
     }
   }
 
+  function openReject(r: RequirementRow) {
+    setRejectTarget(r)
+    setRejectReason('')
+    setRejectError(null)
+  }
+
+  async function doReject() {
+    if (!rejectTarget) return
+    const reason = rejectReason.trim()
+    if (reason === '') return
+    setRejecting(true)
+    setRejectError(null)
+    try {
+      await api.post(withProject(`/targets/requirement/${rejectTarget.id}/comments`, projectId), { body: `打回：${reason}` })
+    } catch (err) {
+      setRejectError(err instanceof ApiError ? err.message : '评论发布失败,请重试')
+      setRejecting(false)
+      return
+    }
+    try {
+      await moveRequirement(rejectTarget.id, 'backlog', projectId)
+      await qc.invalidateQueries({ queryKey: ['requirements', projectId] })
+      setRejectTarget(null)
+      setRejectReason('')
+    } catch (err) {
+      setRejectError(
+        err instanceof ApiError
+          ? `打回理由已发布到评论区,但状态回退失败:${err.message}`
+          : '打回理由已发布到评论区,但状态回退失败,请手动改回待办',
+      )
+    } finally {
+      setRejecting(false)
+    }
+  }
+
   if (cpLoading) return <p className="text-sm text-muted-foreground">加载中…</p>
   if (!currentProject) return <NoProjectGuide />
 
   return (
     <div className="flex min-h-[calc(100dvh-3rem)] flex-col gap-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">需求</h1>
           <p className="text-sm text-muted-foreground">
@@ -158,33 +285,67 @@ export function RequirementsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex overflow-hidden rounded-md border">
-            <Button variant={view === 'list' ? 'secondary' : 'ghost'} size="sm" className="rounded-none" onClick={() => setView('list')}>
-              <List className="h-4 w-4" />
-              列表
-            </Button>
-            <Button variant={view === 'board' ? 'secondary' : 'ghost'} size="sm" className="rounded-none" onClick={() => setView('board')}>
-              <LayoutGrid className="h-4 w-4" />
-              看板
-            </Button>
-          </div>
-          <select
-            value={filter}
-            onChange={(e) => setFilter(e.target.value as RequirementStatus | 'all')}
-            className="h-8 rounded-md border bg-transparent px-2 text-sm"
-          >
-            {FILTERS.map((f) => (
-              <option key={f} value={f}>
-                {f === 'all' ? '全部状态' : STATUS_TEXT[f]}
-              </option>
-            ))}
-          </select>
+          <FilterViewSwitcher
+            projectId={projectId ?? ''}
+            entityType="requirement"
+            activeViewId={activeViewId}
+            onSelectView={applyView}
+            currentCriteria={criteria}
+          />
           {canEdit && (
             <Button onClick={() => setCreateOpen(true)}>
               <Plus className="mr-2 h-4 w-4" />
               新建需求
             </Button>
           )}
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <StatusFilterPopover statuses={REQUIREMENT_STATUSES} value={statuses} onChange={setStatuses} />
+        <select
+          aria-label="时间窗口"
+          value={updatedWithinDays}
+          onChange={(e) => setUpdatedWithinDays(e.target.value)}
+          className="h-8 rounded-md border bg-transparent px-2 text-sm"
+        >
+          {TIME_WINDOWS.map((w) => (
+            <option key={w.value} value={w.value}>
+              {w.label}
+            </option>
+          ))}
+        </select>
+        <div className="w-48">
+          <Label htmlFor="requirement-keyword" className="sr-only">
+            关键词
+          </Label>
+          <Input
+            id="requirement-keyword"
+            value={keywordInput}
+            onChange={(e) => handleKeywordChange(e.target.value)}
+            autoComplete="off"
+            placeholder="关键词"
+          />
+        </div>
+        <div className="flex overflow-hidden rounded-md border">
+          <Button
+            variant={viewMode === 'list' ? 'secondary' : 'ghost'}
+            size="sm"
+            className="rounded-none"
+            onClick={() => setViewMode('list')}
+          >
+            <List className="h-4 w-4" />
+            列表
+          </Button>
+          <Button
+            variant={viewMode === 'board' ? 'secondary' : 'ghost'}
+            size="sm"
+            className="rounded-none"
+            onClick={() => setViewMode('board')}
+          >
+            <LayoutGrid className="h-4 w-4" />
+            看板
+          </Button>
         </div>
       </div>
 
@@ -195,13 +356,13 @@ export function RequirementsPage() {
         <p className="py-10 text-center text-sm text-muted-foreground">暂无需求</p>
       )}
 
-      {view === 'board' ? (
+      {viewMode === 'board' ? (
         <Kanban
           className="flex-1"
           items={boardItems}
           canDrag={canEdit}
           onMove={(id, to) => void doMove(id, to as RequirementStatus)}
-          columns={EXECUTION_REQUIREMENT_STATUSES}
+          columns={REQUIREMENT_STATUSES}
           renderCard={(r) => (
             <RequirementCard
               r={r}
@@ -209,6 +370,7 @@ export function RequirementsPage() {
               onStatus={onCardStatus}
               onDelete={setDeleteTarget}
               canDelete={canEdit}
+              onReject={openReject}
             />
           )}
         />
@@ -227,7 +389,55 @@ export function RequirementsPage() {
         </div>
       )}
 
+      {hasNextPage && (
+        <div className="flex justify-center">
+          <Button
+            variant="outline"
+            onClick={() => void fetchNextPage()}
+            disabled={isFetchingNextPage}
+          >
+            {isFetchingNextPage ? '加载中…' : '加载更多'}
+          </Button>
+        </div>
+      )}
+
       <CreateRequirementDialog open={createOpen} onOpenChange={setCreateOpen} />
+
+      <Dialog open={rejectTarget !== null} onOpenChange={(v) => !v && setRejectTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>打回需求</DialogTitle>
+            <DialogDescription>
+              打回理由将发布到需求「{rejectTarget?.title}」的评论区,确认后需求状态回退到待办。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label htmlFor="reject-reason">打回理由</Label>
+            <Textarea
+              id="reject-reason"
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              autoComplete="off"
+              maxLength={2000}
+              rows={4}
+              placeholder="请填写需要修改或补充的内容"
+            />
+            {rejectError && <p className="text-sm text-destructive">{rejectError}</p>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRejectTarget(null)}>
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => void doReject()}
+              disabled={rejecting || rejectReason.trim() === ''}
+            >
+              {rejecting ? '提交中…' : '确认打回'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={deleteTarget !== null} onOpenChange={(v) => !v && setDeleteTarget(null)}>
         <DialogContent>
@@ -266,13 +476,67 @@ function CreateRequirementDialog({ open, onOpenChange }: { open: boolean; onOpen
   const [description, setDescription] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [refs, setRefs] = useState<StagedReference[]>([])
+  const [files, setFiles] = useState<File[]>([])
+
+  const draftKey = projectId ? `zeichen.draft.requirement:${projectId}` : null
+
+  useEffect(() => {
+    if (!open) return
+    setError(null)
+    const draft = draftKey ? readDraft<{ title: string; description: string }>(draftKey) : null
+    setTitle(draft?.title ?? '')
+    setDescription(draft?.description ?? '')
+    setRefs([])
+    setFiles([])
+  }, [open, draftKey])
+
+  useEffect(() => {
+    if (!open || !draftKey) return
+    // 全空内容不持久化,并清掉既有草稿
+    if (!title && !description) {
+      clearDraft(draftKey)
+      return
+    }
+    writeDraft(draftKey, { title, description })
+  }, [open, draftKey, title, description])
+
+  function clearFormDraft() {
+    if (draftKey) clearDraft(draftKey)
+    setTitle('')
+    setDescription('')
+    setRefs([])
+    setFiles([])
+    setError(null)
+  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
     setError(null)
     setSubmitting(true)
     try {
-      await api.post(`/projects/${projectId}/requirements`, { title: title.trim(), description: description.trim() || null })
+      const created = await api.post<{ id: string }>(`/projects/${projectId}/requirements`, { title: title.trim(), description: description.trim() || null })
+      const remainingRefs = [...refs]
+      const remainingFiles = [...files]
+      try {
+        while (remainingRefs.length > 0) {
+          const r = remainingRefs[0]
+          await api.post(withProject(`/targets/requirement/${created.id}/references`, projectId), { from_type: 'requirement', from_id: created.id, to_type: r.toType, to_id: r.toId, type: r.type })
+          remainingRefs.shift()
+        }
+        while (remainingFiles.length > 0) {
+          await api.upload(withProject(`/targets/requirement/${created.id}/attachments`, projectId), remainingFiles[0])
+          remainingFiles.shift()
+        }
+      } catch {
+        setRefs(remainingRefs)
+        setFiles(remainingFiles)
+        setError('已创建,但部分引用/附件回填失败,可稍后在详情页重试')
+        return
+      }
+      setRefs([])
+      setFiles([])
+      if (draftKey) clearDraft(draftKey)
       setTitle('')
       setDescription('')
       onOpenChange(false)
@@ -286,7 +550,7 @@ function CreateRequirementDialog({ open, onOpenChange }: { open: boolean; onOpen
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>新建需求</DialogTitle>
           <DialogDescription>需求是项目内的可验收变更单元,可用任务承接拆解。</DialogDescription>
@@ -300,8 +564,12 @@ function CreateRequirementDialog({ open, onOpenChange }: { open: boolean; onOpen
             <Label htmlFor="req-desc">描述</Label>
             <Input id="req-desc" value={description} onChange={(e) => setDescription(e.target.value)} autoComplete="off" maxLength={512} />
           </div>
+          {projectId && <CreateExtras projectId={projectId} refs={refs} onRefsChange={setRefs} files={files} onFilesChange={setFiles} />}
           {error && <p className="text-sm text-destructive">{error}</p>}
           <DialogFooter>
+            <Button type="button" variant="outline" onClick={clearFormDraft}>
+              清空草稿
+            </Button>
             <Button type="submit" disabled={submitting}>
               {submitting ? '创建中…' : '创建'}
             </Button>

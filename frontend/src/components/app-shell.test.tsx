@@ -71,12 +71,15 @@ describe('AppShell 侧边栏', () => {
     renderShell('admin')
     expect(await screen.findByText('团队功能')).toBeInTheDocument()
     expect(screen.getByText('工作区')).toBeInTheDocument()
-    for (const label of ['项目', '成员', 'Agent', '需求', '任务']) {
+    // 任务入口已随独立任务面板移除(ADR 0003);Agent 管理页已随附属化移除(ADR 0004)
+    expect(screen.queryByRole('link', { name: '任务' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Agent' })).not.toBeInTheDocument()
+    for (const label of ['项目', '成员', '需求']) {
       expect(screen.getByRole('link', { name: label })).toBeInTheDocument()
     }
   })
 
-  it('普通成员可见成员入口，但不见 Agent 入口', async () => {
+  it('附属化后 Agent 管理入口对任何角色都不存在', async () => {
     renderShell('member')
     expect(await screen.findByText('团队功能')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '项目' })).toBeInTheDocument()
@@ -84,7 +87,7 @@ describe('AppShell 侧边栏', () => {
     expect(screen.queryByRole('link', { name: 'Agent' })).not.toBeInTheDocument()
   })
 
-  it('文档为可折叠父项，展开后显示 Wiki、词条与 API 子页', async () => {
+  it('文档为可折叠父项，展开后显示 Wiki（REQ-59 词条并入 wiki，单入口），不再显示 API 子页', async () => {
     const user = (await import('@testing-library/user-event')).default.setup()
     renderShell('admin')
     const documentToggle = await screen.findByRole('button', { name: '文档' })
@@ -95,8 +98,8 @@ describe('AppShell 侧边栏', () => {
 
     expect(documentToggle).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByRole('link', { name: 'Wiki' })).toHaveAttribute('href', '/documents/wiki')
-    expect(screen.getByRole('link', { name: '词条' })).toHaveAttribute('href', '/documents/glossary')
-    expect(screen.getByRole('link', { name: '代码 API 参考' })).toHaveAttribute('href', '/code-reference')
+    expect(screen.queryByRole('link', { name: '词条' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '代码 API 参考' })).not.toBeInTheDocument()
   })
 
   it('当前项目切换器:默认第一个可见项目,选择后持久化', async () => {
@@ -107,5 +110,17 @@ describe('AppShell 侧边栏', () => {
     await user.click(trigger)
     await user.click(await screen.findByRole('option', { name: '网站改版' }))
     expect(localStorage.getItem('zeichen.currentProjectId')).toBe('p2')
+  })
+
+  it('侧边栏底部用户按钮可收缩(flex-1 min-w-0),通知铃铛不溢出侧栏(REQ fa6e667e)', async () => {
+    renderShell('admin')
+    const bell = await screen.findByRole('button', { name: '通知' })
+    const row = bell.closest('div.border-t')!
+    const userButton = row.querySelector('button:not([aria-label])')!
+    expect(userButton.className).toContain('flex-1')
+    expect(userButton.className).toContain('min-w-0')
+    expect(userButton.className).not.toContain('w-full')
+    // 铃铛徽标锚定在按钮内沿,右移不超过行内边距(-right-1.5 < p-2)
+    expect(bell.className).toContain('shrink-0')
   })
 })

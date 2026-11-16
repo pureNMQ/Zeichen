@@ -1,33 +1,32 @@
 import { useEffect, useState } from 'react'
-import { Navigate, Outlet, Route, Routes, useNavigate } from 'react-router-dom'
-import { ShieldAlert } from 'lucide-react'
+import { Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom'
 import { AppShell } from '@/components/app-shell'
 import { api } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { DocumentNavigationProvider } from '@/lib/document-navigation'
 import { CurrentProjectProvider } from '@/lib/current-project'
-import { AgentsPage } from '@/pages/agents'
 import { BootstrapPage } from '@/pages/bootstrap'
 import { LoginPage } from '@/pages/login'
 import { MembersPage } from '@/pages/members'
 import { ProjectsPage } from '@/pages/projects'
 import { ProjectLayout } from '@/pages/project/layout'
 import { RequirementsPage } from '@/pages/requirements'
-import { TasksPage } from '@/pages/tasks'
 import { RequirementDetailPage } from '@/pages/requirement-detail'
 import { SetPasswordPage } from '@/pages/set-password'
-import { TaskDetailPage } from '@/pages/task-detail'
 import { DocumentWorkbenchPage } from '@/pages/documents'
-import { CodeReferencePage } from '@/pages/code-reference'
-import { MemoryPage, MemorySessionsPage } from '@/pages/memory'
-import { CogneePage } from '@/pages/cognee'
 import { RepositoriesPage } from '@/pages/repositories'
 import { SearchPage } from '@/pages/search'
+import { ManualPage } from '@/pages/manual'
+
+/** REQ-59:旧词条 URL(TERM-n)重定向到 wiki 工作台同短码页面。 */
+function WikiTermRedirect() {
+  const { id } = useParams<{ id: string }>()
+  return <Navigate to={`/documents/wiki/${id ?? ''}`} replace />
+}
 
 function BootstrapGate() {
   const navigate = useNavigate()
   const { loading } = useAuth()
-
   useEffect(() => {
     if (loading) return
     void (async () => {
@@ -85,19 +84,6 @@ function RequireAuth() {
   )
 }
 
-function RequireAdmin() {
-  const { user } = useAuth()
-  if (user?.workspace_role !== 'admin') {
-    return (
-      <div className="flex flex-col items-center gap-3 py-16 text-muted-foreground">
-        <ShieldAlert className="h-10 w-10" />
-        <p className="text-sm">该页面仅工作区管理员可访问</p>
-      </div>
-    )
-  }
-  return <Outlet />
-}
-
 export function App() {
   return (
     <Routes>
@@ -109,27 +95,17 @@ export function App() {
         <Route path="projects" element={<ProjectsPage />} />
         <Route path="projects/:projectId" element={<ProjectLayout />} />
         <Route path="requirements" element={<RequirementsPage />} />
-        <Route path="tasks" element={<TasksPage />} />
         <Route path="requirements/:id" element={<RequirementDetailPage />} />
-        <Route path="tasks/:id" element={<TaskDetailPage />} />
         <Route path="documents/wiki" element={<DocumentWorkbenchPage module="wiki" />} />
         <Route path="documents/wiki/:id" element={<DocumentWorkbenchPage module="wiki" />} />
-        <Route path="documents/glossary" element={<DocumentWorkbenchPage module="glossary" />} />
-        <Route path="documents/glossary/directory/:id" element={<DocumentWorkbenchPage module="glossary" routeNodeKind="directory" />} />
-        <Route path="documents/glossary/term/:id" element={<DocumentWorkbenchPage module="glossary" routeNodeKind="document" />} />
-        <Route path="code-reference" element={<CodeReferencePage />} />
-        <Route path="code-reference/:id" element={<CodeReferencePage />} />
+        {/* REQ-59:glossary 并入 wiki,旧词条 URL 重定向保持不断链 */}
+        <Route path="documents/glossary" element={<Navigate to="/documents/wiki" replace />} />
+        <Route path="documents/glossary/directory/:id" element={<Navigate to="/documents/wiki" replace />} />
+        <Route path="documents/glossary/term/:id" element={<WikiTermRedirect />} />
         <Route path="repositories" element={<RepositoriesPage />} />
-        <Route path="memory" element={<MemoryPage />} />
-        <Route path="memory/sessions" element={<MemorySessionsPage />} />
         <Route path="search" element={<SearchPage />} />
+        <Route path="manual" element={<ManualPage />} />
         <Route path="members" element={<MembersPage />} />
-        <Route path="agents" element={<RequireAdmin />}>
-          <Route index element={<AgentsPage />} />
-        </Route>
-        <Route path="cognee" element={<RequireAdmin />}>
-          <Route index element={<CogneePage />} />
-        </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

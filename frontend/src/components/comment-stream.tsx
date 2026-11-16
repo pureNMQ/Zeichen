@@ -4,7 +4,7 @@ import { Trash2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import { api, ApiError, type CommentRow } from '@/lib/api'
+import { api, ApiError, withProject, type CommentRow } from '@/lib/api'
 import { ErrorNotification } from '@/components/ui/notification'
 import { UserAvatar } from '@/components/user-avatar'
 
@@ -13,7 +13,7 @@ export function CommentStream({ targetType, targetId, canEdit }: { targetType: s
   const key = ['comments', targetType, targetId]
   const { data, isLoading } = useQuery({
     queryKey: key,
-    queryFn: () => api.get<{ items: CommentRow[] }>(`/targets/${targetType}/${targetId}/comments?limit=50`),
+    queryFn: () => api.get<{ items: CommentRow[] }>(withProject(`/targets/${targetType}/${targetId}/comments?limit=50`)),
   })
   const [body, setBody] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -22,7 +22,7 @@ export function CommentStream({ targetType, targetId, canEdit }: { targetType: s
     e.preventDefault()
     setError(null)
     try {
-      await api.post(`/targets/${targetType}/${targetId}/comments`, { body: body.trim() })
+      await api.post(withProject(`/targets/${targetType}/${targetId}/comments`), { body: body.trim() })
       setBody('')
       await qc.invalidateQueries({ queryKey: key })
     } catch (err) {

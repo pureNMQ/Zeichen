@@ -27,43 +27,6 @@ class Settings(BaseSettings):
     attachment_storage_dir: Path = Path(".scratch/attachments")
     attachment_max_bytes: int = 20 * 1024 * 1024
 
-    # The backend is normally run on the host by start-all.ps1, while Cognee is
-    # published by Docker Compose on localhost:8000. A future in-compose backend
-    # must override this with http://cognee:8000/api/v1.
-    cognee_base_url: str = "http://localhost:8000/api/v1"
-    cognee_timeout_seconds: float = 30.0
-    # The durable improve worker, not an MCP request, owns this longer wait.
-    # A timeout is recorded as unknown/timed_out and is never auto-retried,
-    # because Cognee 1.4.1 may still be executing remotely.
-    cognee_improve_job_timeout_seconds: float = 15 * 60
-    cognee_improve_worker_poll_seconds: float = 1.0
-    # Cognee runs with backend access control enabled.  The API process is the
-    # sole Cognee principal: project roles are enforced by this application,
-    # never delegated to browser or MCP clients.  Deployments should prefer a
-    # long-lived API key; the email/password pair bootstraps the local service
-    # account when a key has not been provisioned yet.
-    cognee_service_api_key: str | None = None
-    cognee_service_email: str = "zeichen-service@example.com"
-    cognee_service_password: str = "zeichen-local-cognee-service-password"
-
-    # Defaults used to bootstrap the workspace-managed Cognee configuration.
-    # They deliberately do not expose the existing compose secret to API clients.
-    cognee_llm_provider: str = "custom"
-    cognee_llm_model: str = "deepseek/deepseek-v4-flash"
-    cognee_llm_endpoint: str | None = "https://api.deepseek.com"
-    cognee_embedding_provider: str = "fastembed"
-    cognee_embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
-    cognee_embedding_dimensions: int | None = 384
-    # These paths and executable are deployment-owned settings.  The restart
-    # API never accepts command, service, or path input from a client.
-    cognee_compose_project_dir: Path = Path("..")
-    cognee_runtime_env_file: Path = Path("../.scratch/cognee-runtime.env")
-    cognee_compose_executable: str = "docker"
-    cognee_restart_timeout_seconds: float = 180.0
-    # The Compose deployment's existing provider key is read only to produce a
-    # masked administrator-facing status.  Plaintext is never returned by API.
-    cognee_deployment_env_file: Path = Path("../.env")
-
     # Streamable HTTP MCP: DNS-rebinding protection remains enabled by default.
     # Use a comma-separated string so a normal .env file can safely extend the
     # Host allowlist for an externally deployed MCP endpoint.
@@ -81,6 +44,13 @@ class Settings(BaseSettings):
     attachment_storage_dir: str = "storage/attachments"
     attachment_max_file_bytes: int = 20 * 1024 * 1024
     attachment_project_quota_bytes: int = 2 * 1024 * 1024 * 1024
+
+    # 软删实体物理清理定时任务(REQ-3 / 规格书 §2.1 / §8.2):
+    # 软删满 retention_days 天的实体由定时任务物理清理(恰好满期即清,<= 判定);
+    # 清理循环按 interval_seconds 周期执行(默认 24h)。env:PHYSICAL_PURGE_RETENTION_DAYS
+    # / PHYSICAL_PURGE_INTERVAL_SECONDS。
+    physical_purge_retention_days: int = 90
+    physical_purge_interval_seconds: float = 24 * 60 * 60
 
     @property
     def mcp_allowed_host_patterns(self) -> list[str]:

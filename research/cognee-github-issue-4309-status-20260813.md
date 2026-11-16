@@ -1,5 +1,7 @@
 # Cognee #4309 状态复查（2026-08-13）
 
+> **已废弃(2026-10-02,REQ-57)**:记忆系统与 Cognee 集成已整体下线,本文仅作历史调研记录保留,结论不再适用于当前产品。
+
 ## 结论
 
 [Cognee #4309](https://github.com/topoteretes/cognee/issues/4309) 已于 **2026-08-13 08:53:27 UTC**（北京时间 16:53:27）由维护者 `dexters1` 关闭，GitHub 的状态原因是 `completed`。不过，GitHub 的 issue 时间线、关联 PR/提交检索、最新发布版本和当前源码均**没有**显示该 issue 所建议的 stale-lock 回收或 `improve()` 总超时已合并。因此，这次关闭不能作为“官方已修复”的依据。

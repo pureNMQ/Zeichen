@@ -9,6 +9,7 @@ from ..db import get_db
 from ..config import get_settings
 from ..models import User
 from ..schemas import MemberCreate, MemberUpdate
+from ..services import agents as agents_service
 from ..services import members as members_service
 from ..services.user_profiles import payload as profile_payload
 from .deps import current_admin, current_user
@@ -31,10 +32,27 @@ def _password_setup_url(token: str) -> str:
 
 @router.get("")
 def list_members(user: User = Depends(current_user), db: Session = Depends(get_db)) -> list[dict]:
-    return [
-        {**_payload(u), "role": role, "is_self": u.id == user.id}
-        for u, role in members_service.list_members(db)
-    ]
+    owned = agents_service.owned_agents_map(db)
+    result = []
+    for u, role in members_service.list_members(db):
+        item = {**_payload(u), "role": role, "is_self": u.id == user.id, "agent": None}
+        agent = owned.get(u.id)
+        if agent is not None:
+            keys = agents_service.agent_detail(db, agent)
+            item["agent"] = {
+                "id": agent.id,
+                "username": agent.username,
+                "nickname": agent.nickname,
+                "display_name": agent_detail_display(agent),
+                "created_at": agent.created_at.isoformat(),
+                "active_keys": keys["active_keys"],
+            }
+        result.append(item)
+    return result
+
+
+def agent_detail_display(agent) -> str:
+    return agent.nickname or agent.username
 
 
 @router.post("", status_code=201)
@@ -78,3 +96,19 @@ def remove_member(
 ) -> dict:
     members_service.remove_member(db, admin, user_id)
     return {"ok": True}
+
+
+@router.post("/{member_id}/agent/revoke-keys")
+def revoke_member_agent_keys(
+    member_id: uuid.UUID,
+    admin: User = Depends(current_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    """紧急吊销:仅失效成员附属 Agent 的全部 key,不接触明文、不可签发(ADR 0004)。"""
+    agent = agents_service.get_owned_agent(db, member_id)
+    if agent is None:
+        from ..errors import not_found
+
+        raise not_found("该成员没有附属 Agent")
+    revoked = agents_service.admin_revoke_keys(db, agent.id)
+    return {"revoked": revoked}

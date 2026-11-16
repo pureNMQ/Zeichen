@@ -1,32 +1,6 @@
 """项目:列表可见性(admin 全量/member 已加入)、建项目、成员管理、判权矩阵。"""
 
-import uuid
-
 from .conftest import login, make_user
-
-
-def test_create_project_provisions_memory_space(client, db, world, monkeypatch):
-    """A new project is immediately readable by the memory page."""
-    from app.models import MemoryDataset
-    from app.services import memory
-
-    created = []
-
-    class FakeCognee:
-        def create_dataset(self, name):
-            created.append(name)
-            return "dataset-created-with-project"
-
-    monkeypatch.setattr(memory, "CogneeClient", FakeCognee)
-    _admin_client(client)
-
-    response = client.post("/api/projects", json={"name": "with-memory", "members": []})
-
-    assert response.status_code == 201, response.text
-    project_id = uuid.UUID(response.json()["id"])
-    dataset = db.query(MemoryDataset).filter_by(project_id=project_id).one()
-    assert dataset.cognee_dataset_id == "dataset-created-with-project"
-    assert created == [f"zeichen:{project_id}"]
 
 
 def _admin_client(client):
@@ -55,15 +29,7 @@ def test_list_visibility(client, db, world):
     assert resp.json() == []
 
 
-def test_create_project_admin_only(client, db, world, monkeypatch):
-    from app.services import memory
-
-    class FakeCognee:
-        def create_dataset(self, name):
-            return "dataset-created-for-permission-test"
-
-    monkeypatch.setattr(memory, "CogneeClient", FakeCognee)
-
+def test_create_project_admin_only(client, db, world):
     resp = client.post("/api/projects", json={"name": "x", "members": []})
     assert resp.status_code == 401
 
@@ -80,7 +46,7 @@ def test_create_project_admin_only(client, db, world, monkeypatch):
             "name": "网站改版",
             "members": [
                 {"user_id": str(world["member"].id), "role": "editor"},
-                {"user_id": str(world["agent"].id), "role": "editor"},
+                {"user_id": str(world["agent_owner"].id), "role": "editor"},
             ],
         },
     )
@@ -89,7 +55,7 @@ def test_create_project_admin_only(client, db, world, monkeypatch):
 
     detail = client.get(f"/api/projects/{resp.json()['id']}/members").json()
     roles = {m["username"]: m["role"] for m in detail}
-    assert roles == {"admin": "owner", "bob": "editor", "agent-a": "editor"}
+    assert roles == {"admin": "owner", "bob": "editor", "a-owner": "editor"}
 
 
 def test_update_project_name(client, db, world):
@@ -184,8 +150,8 @@ def test_remove_member_last_owner_guard(client, db, world):
     login(client, "bob", "whatever-1")
     client.post("/api/auth/set-password", json={"password": "bob-pass-1"})
 
-    # 移除非 owner 成员成功
-    resp = client.delete(f"/api/projects/{project_id}/members/{world['agent'].id}")
+    # 移除非 owner 成功(项目成员:a-owner editor)
+    resp = client.delete(f"/api/projects/{project_id}/members/{world['agent_owner'].id}")
     assert resp.status_code == 200
 
     # 唯一 owner 不可移除
@@ -224,7 +190,7 @@ def test_update_member_role_requires_owner(client, db, world):
     login(client, "bob", "whatever-1")
     client.post("/api/auth/set-password", json={"password": "bob-pass-1"})
     resp = client.patch(
-        f"/api/projects/{project_id}/members/{world['agent'].id}",
+        f"/api/projects/{project_id}/members/{world['agent_owner'].id}",
         json={"role": "viewer"},
     )
     assert resp.status_code == 403
@@ -285,7 +251,8 @@ def test_member_candidates(client, db, world):
     assert names["carol"] is False
     assert "admin" not in names  # admin 自动 owner,不列为候选人
     assert "bob" not in names  # 已在项目中
-    assert "agent-a" not in names  # 已在项目中
+    assert "a-owner" not in names  # 已在项目中
+    assert "agent-a" not in names  # ADR 0004:agent 不单独授权,不列为候选人
 
     # viewer 成员无候选人访问权
     login(client, "bob", "whatever-1")
@@ -308,7 +275,7 @@ def test_project_access_matrix(client, db, world):
     assert members.status_code == 200
     assert {row["username"]: row["role"] for row in members.json()} == {
         "bob": "viewer",
-        "agent-a": "editor",
+        "a-owner": "editor",
     }
     assert client.post(
         f"/api/projects/{project_id}/members",

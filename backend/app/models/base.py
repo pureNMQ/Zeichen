@@ -1,7 +1,7 @@
 """SQLAlchemy 公共基类与 mixin。
 
 规格书 §2.1 五件套约定:created_at / updated_at / created_by / project_id / deleted_at + UUID 主键。
-工作区级实体(user / team / api_key / workspace_member / memory_grant)不带 project_id,
+工作区级实体(user / team / api_key / workspace_member)不带 project_id,
 它们是 workspace 根,project_id 无意义——在 ticket 01 Answer 中记录此判定。
 """
 
@@ -54,10 +54,10 @@ class ProjectScopeMixin:
 
 
 class PolymorphicTargetMixin:
-    """多态目标:target_type 枚举 + target_id,check 约束见各表。"""
+    """多态目标:target_type 枚举 + target_id(ADR 0002:五类实体目标存短码,project 目标存 UUID)。"""
 
     target_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    target_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    target_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
 
 
 __all__ = [

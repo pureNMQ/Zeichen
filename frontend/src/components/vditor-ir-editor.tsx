@@ -39,6 +39,38 @@ export type VditorIrEditorProps = VditorAccessibilityProps & {
 export type VditorMarkdownViewerProps = VditorAccessibilityProps & {
   markdown: string
   className?: string
+  /** REQ-59:[[双链]]解析结果;提供时把 [[..]] 渲染为可点 wiki 链接(断链可点创建)。 */
+  wikiLinks?: {
+    outgoing: { raw_text: string; display: string | null; section: string | null; to_code: string | null; to_title: string | null; broken: boolean }[]
+  }
+}
+
+// 与后端 _LINK_RE 对齐:[[目标|显示]]/[[目标#小节]];目标/显示不含 [ ] |
+const WIKI_LINK_RE = /\[\[\s*([^\[\]|]+?)\s*(?:\|\s*([^\[\]|]+?)\s*)?\]\]/g
+
+function renderWikiLinks(markdown: string, links: VditorMarkdownViewerProps['wikiLinks']): string {
+  if (!links || links.outgoing.length === 0) return markdown
+  const byTarget = new Map<string, { to_code: string | null; broken: boolean }>()
+  for (const link of links.outgoing) {
+    if (!byTarget.has(link.raw_text)) byTarget.set(link.raw_text, { to_code: link.to_code, broken: link.broken })
+  }
+  return markdown.replace(WIKI_LINK_RE, (whole, target: string, display?: string) => {
+    const resolved = byTarget.get(target.trim())
+    if (!resolved) return whole
+    const text = (display ?? target).trim()
+    if (resolved.broken || !resolved.to_code) {
+      return `<a href="#wiki-create" class="wiki-link wiki-link-broken" data-wiki-create="${escapeAttr(target.trim())}" title="断链:点击创建该页面">${escapeHtml(text)}<sup>+</sup></a>`
+    }
+    return `<a href="/documents/wiki/${encodeURIComponent(resolved.to_code)}" class="wiki-link" data-wiki-code="${escapeAttr(resolved.to_code)}">${escapeHtml(text)}</a>`
+  })
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+function escapeAttr(value: string): string {
+  return escapeHtml(value).replace(/"/g, '&quot;')
 }
 
 function applyAccessibility(
@@ -211,6 +243,7 @@ export function VditorIrEditor({
 export function VditorMarkdownViewer({
   markdown,
   className,
+  wikiLinks,
   ariaLabel,
   ariaLabelledBy,
   ariaDescribedBy,
@@ -224,7 +257,7 @@ export function VditorMarkdownViewer({
     let cancelled = false
     const renderTarget = document.createElement('div')
     host.setAttribute('aria-busy', 'true')
-    void Vditor.preview(renderTarget, markdown, { cdn: VDITOR_CDN, mode: 'light' })
+    void Vditor.preview(renderTarget, renderWikiLinks(markdown, wikiLinks), { cdn: VDITOR_CDN, mode: 'light' })
       .then(() => {
         if (cancelled) return
         host.replaceChildren(...renderTarget.childNodes)
@@ -238,7 +271,7 @@ export function VditorMarkdownViewer({
     return () => {
       cancelled = true
     }
-  }, [markdown, ariaLabel, ariaLabelledBy, ariaDescribedBy])
+  }, [markdown, wikiLinks, ariaLabel, ariaLabelledBy, ariaDescribedBy])
 
   return <div ref={hostRef} className={cn('vditor-reset', className)} />
 }

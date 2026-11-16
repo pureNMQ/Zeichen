@@ -23,16 +23,19 @@ router = APIRouter(prefix="/api", tags=["tasks"])
 @router.get("/projects/{project_id}/tasks")
 def list_tasks(
     project_id: uuid.UUID,
-    requirement_id: uuid.UUID | None = None,
+    requirement_id: str | None = None,
     assignee_id: uuid.UUID | None = None,
-    status: str | None = None,
+    status: list[str] | None = Query(None),
+    updated_within_days: str | None = None,
+    keyword: str | None = None,
     cursor: str | None = None,
     limit: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
     return service.list_tasks(
-        db, user, project_id, requirement_id, assignee_id, status, cursor, limit
+        db, user, project_id, requirement_id, assignee_id, status, cursor, limit,
+        updated_within_days=updated_within_days, keyword=keyword,
     )
 
 
@@ -51,97 +54,119 @@ def create_task(
         body.description,
         body.requirement_id,
         body.assignee_id,
+        body.blocked_by,
     )
     return service._task_dict(db, task)
 
 
 @router.get("/tasks/{task_id}")
 def get_task(
-    task_id: uuid.UUID,
+    task_id: str,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    return service._task_dict(db, service.get_task(db, user, task_id))
+    return service._task_dict(db, service.get_task(db, user, task_id, project_id))
 
 
 @router.patch("/tasks/{task_id}")
 def update_task(
-    task_id: uuid.UUID,
+    task_id: str,
     body: TaskUpdate,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
     fields = body.model_fields_set
     requirement_id = body.requirement_id if "requirement_id" in fields else service._UNSET
+    blocked_by = body.blocked_by if "blocked_by" in fields else service._UNSET
     return service._task_dict(
         db,
         service.update_task(
-            db, user, task_id, body.title, body.description, requirement_id
+            db, user, task_id, body.title, body.description, requirement_id, blocked_by,
+            project_id=project_id,
         ),
     )
 
 
 @router.post("/tasks/{task_id}/status")
 def set_status(
-    task_id: uuid.UUID,
+    task_id: str,
     body: StatusBody,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    return service._task_dict(db, service.set_task_status(db, user, task_id, body.status))
+    return service._task_dict(
+        db, service.set_task_status(db, user, task_id, body.status, project_id=project_id)
+    )
 
 
 @router.post("/tasks/{task_id}/assign")
 def assign_task(
-    task_id: uuid.UUID,
+    task_id: str,
     body: TaskAssignBody,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    return service._task_dict(db, service.assign_task(db, user, task_id, body.assignee_id))
+    return service._task_dict(
+        db, service.assign_task(db, user, task_id, body.assignee_id, project_id=project_id)
+    )
 
 
 @router.post("/tasks/{task_id}/claim")
 def claim_task(
-    task_id: uuid.UUID,
+    task_id: str,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    return service._task_dict(db, service.claim_task(db, user, task_id))
+    return service._task_dict(db, service.claim_task(db, user, task_id, project_id=project_id))
 
 
 @router.post("/tasks/{task_id}/unassign")
 def unassign_task(
-    task_id: uuid.UUID,
+    task_id: str,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    return service._task_dict(db, service.unassign_task(db, user, task_id))
+    return service._task_dict(
+        db, service.unassign_task(db, user, task_id, project_id=project_id)
+    )
 
 
 @router.post("/tasks/{task_id}/cancel")
 def cancel_task(
-    task_id: uuid.UUID,
+    task_id: str,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    return service._task_dict(db, service.cancel_task(db, user, task_id))
+    return service._task_dict(
+        db, service.cancel_task(db, user, task_id, project_id=project_id)
+    )
 
 
 @router.post("/tasks/{task_id}/delete")
 def delete_task(
-    task_id: uuid.UUID,
+    task_id: str,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    service.delete_task(db, user, task_id)
+    service.delete_task(db, user, task_id, project_id=project_id)
     return {"ok": True}
 
 
 @router.post("/tasks/{task_id}/restore")
 def restore_task(
-    task_id: uuid.UUID,
+    task_id: str,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    return service._task_dict(db, service.restore_task(db, user, task_id))
+    return service._task_dict(
+        db, service.restore_task(db, user, task_id, project_id=project_id)
+    )

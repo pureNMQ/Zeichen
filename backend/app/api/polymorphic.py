@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from ..models import User
 from ..schemas import CommentCreate, ReferenceCreate
+from ..services import notifications as notification_service
 from ..services import polymorphic as service
 from ..services.pagination import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from .deps import current_user
@@ -18,25 +19,31 @@ router = APIRouter(prefix="/api", tags=["polymorphic"])
 @router.get("/targets/{target_type}/{target_id}/comments")
 def list_comments(
     target_type: str,
-    target_id: uuid.UUID,
+    target_id: str,
     cursor: str | None = None,
     limit: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    return service.list_comments(db, user, target_type, target_id, cursor, limit)
+    return service.list_comments(
+        db, user, target_type, target_id, cursor, limit, project_id=project_id
+    )
 
 
 @router.post("/targets/{target_type}/{target_id}/comments", status_code=201)
 def create_comment(
     target_type: str,
-    target_id: uuid.UUID,
+    target_id: str,
     body: CommentCreate,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    comment = service.create_comment(db, user, target_type, target_id, body.body)
-    return {"id": str(comment.id), "target_type": comment.target_type, "target_id": str(comment.target_id), "body": comment.body}
+    comment = service.create_comment(
+        db, user, target_type, target_id, body.body, project_id=project_id
+    )
+    return {"id": str(comment.id), "target_type": comment.target_type, "target_id": comment.target_id, "body": comment.body}
 
 
 @router.delete("/comments/{comment_id}")
@@ -52,37 +59,45 @@ def delete_comment(
 @router.get("/targets/{target_type}/{target_id}/activity")
 def list_activity(
     target_type: str,
-    target_id: uuid.UUID,
+    target_id: str,
     cursor: str | None = None,
     limit: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    return service.list_activity(db, user, target_type, target_id, cursor, limit)
+    return service.list_activity(
+        db, user, target_type, target_id, cursor, limit, project_id=project_id
+    )
 
 
 @router.get("/targets/{target_type}/{target_id}/references")
 def list_references(
     target_type: str,
-    target_id: uuid.UUID,
+    target_id: str,
     cursor: str | None = None,
     limit: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    return service.list_references(db, user, target_type, target_id, cursor, limit)
+    return service.list_references(
+        db, user, target_type, target_id, cursor, limit, project_id=project_id
+    )
 
 
 @router.post("/targets/{target_type}/{target_id}/references", status_code=201)
 def create_reference(
     target_type: str,
-    target_id: uuid.UUID,
+    target_id: str,
     body: ReferenceCreate,
+    project_id: uuid.UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
     ref = service.create_reference(
-        db, user, body.from_type, body.from_id, body.to_type, body.to_id, body.type
+        db, user, body.from_type, body.from_id, body.to_type, body.to_id, body.type,
+        project_id=project_id,
     )
     return {
         "id": str(ref.id),
@@ -102,3 +117,46 @@ def delete_reference(
 ) -> dict:
     service.delete_reference(db, user, ref_id)
     return {"ok": True}
+
+
+@router.get("/targets/{target_type}/{target_id}/watch")
+def get_watch_state(
+    target_type: str,
+    target_id: str,
+    project_id: uuid.UUID | None = None,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    return {
+        "watching": notification_service.is_watching(
+            db, user, target_type, target_id, project_id=project_id
+        )
+    }
+
+
+@router.post("/targets/{target_type}/{target_id}/watch", status_code=201)
+def watch_target(
+    target_type: str,
+    target_id: str,
+    project_id: uuid.UUID | None = None,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    notification_service.watch_entity(
+        db, user, target_type, target_id, project_id=project_id
+    )
+    return {"watching": True}
+
+
+@router.delete("/targets/{target_type}/{target_id}/watch")
+def unwatch_target(
+    target_type: str,
+    target_id: str,
+    project_id: uuid.UUID | None = None,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    notification_service.unwatch_entity(
+        db, user, target_type, target_id, project_id=project_id
+    )
+    return {"watching": False}

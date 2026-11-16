@@ -37,10 +37,10 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
           <div
             key={notice.id}
             role="alert"
-            className={`flex items-start gap-3 rounded-lg border bg-background p-4 text-sm shadow-lg ${notice.variant === 'success' ? 'border-emerald-500/30' : 'border-destructive/30'}`}
+            className={`flex items-start gap-3 rounded-lg border bg-background p-4 text-sm shadow-lg ${notice.variant === 'success' ? 'border-emerald-500/30 dark:border-emerald-500/40' : 'border-destructive/30'}`}
           >
             {notice.variant === 'success'
-              ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+              ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
               : <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />}
             <p className="flex-1 text-foreground">{notice.message}</p>
             <Button

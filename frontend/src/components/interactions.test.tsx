@@ -9,6 +9,7 @@ vi.mock('@/lib/api', () => {
     constructor(status: number, message: string) { super(message); this.status = status }
   }
   return {
+  withProject: (path: string) => path,
     ApiError,
     api: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn(), upload: vi.fn() },
     STATUS_LABEL: { backlog: '待办', in_progress: '实现中', verifying: '验收中', done: '已完成', cancelled: '已取消' },

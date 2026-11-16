@@ -47,8 +47,8 @@ vi.mock('@/lib/auth', () => ({
 import { ApiError, api, type MemberRow } from '@/lib/api'
 
 const rows: MemberRow[] = [
-  { id: 'u1', username: 'admin', role: 'admin', created_at: '2026-08-01T00:00:00Z', is_bootstrap: true, is_self: true, has_password: true },
-  { id: 'u2', username: 'bob', role: 'member', created_at: '2026-08-02T00:00:00Z', is_bootstrap: false, is_self: false, has_password: false },
+  { id: 'u1', username: 'admin', role: 'admin', created_at: '2026-08-01T00:00:00Z', is_bootstrap: true, is_self: true, has_password: true, agent: { id: 'a1', username: 'admin-bot', nickname: null, display_name: 'admin-bot', created_at: '2026-08-03T00:00:00Z', active_keys: 2 } },
+  { id: 'u2', username: 'bob', role: 'member', created_at: '2026-08-02T00:00:00Z', is_bootstrap: false, is_self: false, has_password: false, agent: null },
 ]
 
 function renderMembers() {
@@ -61,6 +61,132 @@ function renderMembers() {
     </QueryClientProvider>,
   )
 }
+
+const agentDetail = {
+  id: 'a1',
+  username: 'admin-bot',
+  nickname: null,
+  display_name: 'admin-bot',
+  avatar: null,
+  is_agent: true,
+  created_at: '2026-08-03T00:00:00Z',
+  active_keys: 1,
+  keys: [
+    { id: 'k1', note: '日常', created_at: '2026-08-03T00:00:00Z', revoked_at: null },
+  ],
+}
+
+describe('ManageAgentDialog 自助管理', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    workspaceRole = 'admin'
+  })
+
+  it('可打开 Agent 资料编辑(昵称/头像)', async () => {
+    vi.mocked(api.get).mockImplementation((path: string) => {
+      if (path === '/members') return Promise.resolve(rows)
+      if (path === '/my-agent') return Promise.resolve({ agent: agentDetail })
+      return Promise.resolve({})
+    })
+    renderMembers()
+    const user = (await import('@testing-library/user-event')).default
+
+    await user.click(await screen.findByRole('button', { name: '管理 Agent 与 key' }))
+    await user.click(await screen.findByRole('button', { name: '编辑资料' }))
+
+    expect(await screen.findByRole('dialog', { name: '编辑 admin-bot 的资料' })).toBeInTheDocument()
+    expect(screen.getByLabelText('昵称')).toBeInTheDocument()
+  })
+
+  it('签发新 key 用弹窗展示明文并提供复制操作', async () => {
+    vi.mocked(api.get).mockImplementation((path: string) => {
+      if (path === '/members') return Promise.resolve(rows)
+      if (path === '/my-agent') return Promise.resolve({ agent: agentDetail })
+      return Promise.resolve({})
+    })
+    vi.mocked(api.post).mockResolvedValue({ token: 'zk-new-abc123' })
+    renderMembers()
+    const user = (await import('@testing-library/user-event')).default
+
+    await user.click(await screen.findByRole('button', { name: '管理 Agent 与 key' }))
+    await user.click(screen.getByRole('button', { name: '签发' }))
+
+    expect(await screen.findByRole('dialog', { name: 'API key 已签发' })).toBeInTheDocument()
+    expect(screen.getByLabelText('新签发的 API key 明文')).toHaveValue('zk-new-abc123')
+    expect(screen.getByRole('button', { name: '复制' })).toBeInTheDocument()
+  })
+
+  it('回看 key 经密码验证弹窗展示明文,错误密码在弹窗内提示', async () => {
+    vi.mocked(api.get).mockImplementation((path: string) => {
+      if (path === '/members') return Promise.resolve(rows)
+      if (path === '/my-agent') return Promise.resolve({ agent: agentDetail })
+      return Promise.resolve({})
+    })
+    vi.mocked(api.post).mockImplementation((path: string, body?: unknown) => {
+      if (path === '/my-agent/keys/k1/reveal') {
+        const password = (body as { password: string }).password
+        if (password !== 'admin-pass-1') return Promise.reject(new ApiError(403, '密码验证失败'))
+        return Promise.resolve({ token: 'zk-reveal-tok' })
+      }
+      return Promise.resolve({})
+    })
+    renderMembers()
+    const user = (await import('@testing-library/user-event')).default
+
+    await user.click(await screen.findByRole('button', { name: '管理 Agent 与 key' }))
+    await user.click(screen.getByRole('button', { name: '回看' }))
+
+    expect(await screen.findByRole('dialog', { name: '回看 API key' })).toBeInTheDocument()
+    const passwordInput = screen.getByLabelText('你的密码')
+    expect(passwordInput).toHaveAttribute('autocomplete', 'current-password')
+
+    await user.type(passwordInput, 'wrong')
+    await user.click(screen.getByRole('button', { name: '验证并显示' }))
+    expect(await screen.findByText('密码验证失败')).toBeInTheDocument()
+
+    await user.clear(passwordInput)
+    await user.type(passwordInput, 'admin-pass-1')
+    await user.click(screen.getByRole('button', { name: '验证并显示' }))
+    expect(await screen.findByLabelText('回看的 API key 明文')).toHaveValue('zk-reveal-tok')
+    expect(screen.getByRole('button', { name: '复制' })).toBeInTheDocument()
+  })
+
+  it('删除 Agent 需确认,确认后调用 DELETE /my-agent', async () => {
+    vi.mocked(api.get).mockImplementation((path: string) => {
+      if (path === '/members') return Promise.resolve(rows)
+      if (path === '/my-agent') return Promise.resolve({ agent: agentDetail })
+      return Promise.resolve({})
+    })
+    vi.mocked(api.delete).mockResolvedValue({ ok: true })
+    renderMembers()
+    const user = (await import('@testing-library/user-event')).default
+
+    await user.click(await screen.findByRole('button', { name: '管理 Agent 与 key' }))
+    await user.click(await screen.findByRole('button', { name: /删除 Agent/ }))
+
+    expect(await screen.findByRole('dialog', { name: '删除附属 Agent' })).toBeInTheDocument()
+    expect(screen.getByText(/需换一个用户名/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '确认删除' }))
+    expect(api.delete).toHaveBeenCalledWith('/my-agent')
+  })
+
+  it('取消删除不调用接口', async () => {
+    vi.mocked(api.get).mockImplementation((path: string) => {
+      if (path === '/members') return Promise.resolve(rows)
+      if (path === '/my-agent') return Promise.resolve({ agent: agentDetail })
+      return Promise.resolve({})
+    })
+    renderMembers()
+    const user = (await import('@testing-library/user-event')).default
+
+    await user.click(await screen.findByRole('button', { name: '管理 Agent 与 key' }))
+    await user.click(await screen.findByRole('button', { name: /删除 Agent/ }))
+    await user.click(await screen.findByRole('button', { name: '取消' }))
+
+    expect(api.delete).not.toHaveBeenCalled()
+  })
+})
 
 describe('MembersPage 成员列表渲染', () => {
   beforeEach(() => {

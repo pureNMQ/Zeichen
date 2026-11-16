@@ -18,7 +18,16 @@ dist/
 .env
 .env.*
 !.env.example
+
+# DSH local tooling
+.dsh/
 !deploy/.env.prod.example
+
+# 环境专属 compose override(含公网 IP,勿提交开源仓库)
+/deploy/docker-compose.ip.yml
+
+# ZCode local tooling(workspace skills 符号链接指向 Skills/,勿提交)
+/.zcode/
 
 # Cognee
 .cognee_data/
@@ -35,6 +44,9 @@ Thumbs.db
 .scratch/*.log
 **/.scratch/attachments/
 
+# 受管 Cognee runtime env(worker 运行时以 root:0600 重写并写入解密后的 LLM 密钥,防泄漏)
+.scratch/cognee-runtime.env
+
 # Local Codex MCP credentials/configuration (project-scoped, never commit)
 /.codex/config.toml
 
@@ -44,3 +56,4 @@ Thumbs.db
 # 生产 TLS 证书(部署机上传,勿提交)
 certs/
 
+backups/

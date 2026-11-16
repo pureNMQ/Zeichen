@@ -1,122 +1,83 @@
-"""Agent API(仅 admin):创建 / 列表 / 更新授权 / 删除 + key 生命周期。"""
+"""附属 Agent 自助 API(ADR 0004):/api/my-agent 全集。
+
+旧 admin 代建端点(/api/agents 全集)已移除;admin 保留紧急吊销,挂 members 路由。
+"""
 
 import uuid
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..models import ApiKey, Project, ProjectMember, User
-from ..schemas import AgentCreate, AgentUpdate, KeyIssue, KeyReveal
+from ..models import User
+from ..schemas import AgentProfileUpdate, KeyIssue, KeyReveal, MyAgentCreate
 from ..services import agents as agents_service
-from ..services.user_profiles import payload as profile_payload
-from .deps import current_admin
+from .deps import current_user
 
-router = APIRouter(prefix="/api/agents", tags=["agents"])
-
-
-def _grant_payload(db: Session, agent_id: uuid.UUID) -> list[dict]:
-    rows = db.execute(
-        select(Project.id, Project.name, ProjectMember.role)
-        .join(ProjectMember, ProjectMember.project_id == Project.id)
-        .where(ProjectMember.user_id == agent_id, Project.deleted_at.is_(None))
-        .order_by(Project.name)
-    ).all()
-    return [{"project_id": str(pid), "name": name, "role": role} for pid, name, role in rows]
-
-
-def _agent_payload(db: Session, agent: User) -> dict:
-    keys = db.scalars(select(ApiKey).where(ApiKey.user_id == agent.id)).all()
-    active = sum(1 for k in keys if k.revoked_at is None)
-    return {
-        **profile_payload(agent),
-        "created_at": agent.created_at.isoformat(),
-        "grants": _grant_payload(db, agent.id),
-        "key_count": len(keys),
-        "active_keys": active,
-    }
+router = APIRouter(prefix="/api/my-agent", tags=["agents"])
 
 
 @router.get("")
-def list_agents(admin: User = Depends(current_admin), db: Session = Depends(get_db)) -> list[dict]:
-    return [_agent_payload(db, a) for a in agents_service.list_agents(db)]
+def get_my_agent(user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+    agent = agents_service.get_owned_agent(db, user.id)
+    if agent is None:
+        return {"agent": None}
+    return {"agent": agents_service.agent_detail(db, agent)}
 
 
 @router.post("", status_code=201)
-def create_agent(
-    body: AgentCreate, admin: User = Depends(current_admin), db: Session = Depends(get_db)
-) -> dict:
-    agent = agents_service.create_agent(
-        db, admin, body.username.strip(), [g.model_dump() for g in body.project_grants]
-    )
-    return _agent_payload(db, agent)
-
-
-@router.patch("/{agent_id}")
-def update_agent(
-    agent_id: uuid.UUID,
-    body: AgentUpdate,
-    admin: User = Depends(current_admin),
+def create_my_agent(
+    body: MyAgentCreate,
+    user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    grants = [g.model_dump() for g in body.project_grants] if body.project_grants is not None else None
-    agent = agents_service.update_agent(db, admin, agent_id, body.username, grants)
-    return _agent_payload(db, agent)
+    agent = agents_service.create_agent(db, user, body.username.strip())
+    return {"agent": agents_service.agent_detail(db, agent)}
 
 
-@router.delete("/{agent_id}")
-def delete_agent(
-    agent_id: uuid.UUID, admin: User = Depends(current_admin), db: Session = Depends(get_db)
+@router.patch("")
+def update_my_agent(
+    body: AgentProfileUpdate,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
 ) -> dict:
-    agents_service.delete_agent(db, admin, agent_id)
+    agent = agents_service.require_owned_agent(db, user.id)
+    from ..services.user_profiles import payload, update_profile
+
+    update_profile(db, user, agent.id, body.nickname)
+    return {"agent": agents_service.agent_detail(db, agent)}
+
+
+@router.delete("")
+def delete_my_agent(
+    user: User = Depends(current_user), db: Session = Depends(get_db)
+) -> dict:
+    agents_service.delete_agent(db, user)
     return {"ok": True}
 
 
-@router.get("/{agent_id}/keys")
-def list_keys(
-    agent_id: uuid.UUID, admin: User = Depends(current_admin), db: Session = Depends(get_db)
-) -> list[dict]:
-    return [
-        {
-            "id": str(k.id),
-            "note": k.note,
-            "created_at": k.created_at.isoformat(),
-            "revoked_at": k.revoked_at.isoformat() if k.revoked_at else None,
-        }
-        for k in agents_service.list_keys(db, agent_id)
-    ]
-
-
-@router.post("/{agent_id}/keys", status_code=201)
+@router.post("/keys", status_code=201)
 def issue_key(
-    agent_id: uuid.UUID,
-    body: KeyIssue,
-    admin: User = Depends(current_admin),
-    db: Session = Depends(get_db),
+    body: KeyIssue, user: User = Depends(current_user), db: Session = Depends(get_db)
 ) -> dict:
-    key, token = agents_service.issue_key(db, agent_id, body.note)
+    key, token = agents_service.issue_key(db, user, body.note)
     return {"id": str(key.id), "token": token, "note": key.note}
 
 
-@router.post("/{agent_id}/keys/{key_id}/reveal")
+@router.post("/keys/{key_id}/reveal")
 def reveal_key(
-    agent_id: uuid.UUID,
     key_id: uuid.UUID,
     body: KeyReveal,
-    admin: User = Depends(current_admin),
+    user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    token = agents_service.reveal_key(db, admin, body.password, agent_id, key_id)
+    token = agents_service.reveal_key(db, user, body.password, key_id)
     return {"token": token}
 
 
-@router.post("/{agent_id}/keys/{key_id}/revoke")
+@router.delete("/keys/{key_id}")
 def revoke_key(
-    agent_id: uuid.UUID,
-    key_id: uuid.UUID,
-    admin: User = Depends(current_admin),
-    db: Session = Depends(get_db),
+    key_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)
 ) -> dict:
-    agents_service.revoke_key(db, agent_id, key_id)
+    agents_service.revoke_key(db, user, key_id)
     return {"ok": True}

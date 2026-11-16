@@ -28,16 +28,12 @@ const ACTION_LABEL: Record<string, string> = {
   attachment_delete: '删除附件',
   attachment_restore: '恢复附件',
   reference: '添加引用',
-  memory_remember: '写入记忆',
-  memory_improve: '蒸馏记忆',
-  memory_forget: '删除记忆',
 }
 
 const TARGET_LABEL: Record<string, string> = {
   requirement: '需求',
   task: '任务',
   document: '文档',
-  code_symbol: '代码符号',
   project: '项目',
 }
 
@@ -45,15 +41,22 @@ function targetHref(targetType: string, targetId: string): string {
   switch (targetType) {
     case 'requirement':
       return `/requirements/${targetId}`
-    case 'task':
-      return `/tasks/${targetId}`
     case 'document':
       return `/documents/wiki/${targetId}`
-    case 'code_symbol':
-      return `/code-reference/${targetId}`
     default:
       return '/projects'
   }
+}
+
+// 任务无独立页面(ADR 0003):先查任务拿所属需求,再定位需求详情页任务弹窗
+async function taskHref(taskId: string): Promise<string> {
+  try {
+    const t = await api.get<{ requirement_id: string | null }>(`/tasks/${taskId}`)
+    if (t.requirement_id) return `/requirements/${t.requirement_id}?task=${taskId}`
+  } catch {
+    // 任务不存在/无权限时回退项目页
+  }
+  return '/projects'
 }
 
 export function NotificationBell() {
@@ -84,7 +87,11 @@ export function NotificationBell() {
         }
       }
       setOpen(false)
-      navigate(targetHref(n.target_type, n.target_id))
+      const href =
+        n.target_type === 'task'
+          ? await taskHref(n.target_id)
+          : targetHref(n.target_type, n.target_id)
+      navigate(href)
     },
     [navigate, queryClient],
   )

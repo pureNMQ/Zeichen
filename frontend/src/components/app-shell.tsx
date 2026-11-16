@@ -1,10 +1,11 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { ChevronDown, LogOut, KeyRound, Search, UserRound } from 'lucide-react'
+import { ChevronDown, LogOut, KeyRound, Search, UserRound, Sun, Moon } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { useCurrentProject } from '@/lib/current-project'
 import { useDocumentNavigation } from '@/lib/document-navigation'
+import { useTheme } from '@/lib/theme'
 import { Button } from '@/components/ui/button'
 import { UserAvatar } from '@/components/user-avatar'
 import { identityName } from '@/lib/user-identity'
@@ -12,6 +13,7 @@ import { UserProfileDialog } from '@/components/user-profile-dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NotificationBell } from '@/components/notification-bell'
+import { NotificationPreferencesDialog } from '@/components/notification-preferences-dialog'
 import {
   Dialog,
   DialogContent,
@@ -39,20 +41,16 @@ import {
 const TEAM_NAV = [
   { to: '/projects', label: '项目' },
   { to: '/members', label: '成员' },
-  { to: '/agents', label: 'Agent', adminOnly: true },
-  { to: '/cognee', label: 'Cognee 管理', adminOnly: true },
 ]
 
 const WORKSPACE_NAV = [
   { to: '/requirements', label: '需求' },
-  { to: '/tasks', label: '任务' },
   { to: '/repositories', label: '代码仓库' },
+  { to: '/manual', label: '使用手册' },
 ]
 
 const DOCUMENT_NAV = [
   { to: '/documents/wiki', label: 'Wiki' },
-  { to: '/documents/glossary', label: '词条' },
-  { to: '/code-reference', label: '代码 API 参考' },
 ]
 
 function GuardedNavLink({ to, children }: { to: string; children: ReactNode }) {
@@ -239,6 +237,24 @@ function ChangePasswordDialog({ open, onOpenChange }: { open: boolean; onOpenCha
   )
 }
 
+function ThemeToggleButton() {
+  const { theme, toggleTheme } = useTheme()
+
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon-sm"
+      className="shrink-0"
+      aria-label="切换主题"
+      title={`切换主题(当前${theme === 'dark' ? '暗色' : '浅色'})`}
+      onClick={toggleTheme}
+    >
+      {theme === 'dark' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+    </Button>
+  )
+}
+
 function GlobalSearchBox() {
   const [query, setQuery] = useState('')
   const navigate = useNavigate()
@@ -271,9 +287,9 @@ function GlobalSearchBox() {
 
 export function AppShell() {
   const { user, logout, refresh } = useAuth()
-  const { role } = useCurrentProject()
   const navigate = useNavigate()
   const [pwdOpen, setPwdOpen] = useState(false)
+  const [prefsOpen, setPrefsOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
 
   const isAdmin = user?.workspace_role === 'admin'
@@ -287,16 +303,13 @@ export function AppShell() {
           <NavGroup title="团队功能" items={TEAM_NAV} isAdmin={isAdmin} />
           <div className="mx-3 my-1 border-t" />
           <NavGroup title="工作区" items={WORKSPACE_NAV} isAdmin={isAdmin} />
-          {(role === 'editor' || role === 'owner') && (
-            <GuardedNavLink to="/memory">记忆</GuardedNavLink>
-          )}
           <DocumentNav />
         </nav>
         <ProjectSwitcher />
         <div className="flex items-center gap-1 border-t p-2">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="w-full justify-start gap-2 font-normal">
+              <Button variant="ghost" className="min-w-0 flex-1 justify-start gap-2 font-normal">
                 {user && <UserAvatar user={user} className="h-6 w-6" />}
                 <span className="truncate">{user ? identityName(user) : ''}</span>
               </Button>
@@ -317,6 +330,9 @@ export function AppShell() {
                 <KeyRound className="mr-2 h-4 w-4" />
                 修改密码
               </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setPrefsOpen(true)}>
+                通知偏好
+              </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={async () => {
                   await logout()
@@ -328,6 +344,7 @@ export function AppShell() {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          <ThemeToggleButton />
           <NotificationBell />
         </div>
       </aside>
@@ -335,6 +352,7 @@ export function AppShell() {
         <Outlet />
       </main>
       <ChangePasswordDialog open={pwdOpen} onOpenChange={setPwdOpen} />
+      <NotificationPreferencesDialog open={prefsOpen} onOpenChange={setPrefsOpen} />
       {user && (
         <UserProfileDialog
           user={user}

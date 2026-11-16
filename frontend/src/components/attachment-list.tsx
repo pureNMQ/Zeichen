@@ -1,7 +1,7 @@
 import { useRef, useState, type ChangeEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Download, Paperclip, Trash2, Upload } from 'lucide-react'
-import { api, ApiError, type AttachmentRow } from '@/lib/api'
+import { api, ApiError, withProject, type AttachmentRow } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ErrorNotification, useNotification } from '@/components/ui/notification'
@@ -25,7 +25,7 @@ export function AttachmentList({ targetType, targetId }: { targetType: string; t
     queryKey: ['attachments', targetType, targetId],
     queryFn: () =>
       api
-        .get<{ items: AttachmentRow[] }>(`/targets/${targetType}/${targetId}/attachments`)
+        .get<{ items: AttachmentRow[] }>(withProject(`/targets/${targetType}/${targetId}/attachments`))
         .then((r) => r.items),
   })
 
@@ -38,7 +38,7 @@ export function AttachmentList({ targetType, targetId }: { targetType: string; t
     setError(null)
     setUploading(true)
     try {
-      await api.upload<AttachmentRow>(`/targets/${targetType}/${targetId}/attachments`, file)
+      await api.upload<AttachmentRow>(withProject(`/targets/${targetType}/${targetId}/attachments`), file)
       await queryClient.invalidateQueries({ queryKey: ['attachments', targetType, targetId] })
     } catch (err) {
       setError(err instanceof ApiError ? err.message : '上传失败,请重试')

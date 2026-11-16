@@ -39,19 +39,12 @@ class MemberUpdate(BaseModel):
     role: Literal["admin", "member"]
 
 
-class ProjectGrant(BaseModel):
-    project_id: uuid.UUID
-    role: Literal["owner", "editor", "viewer"]
-
-
-class AgentCreate(BaseModel):
+class MyAgentCreate(BaseModel):
     username: str = Field(min_length=1, max_length=64)
-    project_grants: list[ProjectGrant] = []
 
 
-class AgentUpdate(BaseModel):
-    username: str | None = Field(default=None, min_length=1, max_length=64)
-    project_grants: list[ProjectGrant] | None = None
+class AgentProfileUpdate(BaseModel):
+    nickname: str | None = Field(default=None, max_length=64)
 
 
 class KeyIssue(BaseModel):
@@ -85,41 +78,6 @@ class ProjectUpdate(BaseModel):
     name: str = Field(min_length=1, max_length=128)
 
 
-class ProjectDelete(BaseModel):
-    confirm_memory_cleanup: bool = False
-
-
-class MemoryRemember(BaseModel):
-    session_id: str = Field(min_length=1, max_length=256)
-    content: str = Field(min_length=1, max_length=20000)
-    anchor: dict | None = None
-
-
-class MemoryRecall(BaseModel):
-    query: str = Field(min_length=1, max_length=2000)
-    session_id: str | None = Field(default=None, max_length=256)
-
-
-class MemoryImprove(BaseModel):
-    agent_id: uuid.UUID
-    session_id: str = Field(min_length=1, max_length=256)
-
-
-class CogneeConfigurationUpdate(BaseModel):
-    llm_provider: str = Field(min_length=1, max_length=64)
-    llm_model: str = Field(min_length=1, max_length=256)
-    llm_endpoint: str | None = Field(default=None, max_length=2048)
-    # Omit the key to retain the stored value; an empty value explicitly clears it.
-    llm_api_key: str | None = Field(default=None, max_length=4096)
-    embedding_provider: str = Field(min_length=1, max_length=64)
-    embedding_model: str = Field(min_length=1, max_length=256)
-    embedding_dimensions: int | None = Field(default=None, ge=1, le=65536)
-
-
-class CogneeRestartRequest(BaseModel):
-    confirmed: bool = False
-
-
 class RequirementCreate(BaseModel):
     title: str = Field(min_length=1, max_length=256)
     description: str | None = None
@@ -141,14 +99,17 @@ class RequirementDeleteBody(BaseModel):
 class TaskCreate(BaseModel):
     title: str = Field(min_length=1, max_length=256)
     description: str | None = None
-    requirement_id: uuid.UUID | None = None
+    # 必填由服务层强制(缺失 → invalid_request,而非 422;ADR 0003);值为需求短码 REQ-n(ADR 0002)
+    requirement_id: str | None = None
     assignee_id: uuid.UUID | None = None
+    blocked_by: list[str] | None = None
 
 
 class TaskUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=256)
     description: str | None = None
-    requirement_id: uuid.UUID | None = None
+    requirement_id: str | None = None
+    blocked_by: list[str] | None = None
 
 
 class TaskAssignBody(BaseModel):
@@ -157,11 +118,10 @@ class TaskAssignBody(BaseModel):
 
 class DocumentCreate(BaseModel):
     title: str = Field(min_length=1, max_length=256)
-    doc_type: Literal["wiki", "glossary"]
+    doc_type: Literal["wiki"]
     content: str | None = None
     metadata: dict = {}
-    parent_id: uuid.UUID | None = None
-    directory_id: uuid.UUID | None = None
+    parent_id: str | None = None
 
 
 class DocumentUpdate(BaseModel):
@@ -170,42 +130,19 @@ class DocumentUpdate(BaseModel):
     metadata: dict | None = None
 
 
-class CodeLibraryCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=128)
-    language: str = Field(min_length=1, max_length=32)
-    package: str = Field(min_length=1, max_length=256)
-    version: str | None = Field(default=None, max_length=64)
+class FilterViewCreate(BaseModel):
+    """字段类型宽松,校验放 service(保证 400 而非 422)。"""
+
+    entity_type: str | None = None
+    name: str | None = None
+    criteria: dict | None = None
 
 
-class CodeSymbolCreate(BaseModel):
-    owner_symbol_id: uuid.UUID | None = None
-    namespace: str | None = Field(default=None, max_length=256)
-    kind: Literal["class", "struct", "interface", "enum", "function", "constructor", "method", "field", "property", "constant"]
-    name: str = Field(min_length=1, max_length=256)
-    summary: str = Field(min_length=1, max_length=512)
-    remarks: str | None = None
-    accessibility: Literal["public", "protected", "internal", "private"] = "public"
-    source_declaration: str | None = None
-    since_version: str | None = Field(default=None, max_length=64)
-    deprecated: bool = False
-    definition: dict
+class FilterViewUpdate(BaseModel):
+    """PATCH:name/criteria 可只传其一;model_fields_set 区分未传与传 null。"""
 
-
-class CodeSymbolUpdate(BaseModel):
-    expected_revision: int = Field(ge=1)
-    name: str | None = Field(default=None, min_length=1, max_length=256)
-    summary: str | None = Field(default=None, min_length=1, max_length=512)
-    remarks: str | None = None
-    accessibility: Literal["public", "protected", "internal", "private"] | None = None
-    source_declaration: str | None = None
-    since_version: str | None = Field(default=None, max_length=64)
-    deprecated: bool | None = None
-    definition: dict | None = None
-
-
-class CodeSymbolRollback(BaseModel):
-    revision: int = Field(ge=1)
-    expected_revision: int = Field(ge=1)
+    name: str | None = None
+    criteria: dict | None = None
 
 
 class RepositoryCreate(BaseModel):
@@ -227,21 +164,7 @@ class RepositoryUpdate(BaseModel):
 
 
 class DocumentMove(BaseModel):
-    parent_id: uuid.UUID | None = None
-    directory_id: uuid.UUID | None = None
-
-
-class DirectoryCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=128)
-    parent_id: uuid.UUID | None = None
-
-
-class DirectoryRename(BaseModel):
-    name: str = Field(min_length=1, max_length=128)
-
-
-class DirectoryMove(BaseModel):
-    parent_id: uuid.UUID | None = None
+    parent_id: str | None = None
 
 
 class RollbackBody(BaseModel):
@@ -253,8 +176,14 @@ class CommentCreate(BaseModel):
 
 
 class ReferenceCreate(BaseModel):
-    from_type: Literal["requirement", "task", "document", "code_symbol", "repository", "project"]
-    from_id: uuid.UUID
-    to_type: Literal["requirement", "task", "document", "code_symbol", "repository", "project"]
-    to_id: uuid.UUID
+    # 五类实体端点传短码(REQ/TASK/DOC/TERM/DIR-n);repository/project 端点传 UUID(ADR 0002)
+    from_type: Literal["requirement", "task", "document", "repository", "project"]
+    from_id: str
+    to_type: Literal["requirement", "task", "document", "repository", "project"]
+    to_id: str
     type: Literal["derives", "documents", "implements", "mentions"]
+
+
+class NotificationPreferencesUpdate(BaseModel):
+    domains: dict[str, bool] = {}
+    actions: dict[str, bool] = {}
