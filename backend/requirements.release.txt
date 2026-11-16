@@ -23,6 +23,8 @@ jsonschema-specifications==2025.9.1
 Mako==1.4.3
 MarkupSafe==3.0.3
 mcp==1.30.0
+markdown-it-py==4.3.0
+mdurl==0.1.2
 opentelemetry-api==1.45.0
 psycopg==3.3.6
 psycopg-binary==3.3.6

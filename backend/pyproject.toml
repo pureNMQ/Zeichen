@@ -16,6 +16,7 @@ dependencies = [
     "cryptography>=44",
     # wiki frontmatter 解析(REQ-59;此前经 mcp 传递依赖引入,现显式声明)
     "pyyaml>=6",
+    "markdown-it-py>=4.3,<5",
     # mcp 2.0 重构了 auth/FastMCP 结构(§9 验证),锁定 1.29 线
     "mcp>=1.29,<2",
 ]
