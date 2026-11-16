@@ -13,7 +13,8 @@ def test_user_profile_migration_upgrade_and_downgrade(tmp_path, monkeypatch):
     get_settings.cache_clear()
     config = Config(str(Path(__file__).parents[2] / "alembic.ini"))
 
-    command.upgrade(config, "head")
+    # Only exercise the profile migration's upgrade/downgrade contract.
+    command.upgrade(config, "0814usernicknameavatar")
     engine = create_engine(f"sqlite:///{db_path.as_posix()}")
     columns = {column["name"]: column for column in inspect(engine).get_columns("user")}
     assert columns["nickname"]["nullable"] is True

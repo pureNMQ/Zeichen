@@ -28,7 +28,8 @@ def test_pending_status_constraint_upgrades_and_downgrades(tmp_path, monkeypatch
     database_path = tmp_path / "pending-status.db"
     config = _config(database_path, monkeypatch)
 
-    command.upgrade(config, "head")
+    # Test this migration's reversible boundary, not later irreversible releases.
+    command.upgrade(config, "0813requirementpending")
     assert "'pending'" in _requirement_sql(database_path)
 
     command.downgrade(config, "0812memoryimprovejobs")

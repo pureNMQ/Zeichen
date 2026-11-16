@@ -31,7 +31,8 @@ def test_short_description_migration_normalizes_existing_data(tmp_path, monkeypa
         )
         connection.commit()
 
-    command.upgrade(config, "head")
+    # Later releases deliberately contain irreversible data migrations.
+    command.upgrade(config, "0818shortdescriptions")
     with sqlite3.connect(database_path) as connection:
         requirement_description = connection.execute("SELECT description FROM requirement").fetchone()[0]
         task_description = connection.execute("SELECT description FROM task").fetchone()[0]
