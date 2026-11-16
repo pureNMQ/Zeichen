@@ -409,6 +409,48 @@ def test_cursor_pagination_over_mcp(mcp_server: dict):
     assert "invalid_request" in err["error"]
 
 
+def test_search_query_paginates_over_mcp(mcp_server: dict):
+    client = RawMcpClient(mcp_server["url"], mcp_server["token"])
+    client.initialize()
+    query = "MCP 搜索分页专用"
+    ids = {
+        client.call("requirements.create", project_id=mcp_server["project_id"], title=f"{query} {i}")["id"]
+        for i in range(4)
+    }
+    filters = {"query": query, "domains": ["requirement"]}
+    first = client.call("search.query", **filters, limit=2)
+    second = client.call("search.query", **filters, cursor=first["next_cursor"])
+    first_ids = {item["id"] for item in first["items"]}
+    second_ids = {item["id"] for item in second["items"]}
+    assert len(first_ids) == len(second_ids) == 2
+    assert not first_ids & second_ids
+    assert first_ids | second_ids == ids
+    assert second["next_cursor"] is None
+    different_query = client.call("search.query", query="不同查询", cursor=first["next_cursor"])
+    assert "invalid_request:" in different_query["error"]
+
+
+@pytest.mark.parametrize(
+    ("tool", "field", "other_args"),
+    [
+        ("project.get", "id", {}),
+        ("repositories.get", "id", {}),
+        ("requirements.list", "project_id", {}),
+        ("tasks.assign", "assignee_id", {"id": "TASK-1"}),
+        ("comment.list", "target_id", {"target_type": "project"}),
+        ("attachment.download", "attachment_id", {}),
+    ],
+)
+def test_invalid_uuid_reports_field_over_mcp(mcp_server: dict, tool: str, field: str, other_args: dict):
+    client = RawMcpClient(mcp_server["url"], mcp_server["token"])
+    client.initialize()
+    args = {**other_args, field: "not-a-uuid"}
+    if tool == "tasks.assign":
+        args["project_id"] = mcp_server["project_id"]
+    response = client.call(tool, **args)
+    assert f"invalid_request: {field}" in response["error"]
+
+
 def test_list_filters_over_mcp(mcp_server: dict):
     """T1:requirements.list / tasks.list 的 keyword、updated_within_days、逗号分隔多状态。
 

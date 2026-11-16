@@ -38,10 +38,10 @@ def decode_cursor_page(filters: dict, cursor: str | None, limit: int | None = No
     payload = _decode(filters, cursor)
     offset = payload["o"]
     if limit is None:
-        encoded = payload.get("l")
-        if isinstance(encoded, int) and encoded > 0:
-            limit = encoded
-    return offset, limit if limit is not None else DEFAULT_PAGE_SIZE
+        limit = payload.get("l", DEFAULT_PAGE_SIZE)
+    if type(limit) is not int or not 1 <= limit <= MAX_PAGE_SIZE:
+        raise invalid_request(f"limit 必须在 1..{MAX_PAGE_SIZE} 之间")
+    return offset, limit
 
 
 def _decode(filters: dict, cursor: str | None) -> dict:
@@ -53,8 +53,8 @@ def _decode(filters: dict, cursor: str | None) -> dict:
         raise invalid_request("游标无效")
     if not isinstance(payload, dict) or payload.get("h") != _hash(filters):
         raise invalid_request("游标与筛选条件不匹配")
-    offset = payload.get("o", 0)
-    if not isinstance(offset, int) or offset < 0:
+    offset = payload.get("o")
+    if type(offset) is not int or offset < 0:
         raise invalid_request("游标无效")
     return payload
 

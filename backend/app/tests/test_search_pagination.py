@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.errors import AppError
+from app.services import documents as docs_svc
 from app.services import requirements as req_svc
 from app.services import search as svc
 from app.services import tasks as task_svc
@@ -169,3 +170,16 @@ class TestSearchApiPagination:
         login(client, "admin", "admin-pass-1")
         assert client.get("/api/search", params={"q": NEEDLE, "limit": 0}).status_code == 422
         assert client.get("/api/search", params={"q": NEEDLE, "limit": 101}).status_code == 422
+
+
+def test_wiki_snippet_contains_match_after_whitespace_and_casefold_expansion(db: Session, world: dict):
+    project_id = world["project"].id
+    body = "导航\n" + "\n" * 200 + "ß" * 180 + "  需要定位的 MatchHere  紧邻文字"
+    document, _ = docs_svc.create_document(db, world["admin"], project_id, "命中片段", "wiki", body, None)
+    wiki = svc.search_documents_paged(db, world["admin"], project_id, "matchhere", limit=1)
+    combined = svc.search(db, world["admin"], "matchhere", ["document"])
+
+    assert wiki["items"][0]["id"] == document.code
+    assert wiki["next_cursor"] is None
+    assert "需要定位的 MatchHere 紧邻文字" in wiki["items"][0]["snippet"]
+    assert wiki["items"][0]["snippet"] == combined["items"][0]["snippet"]

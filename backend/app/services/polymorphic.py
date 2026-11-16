@@ -42,10 +42,15 @@ def resolve_target(
     """
     if target_type not in TARGET_TYPES:
         raise invalid_request(f"不支持的目标类型: {target_type}")
+    if target_type in {"project", "repository"}:
+        try:
+            target_id = uuid.UUID(str(target_id))
+        except ValueError:
+            raise invalid_request("target_id 必须是合法 UUID") from None
     if target_type == "project":
         project = db.scalar(
             select(Project).where(
-                Project.id == uuid.UUID(str(target_id)), Project.deleted_at.is_(None)
+                Project.id == target_id, Project.deleted_at.is_(None)
             )
         )
         if project is None:
@@ -54,7 +59,7 @@ def resolve_target(
     if target_type == "repository":
         repo = db.scalar(
             select(Repository).where(
-                Repository.id == uuid.UUID(str(target_id)), Repository.deleted_at.is_(None)
+                Repository.id == target_id, Repository.deleted_at.is_(None)
             )
         )
         if repo is None:

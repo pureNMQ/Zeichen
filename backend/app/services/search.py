@@ -25,7 +25,7 @@ from ..models import (
     WorkspaceMember,
 )
 from .documents import split_frontmatter
-from .pagination import MAX_PAGE_SIZE, decode_cursor_page, page_result
+from .pagination import decode_cursor_page, encode_cursor
 from .permissions import get_team, is_admin, effective_user_id
 
 SNIPPET_RADIUS = 50
@@ -86,20 +86,34 @@ def _doc_kind_of(document: Document) -> str | None:
     return None
 
 
-def _summary_of(document: Document, body: str) -> str:
+def _summary_of(document: Document, flattened: str) -> str:
     summary = (document.doc_metadata or {}).get("summary")
     if isinstance(summary, str) and summary.strip():
         return summary.strip()
-    return " ".join(body.split())[:120]
+    return flattened[:120]
 
 
-def _snippet(body: str, position: int | None, keyword: str | None) -> str | None:
+def _snippet(flattened: str, folded: str, position: int | None, keyword: str | None) -> str | None:
     """首个命中词上下文窗口片段(约 ±SNIPPET_RADIUS 字),无正文命中返回 None。"""
     if position is None or not keyword:
         return None
-    flattened = " ".join(body.split())
-    start = max(position - SNIPPET_RADIUS, 0)
-    end = min(position + len(keyword) + SNIPPET_RADIUS, len(flattened))
+    match_start, match_end = position, position + len(keyword)
+    if len(folded) != len(flattened):
+        # Locate the source character spans that contain the folded match.
+        # Casefold can expand one source character into several (e.g. ß → ss).
+        source_start = 0
+        folded_end = 0
+        for index, char in enumerate(flattened):
+            folded_end += len(char.casefold())
+            if folded_end <= match_start:
+                source_start = index + 1
+            if folded_end >= match_end:
+                match_start = source_start
+                match_end = index + 1
+                break
+
+    start = max(match_start - SNIPPET_RADIUS, 0)
+    end = min(match_end + SNIPPET_RADIUS, len(flattened))
     snippet = flattened[start:end]
     prefix = "…" if start > 0 else ""
     suffix = "…" if end < len(flattened) else ""
@@ -114,7 +128,8 @@ def _match_document(document: Document, keywords: list[str]) -> dict | None:
     """
     title_cf = document.title.casefold()
     _frontmatter, body = split_frontmatter(document.content)
-    content_cf = body.casefold()
+    flattened = " ".join(body.split())
+    content_cf = flattened.casefold()
     aliases = _aliases_of(document)
     summary = (document.doc_metadata or {}).get("summary")
     summary_cf = summary.casefold() if isinstance(summary, str) else ""
@@ -142,8 +157,8 @@ def _match_document(document: Document, keywords: list[str]) -> dict | None:
                 first_keyword = keyword
     return {
         "score": score,
-        "snippet": _snippet(body, first_pos, first_keyword),
-        "summary": _summary_of(document, body),
+        "snippet": _snippet(flattened, content_cf, first_pos, first_keyword),
+        "summary": _summary_of(document, flattened),
         "doc_kind": _doc_kind_of(document),
     }
 
@@ -197,8 +212,16 @@ def search_documents(db: Session, project_ids: list[uuid.UUID], query: str) -> l
                 "score": match["score"],
             }
         )
-    rows.sort(key=lambda row: (-row["score"], row["title"].casefold()))
+    rows.sort(key=lambda row: (-row["score"], row["title"].casefold(), row["project_id"], row["id"]))
     return rows
+
+
+def _page(rows: list[dict], offset: int, size: int, filters: dict) -> dict:
+    next_offset = offset + size
+    return {
+        "items": rows[offset:next_offset],
+        "next_cursor": encode_cursor(filters, next_offset, size) if next_offset < len(rows) else None,
+    }
 
 
 def search_documents_paged(
@@ -216,13 +239,10 @@ def search_documents_paged(
     query = query.strip()
     if not query:
         raise invalid_request("检索词不能为空")
-    if limit is not None and (limit < 1 or limit > MAX_PAGE_SIZE):
-        raise invalid_request("limit 必须在 1..100 之间")
     filters = {"project_id": str(project_id), "q": query}
     offset, page_size = decode_cursor_page(filters, cursor, limit)
     rows = search_documents(db, [project_id], query)
-    page = rows[offset : offset + page_size]
-    return page_result(page, offset, page_size, filters)
+    return _page(rows, offset, page_size, filters)
 
 
 def search_requirements(db: Session, project_ids: list[uuid.UUID], query: str) -> list[dict]:
@@ -238,7 +258,7 @@ def search_requirements(db: Session, project_ids: list[uuid.UUID], query: str) -
                 Requirement.description.ilike(f"%{needle}%"),
             ),
         )
-        .order_by(Requirement.updated_at.desc(), Requirement.code)
+        .order_by(Requirement.updated_at.desc(), Requirement.project_id, Requirement.code)
     ).all()
     return [
         {
@@ -266,7 +286,7 @@ def search_tasks(db: Session, project_ids: list[uuid.UUID], query: str) -> list[
                 Task.description.ilike(f"%{needle}%"),
             ),
         )
-        .order_by(Task.updated_at.desc(), Task.code)
+        .order_by(Task.updated_at.desc(), Task.project_id, Task.code)
     ).all()
     return [
         {
@@ -300,12 +320,10 @@ def search(
     """
     project_ids = _accessible_project_ids(db, user)
     query = query.strip()
-    if not project_ids or not query:
-        return {"items": []}
-    if limit is not None and (limit < 1 or limit > MAX_PAGE_SIZE):
-        raise invalid_request("limit 必须在 1..100 之间")
     filters = _cursor_filters(query, domains)
     offset, page_size = decode_cursor_page(filters, cursor, limit)
+    if not project_ids or not query:
+        return {"items": [], "next_cursor": None}
     requested = set(domains) if domains else None
 
     items: list[dict] = []
@@ -320,5 +338,4 @@ def search(
         names = _project_names(db, project_ids)
         for item in items:
             item["project_name"] = names.get(uuid.UUID(item["project_id"]), "")
-    page = items[offset : offset + page_size]
-    return page_result(page, offset, page_size, filters)
+    return _page(items, offset, page_size, filters)

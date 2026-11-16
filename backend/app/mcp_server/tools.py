@@ -107,7 +107,7 @@ def _require_scope(project_id: str | None) -> uuid.UUID:
     """短码寻址工具必传 project_id(REQ-55 返工:统一接口,缺省项目的全局解析路径从 MCP 移除)。"""
     if project_id is None or not str(project_id).strip():
         raise ToolError("invalid_request: project_id 必传(短码按项目内寻址,不接受缺省项目)")
-    return _optional_uuid(project_id, "project_id")
+    return _parse_uuid(project_id, "project_id")
 
 
 _ENTITY_TARGET_TYPES = ("requirement", "task", "document")
@@ -124,6 +124,10 @@ def _optional_uuid(value: str | None, field_name: str) -> uuid.UUID | None:
     """Parse an optional MCP UUID while preserving the established empty=root semantics."""
     if value is None or value == "":
         return None
+    return _parse_uuid(value, field_name)
+
+
+def _parse_uuid(value: str, field_name: str) -> uuid.UUID:
     try:
         return uuid.UUID(value)
     except (AttributeError, TypeError, ValueError):
@@ -137,21 +141,21 @@ def _register_all(mcp) -> None:
     def repositories_list(project_id: str) -> dict:
         """列出项目中未删除的代码仓库记录。"""
         db, actor = dbc()
-        return {"items": repository_svc.list_repositories(db, actor, uuid.UUID(project_id))}
+        return {"items": repository_svc.list_repositories(db, actor, _require_scope(project_id))}
 
     @mcp.tool(name="repositories.deleted")
     @sessioned
     def repositories_deleted(project_id: str) -> dict:
         """列出项目中已软删除的代码仓库记录（editor+）。"""
         db, actor = dbc()
-        return {"items": repository_svc.list_repositories(db, actor, uuid.UUID(project_id), deleted=True)}
+        return {"items": repository_svc.list_repositories(db, actor, _require_scope(project_id), deleted=True)}
 
     @mcp.tool(name="repositories.get")
     @sessioned
     def repositories_get(id: str) -> dict:
         """获取代码仓库记录。"""
         db, actor = dbc()
-        return repository_svc.get_repository(db, actor, uuid.UUID(id))
+        return repository_svc.get_repository(db, actor, _parse_uuid(id, "id"))
 
     @mcp.tool(name="repositories.create")
     @sessioned
@@ -167,7 +171,7 @@ def _register_all(mcp) -> None:
         """创建项目代码仓库记录；不保存凭据，也不会连接或同步远端。"""
         db, actor = dbc()
         repository = repository_svc.create_repository(
-            db, actor, uuid.UUID(project_id),
+            db, actor, _require_scope(project_id),
             {
                 "name": name, "vcs_type": vcs_type, "url": url,
                 "other_vcs_type": other_vcs_type, "description": description,
@@ -194,7 +198,7 @@ def _register_all(mcp) -> None:
             "other_vcs_type": other_vcs_type, "description": description,
             "default_branch": default_branch,
         }.items() if value is not _UNSET and (value is not None or key in {"other_vcs_type", "description", "default_branch"})}
-        repository = repository_svc.update_repository(db, actor, uuid.UUID(id), patch)
+        repository = repository_svc.update_repository(db, actor, _parse_uuid(id, "id"), patch)
         return repository_svc._repository_dict(repository)
 
     @mcp.tool(name="repositories.delete")
@@ -202,7 +206,7 @@ def _register_all(mcp) -> None:
     def repositories_delete(id: str) -> dict:
         """软删除代码仓库记录；不影响实际仓库。"""
         db, actor = dbc()
-        repository_svc.delete_repository(db, actor, uuid.UUID(id))
+        repository_svc.delete_repository(db, actor, _parse_uuid(id, "id"))
         return {"deleted": True, "id": id}
 
     @mcp.tool(name="repositories.restore")
@@ -210,7 +214,7 @@ def _register_all(mcp) -> None:
     def repositories_restore(id: str) -> dict:
         """恢复已软删除的代码仓库记录。"""
         db, actor = dbc()
-        repository = repository_svc.restore_repository(db, actor, uuid.UUID(id))
+        repository = repository_svc.restore_repository(db, actor, _parse_uuid(id, "id"))
         return repository_svc._repository_dict(repository)
 
     # ---------- requirements.* ----------
@@ -219,7 +223,7 @@ def _register_all(mcp) -> None:
     def requirements_create(project_id: str, title: str, description: str | None = None) -> dict:
         """创建需求(状态=待确认)。"""
         db, actor = dbc()
-        r = req_svc.create_requirement(db, actor, uuid.UUID(project_id), title, description)
+        r = req_svc.create_requirement(db, actor, _require_scope(project_id), title, description)
         return req_svc._requirement_dict(db, r)
 
     @mcp.tool(name="requirements.get")
@@ -246,7 +250,7 @@ def _register_all(mcp) -> None:
         db, actor = dbc()
         cursor, limit = _paged({}, cursor, limit)
         return req_svc.list_requirements(
-            db, actor, uuid.UUID(project_id), _split_statuses(status), cursor, limit,
+            db, actor, _require_scope(project_id), _split_statuses(status), cursor, limit,
             updated_within_days=updated_within_days, keyword=keyword,
         )
 
@@ -318,9 +322,9 @@ def _register_all(mcp) -> None:
         assignee_id 可空=待认领;blocked_by=前置任务 id 列表,仅同项目)。"""
         db, actor = dbc()
         t = task_svc.create_task(
-            db, actor, uuid.UUID(project_id), title, description,
+            db, actor, _require_scope(project_id), title, description,
             _req_id(requirement_id),
-            uuid.UUID(assignee_id) if assignee_id else None,
+            _optional_uuid(assignee_id, "assignee_id"),
             _uuid_list(blocked_by),
         )
         return task_svc._task_dict(db, t)
@@ -351,8 +355,8 @@ def _register_all(mcp) -> None:
         db, actor = dbc()
         cursor, limit = _paged({}, cursor, limit)
         return task_svc.list_tasks(
-            db, actor, uuid.UUID(project_id), _req_id(requirement_id),
-            uuid.UUID(assignee_id) if assignee_id else None,
+            db, actor, _require_scope(project_id), _req_id(requirement_id),
+            _optional_uuid(assignee_id, "assignee_id"),
             _split_statuses(status), cursor, limit,
             updated_within_days=updated_within_days, keyword=keyword,
         )
@@ -400,7 +404,7 @@ def _register_all(mcp) -> None:
         return task_svc._task_dict(
             db,
             task_svc.assign_task(
-                db, actor, id, uuid.UUID(assignee_id), project_id=_require_scope(project_id)
+                db, actor, id, _parse_uuid(assignee_id, "assignee_id"), project_id=_require_scope(project_id)
             ),
         )
 
@@ -452,7 +456,7 @@ def _register_all(mcp) -> None:
     def _doc_create(project_id: str, title: str, module: str, content: str, metadata: dict | None, parent_id: str | None = None) -> dict:
         db, actor = dbc()
         document, link_warning = document_svc.create_document(
-            db, actor, uuid.UUID(project_id), title, module, content, metadata,
+            db, actor, _require_scope(project_id), title, module, content, metadata,
             parent_id or None,
         )
         return document_svc._document_dict(db, document, warning=link_warning, with_links=True)
@@ -468,7 +472,7 @@ def _register_all(mcp) -> None:
     def _doc_children(project_id: str, module: str, parent_id: str | None, cursor: str | None, limit: int | None) -> dict:
         db, actor = dbc()
         cursor, limit = _paged({"project_id": project_id, "module": module, "parent_id": parent_id}, cursor, limit)
-        return document_svc.list_module_children(db, actor, uuid.UUID(project_id), module, parent_id or None, cursor, limit)
+        return document_svc.list_module_children(db, actor, _require_scope(project_id), module, parent_id or None, cursor, limit)
 
     def _doc_update(
         id: str, module: str, title: str | None, content: str | None,
@@ -517,7 +521,7 @@ def _register_all(mcp) -> None:
 
     def _doc_path(project_id: str, module: str, node_kind: str, id: str) -> dict:
         db, actor = dbc()
-        return document_svc.ancestor_path(db, actor, uuid.UUID(project_id), module, node_kind, id)
+        return document_svc.ancestor_path(db, actor, _require_scope(project_id), module, node_kind, id)
 
     @mcp.tool(name="docs.wiki.create")
     @sessioned
@@ -542,7 +546,7 @@ def _register_all(mcp) -> None:
         每页一行(短码/标题/summary/更新时间/溯源);附带 lint 信号
         (missing_kind/missing_summary/broken_links)。读路径:先读 INDEX 再钻页。"""
         db, actor = dbc()
-        return document_svc.project_index(db, actor, uuid.UUID(project_id))
+        return document_svc.project_index(db, actor, _require_scope(project_id))
 
     @mcp.tool(name="docs.search")
     @sessioned
@@ -552,7 +556,7 @@ def _register_all(mcp) -> None:
         INDEX 未覆盖(词没进目录/跨概念)时用此工具兜底定位。"""
         db, actor = dbc()
         return search_svc.search_documents_paged(
-            db, actor, uuid.UUID(project_id), q, cursor=cursor, limit=limit
+            db, actor, _require_scope(project_id), q, cursor=cursor, limit=limit
         )
 
     @mcp.tool(name="docs.wiki.children")
@@ -658,7 +662,7 @@ def _register_all(mcp) -> None:
     def comment_delete(id: str) -> dict:
         """删除评论(仅自己的;owner/admin 任意)。"""
         db, actor = dbc()
-        poly_svc.delete_comment(db, actor, uuid.UUID(id))
+        poly_svc.delete_comment(db, actor, _parse_uuid(id, "id"))
         return {"deleted": True, "id": id}
 
     # ---------- ref.* ----------
@@ -700,7 +704,7 @@ def _register_all(mcp) -> None:
     def ref_delete(id: str) -> dict:
         """删除引用。"""
         db, actor = dbc()
-        poly_svc.delete_reference(db, actor, uuid.UUID(id))
+        poly_svc.delete_reference(db, actor, _parse_uuid(id, "id"))
         return {"deleted": True, "id": id}
 
     # ---------- project.* / agent.* ----------
@@ -719,7 +723,7 @@ def _register_all(mcp) -> None:
     def project_get(id: str) -> dict:
         """项目详情(非成员 404)。"""
         db, actor = dbc()
-        project, role = project_svc.get_project(db, actor, uuid.UUID(id))
+        project, role = project_svc.get_project(db, actor, _parse_uuid(id, "id"))
         return {"id": str(project.id), "name": project.name, "my_role": role}
 
     @mcp.tool(name="agent.whoami")
@@ -748,11 +752,16 @@ def _register_all(mcp) -> None:
     # ---------- search.* ----------
     @mcp.tool(name="search.query")
     @sessioned
-    def search_query(query: str, domains: list[str] | None = None) -> dict:
+    def search_query(
+        query: str,
+        domains: list[str] | None = None,
+        cursor: str | None = None,
+        limit: int | None = None,
+    ) -> dict:
         """跨我有权限的项目搜索(query 关键词)。
-        结果按域分组:requirement/task/document。"""
+        可按 requirement/task/document 过滤，使用 next_cursor 继续读取。"""
         db, actor = dbc()
-        return search_svc.search(db, actor, query, domains)
+        return search_svc.search(db, actor, query, domains, cursor=cursor, limit=limit)
 
     # ---------- attachment.* ----------
     @mcp.tool(name="attachment.upload")
@@ -767,7 +776,7 @@ def _register_all(mcp) -> None:
         except (ValueError, TypeError) as exc:
             raise ToolError("invalid_request: data 必须是合法 base64") from exc
         a = attachment_svc.upload(
-            db, actor, uuid.UUID(project_id), target_type, target_id, file_name, payload
+            db, actor, _require_scope(project_id), target_type, target_id, file_name, payload
         )
         return attachment_svc._attachment_dict(db, a)
 
@@ -776,7 +785,7 @@ def _register_all(mcp) -> None:
     def attachment_download(attachment_id: str) -> dict:
         """下载附件,返回 base64 内容与文件名。"""
         db, actor = dbc()
-        file_name, data, _ = attachment_svc.download(db, actor, uuid.UUID(attachment_id))
+        file_name, data, _ = attachment_svc.download(db, actor, _parse_uuid(attachment_id, "attachment_id"))
         import base64
 
         return {"file_name": file_name, "content": base64.b64encode(data).decode(), "size": len(data)}
