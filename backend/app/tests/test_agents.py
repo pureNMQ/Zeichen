@@ -71,25 +71,23 @@ class TestKeyJurisdiction:
         client.post("/api/my-agent", json={"username": "key-bot"})
         resp = client.post("/api/my-agent/keys", json={"note": "首次"})
         assert resp.status_code == 201
+        assert resp.headers["Cache-Control"] == "no-store"
         assert len(resp.json()["token"]) > 20
         detail = client.get("/api/my-agent").json()["agent"]
         assert detail["active_keys"] == 1
         assert detail["keys"][0]["note"] == "首次"
         assert "token" not in detail["keys"][0]
 
-    def test_reveal_requires_owner_password(self, client, db, world):
+    def test_no_key_reveal_route_even_for_owner(self, client, db, world):
         _admin(client)
         client.post("/api/my-agent", json={"username": "reveal-bot"})
         key = client.post("/api/my-agent/keys", json={"note": None}).json()
-        bad = client.post(
-            f"/api/my-agent/keys/{key['id']}/reveal", json={"password": "wrong"}
-        )
-        assert bad.status_code == 403
-        ok = client.post(
+        reveal = client.post(
             f"/api/my-agent/keys/{key['id']}/reveal", json={"password": "admin-pass-1"}
         )
-        assert ok.status_code == 200
-        assert ok.json()["token"] == key["token"]
+        assert reveal.status_code == 404
+        assert key["token"] not in reveal.text
+        assert set(ApiKey.__table__.columns.keys()).isdisjoint({"token_encrypted", "token"})
 
     def test_owner_revoke(self, client, db, world):
         _admin(client)
@@ -100,10 +98,7 @@ class TestKeyJurisdiction:
         assert detail["active_keys"] == 0
         # REQ-53:吊销的 key 条目即时从列表消失,与活跃计数一致
         assert [k["id"] for k in detail["keys"]] == []
-        reveal = client.post(
-            f"/api/my-agent/keys/{key['id']}/reveal", json={"password": "admin-pass-1"}
-        )
-        assert reveal.status_code == 409
+        assert db.scalar(select(ApiKey.revoked_at).where(ApiKey.id == uuid.UUID(key["id"]))) is not None
 
     def test_admin_emergency_revoke_only(self, client, db, world):
         """admin 不可签发/回看他人 agent 的 key,仅可紧急吊销(ADR 0004 §4)。"""
@@ -116,11 +111,6 @@ class TestKeyJurisdiction:
         assert resp.status_code == 200
         assert resp.json() == {"revoked": 1}
         assert db.scalar(select(ApiKey.revoked_at).where(ApiKey.id == key.id)) is not None
-        # admin 的 my-agent 无此 key → 404(不可回看他人 key)
-        reveal = client.post(
-            f"/api/my-agent/keys/{key.id}/reveal", json={"password": "admin-pass-1"}
-        )
-        assert reveal.status_code == 404
         # 无 agent 的成员:紧急吊销 404
         empty = client.post(f"/api/members/{world['agent'].id}/agent/revoke-keys")
         assert empty.status_code in (404,)

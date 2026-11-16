@@ -232,7 +232,7 @@ def mcp_two_projects(tmp_path_factory):
         db.add_all([pa, pb])
         db.flush()
         token = generate_api_token()
-        db.add(ApiKey(user_id=agent.id, token_hash=token_digest(token), token_encrypted="x", note="dis"))
+        db.add(ApiKey(user_id=agent.id, token_hash=token_digest(token), note="dis"))
         db.commit()
         ids = {"pa": str(pa.id), "pb": str(pb.id), "token": token}
     engine.dispose()

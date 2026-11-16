@@ -5,12 +5,12 @@
 
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..models import User
-from ..schemas import AgentProfileUpdate, KeyIssue, KeyReveal, MyAgentCreate
+from ..schemas import AgentProfileUpdate, KeyIssue, MyAgentCreate
 from ..services import agents as agents_service
 from .deps import current_user
 
@@ -58,21 +58,11 @@ def delete_my_agent(
 
 @router.post("/keys", status_code=201)
 def issue_key(
-    body: KeyIssue, user: User = Depends(current_user), db: Session = Depends(get_db)
+    body: KeyIssue, response: Response, user: User = Depends(current_user), db: Session = Depends(get_db)
 ) -> dict:
     key, token = agents_service.issue_key(db, user, body.note)
+    response.headers["Cache-Control"] = "no-store"
     return {"id": str(key.id), "token": token, "note": key.note}
-
-
-@router.post("/keys/{key_id}/reveal")
-def reveal_key(
-    key_id: uuid.UUID,
-    body: KeyReveal,
-    user: User = Depends(current_user),
-    db: Session = Depends(get_db),
-) -> dict:
-    token = agents_service.reveal_key(db, user, body.password, key_id)
-    return {"token": token}
 
 
 @router.delete("/keys/{key_id}")

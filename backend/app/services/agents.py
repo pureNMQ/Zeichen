@@ -2,7 +2,7 @@
 
 - 每个工作区成员至多一个附属 Agent,由成员本人创建(username 全局唯一,创建后不可改);
 - Agent 无独立授权行,判权经 permissions.effective_user_id 动态继承主人;
-- key 仅主人可签发/回看(主人本人密码验证)/吊销;工作区 admin 仅保留紧急吊销;
+- key 仅主人可签发/吊销，明文仅签发时返回；工作区 admin 仅保留紧急吊销；
 - 主人被移除/软删时 Agent 随之停用并吊销全部 key(联动在 members.remove_member)。
 """
 
@@ -15,13 +15,7 @@ from sqlalchemy.orm import Session
 
 from ..errors import conflict, invalid_request, not_found, permission_denied
 from ..models import ApiKey, User
-from ..security import (
-    decrypt_secret,
-    encrypt_secret,
-    generate_api_token,
-    token_digest,
-    verify_password,
-)
+from ..security import generate_api_token, token_digest
 from .user_profiles import payload as profile_payload
 
 
@@ -145,25 +139,11 @@ def issue_key(db: Session, owner: User, note: str | None) -> tuple[ApiKey, str]:
     key = ApiKey(
         user_id=agent.id,
         token_hash=token_digest(token),
-        token_encrypted=encrypt_secret(token),
         note=note,
     )
     db.add(key)
     db.commit()
     return key, token
-
-
-def reveal_key(db: Session, owner: User, password: str, key_id: uuid.UUID) -> str:
-    """主人输入本人密码验证后,解密回看自己附属 Agent 的 key 明文。"""
-    agent = require_owned_agent(db, owner.id)
-    if not owner.password_hash or not verify_password(password, owner.password_hash):
-        raise permission_denied("密码验证失败")
-    key = db.scalar(select(ApiKey).where(ApiKey.id == key_id, ApiKey.user_id == agent.id))
-    if key is None:
-        raise not_found("API key 不存在")
-    if key.revoked_at is not None:
-        raise conflict("key 已吊销,无法回看")
-    return decrypt_secret(key.token_encrypted)
 
 
 def revoke_key(db: Session, owner: User, key_id: uuid.UUID) -> None:

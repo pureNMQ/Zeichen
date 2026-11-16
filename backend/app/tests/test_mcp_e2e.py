@@ -147,7 +147,7 @@ def mcp_server(tmp_path_factory, request):
         db.add(project)
         db.flush()
         token = generate_api_token()
-        db.add(ApiKey(user_id=agent.id, token_hash=token_digest(token), token_encrypted="x", note="e2e"))
+        db.add(ApiKey(user_id=agent.id, token_hash=token_digest(token), note="e2e"))
         db.commit()
         ids = {"project_id": str(project.id), "agent_id": str(agent.id), "token": token}
     engine.dispose()

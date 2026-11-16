@@ -51,10 +51,6 @@ class KeyIssue(BaseModel):
     note: str | None = Field(default=None, max_length=500)
 
 
-class KeyReveal(BaseModel):
-    password: str = Field(min_length=1, max_length=128)
-
-
 class ProjectMemberAdd(BaseModel):
     user_id: uuid.UUID
     role: Literal["editor", "viewer"]
