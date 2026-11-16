@@ -46,10 +46,10 @@ function localizeSummary(summary: string): string {
   return summary
 }
 
-export function ActivityStream({ targetType, targetId }: { targetType: string; targetId: string }) {
+export function ActivityStream({ targetType, targetId, projectId }: { targetType: string; targetId: string; projectId?: string }) {
   const { data, isLoading } = useQuery({
-    queryKey: ['activity', targetType, targetId],
-    queryFn: () => api.get<{ items: ActivityRow[] }>(withProject(`/targets/${targetType}/${targetId}/activity?limit=50`)),
+    queryKey: ['activity', targetType, targetId, projectId],
+    queryFn: () => api.get<{ items: ActivityRow[] }>(withProject(`/targets/${targetType}/${targetId}/activity?limit=50`, projectId)),
   })
 
   return (

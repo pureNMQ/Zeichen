@@ -15,6 +15,7 @@ const STORAGE_KEY = 'zeichen.currentProjectId'
 interface CurrentProjectContextValue {
   projects: ProjectRow[]
   isLoading: boolean
+  routeProjectId?: string
   currentProject: ProjectRow | null
   projectId: string | null
   role: ProjectRole | null
@@ -70,6 +71,19 @@ export function useCurrentProject(): CurrentProjectContextValue {
   const ctx = useContext(CurrentProjectContext)
   if (!ctx) throw new Error('useCurrentProject 必须在 CurrentProjectProvider 内使用')
   return ctx
+}
+
+export function ProjectRouteProvider({ project, children }: { project: ProjectRow; children: ReactNode }) {
+  const parent = useCurrentProject()
+  const value = useMemo<CurrentProjectContextValue>(() => ({
+    ...parent,
+    isLoading: false,
+    routeProjectId: project.id,
+    currentProject: project,
+    projectId: project.id,
+    role: project.my_role,
+  }), [parent, project])
+  return <CurrentProjectContext.Provider value={value}>{children}</CurrentProjectContext.Provider>
 }
 
 export function useProjectRole(): ProjectRole | null {

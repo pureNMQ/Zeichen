@@ -8,12 +8,12 @@ import { api, ApiError, withProject, type CommentRow } from '@/lib/api'
 import { ErrorNotification } from '@/components/ui/notification'
 import { UserAvatar } from '@/components/user-avatar'
 
-export function CommentStream({ targetType, targetId, canEdit }: { targetType: string; targetId: string; canEdit: boolean }) {
+export function CommentStream({ targetType, targetId, projectId, canEdit }: { targetType: string; targetId: string; projectId?: string; canEdit: boolean }) {
   const qc = useQueryClient()
-  const key = ['comments', targetType, targetId]
+  const key = ['comments', targetType, targetId, projectId]
   const { data, isLoading } = useQuery({
     queryKey: key,
-    queryFn: () => api.get<{ items: CommentRow[] }>(withProject(`/targets/${targetType}/${targetId}/comments?limit=50`)),
+    queryFn: () => api.get<{ items: CommentRow[] }>(withProject(`/targets/${targetType}/${targetId}/comments?limit=50`, projectId)),
   })
   const [body, setBody] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -22,7 +22,7 @@ export function CommentStream({ targetType, targetId, canEdit }: { targetType: s
     e.preventDefault()
     setError(null)
     try {
-      await api.post(withProject(`/targets/${targetType}/${targetId}/comments`), { body: body.trim() })
+      await api.post(withProject(`/targets/${targetType}/${targetId}/comments`, projectId), { body: body.trim() })
       setBody('')
       await qc.invalidateQueries({ queryKey: key })
     } catch (err) {

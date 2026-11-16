@@ -13,19 +13,21 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-export function AttachmentList({ targetType, targetId }: { targetType: string; targetId: string }) {
+export function AttachmentList({ targetType, targetId, projectId }: { targetType: string; targetId: string; projectId?: string }) {
   const queryClient = useQueryClient()
   const role = useProjectRole()
   const { notify } = useNotification()
   const inputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const key = ['attachments', targetType, targetId, projectId]
+  const path = withProject(`/targets/${targetType}/${targetId}/attachments`, projectId)
 
   const { data, isLoading } = useQuery({
-    queryKey: ['attachments', targetType, targetId],
+    queryKey: key,
     queryFn: () =>
       api
-        .get<{ items: AttachmentRow[] }>(withProject(`/targets/${targetType}/${targetId}/attachments`))
+        .get<{ items: AttachmentRow[] }>(path)
         .then((r) => r.items),
   })
 
@@ -38,8 +40,8 @@ export function AttachmentList({ targetType, targetId }: { targetType: string; t
     setError(null)
     setUploading(true)
     try {
-      await api.upload<AttachmentRow>(withProject(`/targets/${targetType}/${targetId}/attachments`), file)
-      await queryClient.invalidateQueries({ queryKey: ['attachments', targetType, targetId] })
+      await api.upload<AttachmentRow>(path, file)
+      await queryClient.invalidateQueries({ queryKey: key })
     } catch (err) {
       setError(err instanceof ApiError ? err.message : '上传失败,请重试')
     } finally {
@@ -51,7 +53,7 @@ export function AttachmentList({ targetType, targetId }: { targetType: string; t
     setError(null)
     try {
       await api.delete(`/attachments/${id}`)
-      await queryClient.invalidateQueries({ queryKey: ['attachments', targetType, targetId] })
+      await queryClient.invalidateQueries({ queryKey: key })
     } catch (err) {
       setError(err instanceof ApiError ? err.message : '删除失败,请重试')
     }

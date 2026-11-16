@@ -10,6 +10,7 @@ import { LoginPage } from '@/pages/login'
 import { MembersPage } from '@/pages/members'
 import { ProjectsPage } from '@/pages/projects'
 import { ProjectLayout } from '@/pages/project/layout'
+import { CanonicalProjectRoute, CanonicalTaskRoute } from '@/pages/project/canonical-routes'
 import { RequirementsPage } from '@/pages/requirements'
 import { RequirementDetailPage } from '@/pages/requirement-detail'
 import { SetPasswordPage } from '@/pages/set-password'
@@ -94,6 +95,13 @@ export function App() {
         <Route index element={<Navigate to="/projects" replace />} />
         <Route path="projects" element={<ProjectsPage />} />
         <Route path="projects/:projectId" element={<ProjectLayout />} />
+        <Route path="projects/:projectId" element={<CanonicalProjectRoute />}>
+          <Route path="requirements" element={<RequirementsPage />} />
+          <Route path="requirements/:id" element={<RequirementDetailPage />} />
+          <Route path="tasks/:id" element={<CanonicalTaskRoute />} />
+          <Route path="wiki" element={<DocumentWorkbenchPage module="wiki" />} />
+          <Route path="wiki/:id" element={<DocumentWorkbenchPage module="wiki" />} />
+        </Route>
         <Route path="requirements" element={<RequirementsPage />} />
         <Route path="requirements/:id" element={<RequirementDetailPage />} />
         <Route path="documents/wiki" element={<DocumentWorkbenchPage module="wiki" />} />

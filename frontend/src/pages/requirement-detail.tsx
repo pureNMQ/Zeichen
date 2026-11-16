@@ -39,9 +39,11 @@ import {
 } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { useCurrentProject, useProjectRole } from '@/lib/current-project'
+import { projectReferenceHref, projectResourceHref } from '@/lib/project-links'
 import { canSetTaskStatus } from '@/lib/task-perms'
 
-function referenceHref(type: string, id: string, _module?: string | null) {
+function referenceHref(type: string, id: string, projectId?: string) {
+  if (projectId) return projectReferenceHref(projectId, type, id)
   if (type === 'requirement') return `/requirements/${id}`
   // task 引用走 TaskRefLink(任务无独立页面,ADR 0003)
   // REQ-59:glossary 并入 wiki,文档引用统一走 wiki 工作台(TERM-n 短码同样可达)
@@ -136,11 +138,17 @@ function Guide({ children }: { children: React.ReactNode }) {
 
 export function RequirementDetailPage() {
   const { id = '' } = useParams()
+  return <RequirementDetail key={id} id={id} />
+}
+
+function RequirementDetail({ id }: { id: string }) {
   const [searchParams, setSearchParams] = useSearchParams()
   const qc = useQueryClient()
   const role = useProjectRole()
-  const { currentProject, isLoading: cpLoading, selectProject } = useCurrentProject()
+  const { currentProject, isLoading: cpLoading, routeProjectId, selectProject } = useCurrentProject()
   const canEdit = role === 'editor' || role === 'owner'
+  const encodedId = encodeURIComponent(id)
+  const requirementsHref = routeProjectId ? projectResourceHref(routeProjectId, 'requirements') : '/requirements'
   const [actionError, setActionError] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [showCancelled, setShowCancelled] = useState(false)
@@ -148,9 +156,14 @@ export function RequirementDetailPage() {
   const [deleteTarget, setDeleteTarget] = useState<TaskRow | null>(null)
 
   const { data: req, isLoading, error } = useQuery({
-    queryKey: ['requirement', id],
+    queryKey: ['requirement', id, routeProjectId],
     // 全局短码解析;跨项目同码(400 invalid_request)时用当前项目重试消歧(REQ-55)
     queryFn: async () => {
+      if (routeProjectId) {
+        const requirement = await api.get<RequirementRow>(`${requirementsHref}/${encodedId}`)
+        if (requirement.project_id !== routeProjectId) throw new ApiError(404, '需求不存在或无访问权限')
+        return requirement
+      }
       try {
         return await api.get<RequirementRow>(`/requirements/${id}`)
       } catch (err) {
@@ -162,21 +175,30 @@ export function RequirementDetailPage() {
     },
   })
   const { data: tasks } = useQuery({
-    queryKey: ['requirement-tasks', id],
-    queryFn: () => api.get<{ items: TaskRow[] }>(`/projects/${req?.project_id}/tasks?requirement_id=${id}&limit=100`),
+    queryKey: ['requirement-tasks', id, req?.project_id],
+    queryFn: () => api.get<{ items: TaskRow[] }>(`/projects/${req?.project_id}/tasks?requirement_id=${encodedId}&limit=100`),
     enabled: !!req,
   })
   const { data: refs } = useQuery({
-    queryKey: ['refs', 'requirement', id],
+    queryKey: ['refs', 'requirement', id, req?.project_id],
     queryFn: () => api.get<{ items: ReferenceRow[] }>(withProject(`/targets/requirement/${id}/references?limit=50`, req?.project_id)),
     enabled: !!req,
   })
 
   // 通知/搜索跳转:/requirements/:rid?task=TID 定位任务弹窗
   const deepLinkTask = searchParams.get('task')
+  const { data: linkedTask, isError: linkedTaskError } = useQuery({
+    queryKey: ['task', deepLinkTask, routeProjectId],
+    queryFn: async () => {
+      const task = await api.get<TaskRow>(withProject(`/tasks/${encodeURIComponent(deepLinkTask!)}`, routeProjectId))
+      if (task.project_id !== routeProjectId) throw new ApiError(404, '任务不存在或无访问权限')
+      return task
+    },
+    enabled: !!routeProjectId && !!req && !!deepLinkTask,
+    retry: false,
+  })
   useEffect(() => {
-    if (deepLinkTask) setDialogTaskId(deepLinkTask)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setDialogTaskId(deepLinkTask)
   }, [deepLinkTask])
 
   function openTask(tid: string) {
@@ -276,11 +298,14 @@ export function RequirementDetailPage() {
   const visibleTasks = showCancelled ? allTasks : allTasks.filter((t) => t.status !== 'cancelled')
   const doneCount = allTasks.filter((t) => t.status === 'done').length
   const totalCount = allTasks.length
-  const dialogTask = allTasks.find((t) => t.id === dialogTaskId) ?? null
+  const dialogTask = allTasks.find((t) => t.id === dialogTaskId)
+    ?? (linkedTask?.id === dialogTaskId && linkedTask.requirement_id === req.id ? linkedTask : null)
+  const taskLinkUnavailable = routeProjectId && deepLinkTask && !dialogTask
+    && (linkedTaskError || (linkedTask && linkedTask.requirement_id !== req.id))
 
   return (
     <div className="space-y-4">
-      <Link to="/requirements" className="text-sm text-muted-foreground hover:text-primary">
+      <Link to={requirementsHref} className="text-sm text-muted-foreground hover:text-primary">
         ← 返回需求
       </Link>
       <div className="flex items-start justify-between gap-4">
@@ -295,7 +320,7 @@ export function RequirementDetailPage() {
           {req.description && <p className="mt-2 text-sm text-muted-foreground">{req.description}</p>}
         </div>
         <div className="flex shrink-0 gap-2">
-          <WatchButton targetType="requirement" targetId={req.id} />
+          {!routeProjectId && <WatchButton targetType="requirement" targetId={req.id} />}
           {canEdit && isPending && (
             <Button onClick={() => void setStatus('backlog')}>
               <Check className="mr-2 h-4 w-4" />
@@ -311,6 +336,7 @@ export function RequirementDetailPage() {
         </div>
       </div>
       <ErrorNotification message={actionError} />
+      <ErrorNotification message={taskLinkUnavailable ? '任务不存在或不属于此需求' : null} />
 
       <Card>
         <CardHeader className="flex-row flex-wrap items-center justify-between gap-2">
@@ -381,9 +407,9 @@ export function RequirementDetailPage() {
             <div key={r.id} className="flex items-center gap-2 rounded-md border p-2.5 text-sm">
               <Badge variant="outline">{r.type}</Badge>
               <span className="text-xs text-muted-foreground">
-                {(() => { const href = referenceHref(r.from_type, r.from_id, r.from_module); if (href) return <Link to={href} className="hover:text-primary hover:underline">{r.from_title ?? r.from_id}</Link>; if (r.from_type === 'task') return <TaskRefLink taskId={r.from_id}>{r.from_title ?? r.from_id}</TaskRefLink>; return r.from_title ?? r.from_id })()}
+                {(() => { const href = referenceHref(r.from_type, r.from_id, routeProjectId); if (href) return <Link to={href} className="hover:text-primary hover:underline">{r.from_title ?? r.from_id}</Link>; if (r.from_type === 'task') return <TaskRefLink taskId={r.from_id}>{r.from_title ?? r.from_id}</TaskRefLink>; return r.from_title ?? r.from_id })()}
                 {' → '}
-                {(() => { const href = referenceHref(r.to_type, r.to_id, r.to_module); if (href) return <Link to={href} className="hover:text-primary hover:underline">{r.to_title ?? r.to_id}</Link>; if (r.to_type === 'task') return <TaskRefLink taskId={r.to_id}>{r.to_title ?? r.to_id}</TaskRefLink>; return r.to_title ?? r.to_id })()}
+                {(() => { const href = referenceHref(r.to_type, r.to_id, routeProjectId); if (href) return <Link to={href} className="hover:text-primary hover:underline">{r.to_title ?? r.to_id}</Link>; if (r.to_type === 'task') return <TaskRefLink taskId={r.to_id}>{r.to_title ?? r.to_id}</TaskRefLink>; return r.to_title ?? r.to_id })()}
               </span>
             </div>
           ))}
@@ -392,13 +418,13 @@ export function RequirementDetailPage() {
 
       <Card>
         <CardContent className="space-y-6 p-4">
-          <CommentStream targetType="requirement" targetId={req.id} canEdit={req.status !== 'cancelled'} />
+          <CommentStream targetType="requirement" targetId={req.id} projectId={routeProjectId} canEdit={req.status !== 'cancelled' && (!routeProjectId || canEdit)} />
         </CardContent>
       </Card>
-      <AttachmentList targetType="requirement" targetId={req.id} />
+      <AttachmentList targetType="requirement" targetId={req.id} projectId={routeProjectId} />
       <Card>
         <CardContent className="p-4">
-          <ActivityStream targetType="requirement" targetId={req.id} />
+          <ActivityStream targetType="requirement" targetId={req.id} projectId={routeProjectId} />
         </CardContent>
       </Card>
 

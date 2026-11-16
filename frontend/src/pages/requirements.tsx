@@ -34,6 +34,7 @@ import {
   type RequirementStatus,
 } from '@/lib/api'
 import { useCurrentProject, useProjectRole } from '@/lib/current-project'
+import { projectResourceHref } from '@/lib/project-links'
 import { clearDraft, readDraft, writeDraft } from '@/lib/form-draft'
 import { CreateExtras, type StagedReference } from '@/components/create-extras'
 
@@ -63,10 +64,14 @@ function RequirementCard({
   canDelete: boolean
   onReject?: (r: RequirementRow) => void
 }) {
+  const { routeProjectId } = useCurrentProject()
+  const href = routeProjectId
+    ? projectResourceHref(routeProjectId, 'requirements', r.id)
+    : `/requirements/${r.id}`
   return (
     <Card>
       <CardContent className="space-y-2 p-3">
-        <Link to={`/requirements/${r.id}`} className="block text-sm font-medium hover:text-primary">
+        <Link to={href} className="block text-sm font-medium hover:text-primary">
           <span className="mr-1.5 rounded bg-muted px-1 py-0.5 font-mono text-[10px] text-muted-foreground">{r.id}</span>
           {r.title}
         </Link>

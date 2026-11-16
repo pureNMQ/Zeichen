@@ -17,9 +17,11 @@ import { filterNodesByTitle } from '@/lib/document-search'
 import { planDocumentMove, rootZoneFirstPointerWithin } from '@/lib/document-tree-dnd'
 import { useCurrentProject, useProjectRole } from '@/lib/current-project'
 import { useDocumentNavigation } from '@/lib/document-navigation'
+import { projectReferenceHref, projectResourceHref } from '@/lib/project-links'
 import { TaskRefLink } from '@/components/task-ref-link'
 
-function referenceHref(type: string, id: string) {
+function referenceHref(type: string, id: string, projectId?: string) {
+  if (projectId) return projectReferenceHref(projectId, type, id)
   if (type === 'requirement') return `/requirements/${id}`
   // task 引用走 TaskRefLink(任务无独立页面,ADR 0003)
   if (type === 'document') return `/documents/wiki/${id}`
@@ -58,12 +60,12 @@ function AuthorBadge({ author, compact }: { author: AuthorIdentity | null | unde
   </span>
 }
 
-function moduleBase() {
-  return '/documents/wiki'
+function moduleBase(projectId?: string) {
+  return projectId ? projectResourceHref(projectId, 'wiki') : '/documents/wiki'
 }
 
-function documentUrl(id: string) {
-  return `/documents/wiki/${id}`
+function documentUrl(id: string, projectId?: string) {
+  return `${moduleBase(projectId)}/${encodeURIComponent(id)}`
 }
 
 function parseNodeFromRoute(id: string | undefined) {
@@ -116,6 +118,7 @@ function TreeRow({ node, dragEnabled, canDrag, open, selectedId, onToggle, onNav
   atRoot?: boolean
   children?: ReactNode
 }) {
+  const { routeProjectId } = useCurrentProject()
   const drag = useDraggable({ id: `drag:document:${node.id}`, data: { kind: 'document', id: node.id }, disabled: !dragEnabled, attributes: { role: 'presentation' } })
   const drop = useDroppable({ id: `drop:document:${node.id}`, data: { kind: 'document', id: node.id } })
   return <div>
@@ -128,7 +131,7 @@ function TreeRow({ node, dragEnabled, canDrag, open, selectedId, onToggle, onNav
         data-testid={`tree-node-${node.id}`}
       >
         {node.has_children ? <button type="button" onClick={() => onToggle(node.id)} aria-label={`${open ? '收起' : '展开'}${node.title}`} className="flex h-7 w-5 shrink-0 items-center justify-center" aria-expanded={open}>{open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}</button> : <span className="w-5 shrink-0" />}
-        <button type="button" onClick={() => onNavigate(documentUrl(node.id))} className="min-w-0 flex-1 truncate py-1.5 text-left text-sm" title={node.title}>{node.title}</button>
+        <button type="button" onClick={() => onNavigate(documentUrl(node.id, routeProjectId))} className="min-w-0 flex-1 truncate py-1.5 text-left text-sm" title={node.title}>{node.title}</button>
         {canDrag && <DropdownMenu><DropdownMenuTrigger asChild><Button type="button" size="icon-xs" variant="ghost" aria-label={`${node.title}更多操作`}><MoreHorizontal className="h-3.5 w-3.5" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end">{!atRoot && onMoveToRoot && <DropdownMenuItem onClick={() => onMoveToRoot(node)}><ArrowUpToLine />移到根级</DropdownMenuItem>}<DropdownMenuItem onClick={() => onRename(node)}><Pencil />重命名</DropdownMenuItem><DropdownMenuItem variant="destructive" onClick={() => onDelete(node)}><Trash2 />删除</DropdownMenuItem></DropdownMenuContent></DropdownMenu>}
       </div>
       {children}
@@ -151,6 +154,7 @@ function RootDropZone({ dragActive }: { dragActive: boolean }) {
 }
 
 function RenameDialog({ node, open, onOpenChange, onSaved }: { node: DocumentNode | null; open: boolean; onOpenChange: (open: boolean) => void; onSaved: () => void }) {
+  const { routeProjectId } = useCurrentProject()
   const [name, setName] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -160,7 +164,7 @@ function RenameDialog({ node, open, onOpenChange, onSaved }: { node: DocumentNod
     if (!node) return
     setSubmitting(true)
     try {
-      await api.patch(withProject(`/documents/wiki/${node.id}`), { title: name.trim() })
+      await api.patch(withProject(`/documents/wiki/${node.id}`, routeProjectId), { title: name.trim() })
       onOpenChange(false)
       onSaved()
     } catch (err) { setError(err instanceof ApiError ? err.message : '重命名失败，请重试') } finally { setSubmitting(false) }
@@ -173,7 +177,7 @@ function CreateFromBrokenLinkDialog({ initialTitle, source, open, onOpenChange, 
   const [title, setTitle] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
-  const { projectId } = useCurrentProject()
+  const { projectId, routeProjectId } = useCurrentProject()
   useEffect(() => { if (open) { setTitle(initialTitle); setError(null) } }, [open, initialTitle])
   async function submit(event: FormEvent) {
     event.preventDefault()
@@ -183,7 +187,7 @@ function CreateFromBrokenLinkDialog({ initialTitle, source, open, onOpenChange, 
       const created = await api.post<DocumentRow>(`/projects/${projectId}/documents/wiki`, { title: title.trim(), doc_type: 'wiki', content: `---\ndoc_kind: concept\n---\n\n(从断链创建,待补充)` })
       if (source) {
         // 目标页就绪后重存源页(同内容)触发双链重解析,断链接上
-        await api.patch<DocumentRow>(withProject(`/documents/wiki/${source.id}`), { content: source.content ?? '' })
+        await api.patch<DocumentRow>(withProject(`/documents/wiki/${source.id}`, routeProjectId), { content: source.content ?? '' })
       }
       onOpenChange(false)
       onCreated(created.id)
@@ -193,7 +197,7 @@ function CreateFromBrokenLinkDialog({ initialTitle, source, open, onOpenChange, 
 }
 
 function ModuleTreeSidebar({ selected, onNavigate }: { selected: { id: string; kind: 'document' } | null; onNavigate: (url: string) => void }) {
-  const { projectId, currentProject } = useCurrentProject()
+  const { projectId, currentProject, routeProjectId } = useCurrentProject()
   const role = useProjectRole()
   const canEdit = role === 'owner' || role === 'editor'
   const qc = useQueryClient()
@@ -214,13 +218,13 @@ function ModuleTreeSidebar({ selected, onNavigate }: { selected: { id: string; k
   async function invalidate() { await Promise.all([qc.invalidateQueries({ queryKey: ['document-tree', projectId] }), qc.invalidateQueries({ queryKey: ['document-node'] })]) }
   function createDocument(parentId: string | null | undefined) {
     const container = parentId === undefined ? (selected?.kind === 'document' ? selected.id : null) : parentId
-    onNavigate(`${moduleBase()}?mode=new${container ? `&container_id=${container}` : ''}`)
+    onNavigate(`${moduleBase(routeProjectId)}?mode=new${container ? `&container_id=${container}` : ''}`)
   }
   function moveToRoot(node: DocumentNode) {
     const plan = planDocumentMove('wiki', 'document', node.id, 'root', null)
     if (!plan) return
     void (async () => {
-      try { await api.post(withProject(plan.path), plan.body); await invalidate() } catch (err) { setActionError(err instanceof ApiError ? err.message : '移动失败') }
+      try { await api.post(withProject(plan.path, routeProjectId), plan.body); await invalidate() } catch (err) { setActionError(err instanceof ApiError ? err.message : '移动失败') }
     })()
   }
   async function handleMoveEnd(event: DragEndEvent) {
@@ -229,21 +233,21 @@ function ModuleTreeSidebar({ selected, onNavigate }: { selected: { id: string; k
     if (!dragData || !overData) return
     const plan = planDocumentMove('wiki', dragData.kind, dragData.id, overData.kind, overData.id)
     if (!plan) return
-    try { await api.post(withProject(plan.path), plan.body); await invalidate() } catch (err) { setActionError(err instanceof ApiError ? err.message : '移动失败') }
+    try { await api.post(withProject(plan.path, routeProjectId), plan.body); await invalidate() } catch (err) { setActionError(err instanceof ApiError ? err.message : '移动失败') }
   }
   function beginDelete(node: DocumentNode) {
-    try { void api.get<{ documents: number }>(withProject(`/documents/wiki/${node.id}/delete-impact`)).then((impact) => { setDeleteImpact(impact); setActionNode(node); setDeleteOpen(true) }).catch(() => setActionError('无法获取删除影响范围')) } catch (err) { setActionError(err instanceof ApiError ? err.message : '无法获取删除影响范围') }
+    try { void api.get<{ documents: number }>(withProject(`/documents/wiki/${node.id}/delete-impact`, routeProjectId)).then((impact) => { setDeleteImpact(impact); setActionNode(node); setDeleteOpen(true) }).catch(() => setActionError('无法获取删除影响范围')) } catch (err) { setActionError(err instanceof ApiError ? err.message : '无法获取删除影响范围') }
   }
   async function confirmDelete() {
     if (!actionNode) return
-    try { await api.post(withProject(`/documents/wiki/${actionNode.id}/delete`)); setDeleteOpen(false); await invalidate(); onNavigate(moduleBase()) } catch (err) { setActionError(err instanceof ApiError ? err.message : '删除失败') }
+    try { await api.post(withProject(`/documents/wiki/${actionNode.id}/delete`, routeProjectId)); setDeleteOpen(false); await invalidate(); onNavigate(moduleBase(routeProjectId)) } catch (err) { setActionError(err instanceof ApiError ? err.message : '删除失败') }
   }
   return <aside className="flex h-full min-h-0 w-64 shrink-0 flex-col border-r bg-background" aria-label="Wiki 文件组织"><div className="border-b px-4 py-4"><p className="font-semibold">Wiki</p><p className="mt-1 truncate text-xs text-muted-foreground">{currentProject.name}</p></div><div className="border-b p-3"><Input aria-label="搜索文档" autoComplete="off" placeholder="搜索文档" value={titleFilter} onChange={(event) => setTitleFilter(event.target.value)} /></div>{canEdit && <div className="flex justify-end border-b p-3"><DropdownMenu><DropdownMenuTrigger asChild><Button type="button" size="icon-sm" aria-label="新建"><Plus className="h-4 w-4" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={() => createDocument(null)}>新建 Wiki</DropdownMenuItem>{selected?.kind === 'document' && <DropdownMenuItem onClick={() => createDocument(selected.id)}>新建子 Wiki</DropdownMenuItem>}</DropdownMenuContent></DropdownMenu></div>}<div className="min-h-0 flex-1 overflow-y-auto p-3"><DndContext sensors={sensors} collisionDetection={rootZoneFirstPointerWithin} onDragStart={() => setDragActive(true)} onDragCancel={() => setDragActive(false)} onDragEnd={(event) => { setDragActive(false); void handleMoveEnd(event) }}><div className="sticky top-0 z-10 -mx-3 mb-1 bg-background px-3 pt-1">{canEdit && <RootDropZone dragActive={dragActive} />}</div><TreeChildren projectId={projectId} parentId={null} filter={titleFilter} expanded={expanded} onToggle={(id) => setExpanded((current) => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next })} onNavigate={onNavigate} selectedId={selected?.id} canEdit={canEdit} onMoveToRoot={moveToRoot} onRename={(node) => { setActionNode(node); setRenameOpen(true) }} onDelete={(node) => void beginDelete(node)} /></DndContext></div><ErrorNotification message={actionError} /><RenameDialog node={actionNode} open={renameOpen} onOpenChange={setRenameOpen} onSaved={invalidate} /><Dialog open={deleteOpen} onOpenChange={setDeleteOpen}><DialogContent><DialogHeader><DialogTitle>确认删除</DialogTitle><DialogDescription>将软删除 {deleteImpact?.documents ?? 0} 篇文档。</DialogDescription></DialogHeader><DialogFooter><Button variant="outline" onClick={() => setDeleteOpen(false)}>取消</Button><Button variant="destructive" onClick={() => void confirmDelete()}>删除</Button></DialogFooter></DialogContent></Dialog></aside>
 }
 
 // REQ-59 ⑤:INDEX 视图(index-first 阅读;后端投影,零维护)
 function WikiIndexView({ onNavigate, onCreate }: { onNavigate: (url: string) => void; onCreate: () => void }) {
-  const { projectId, currentProject } = useCurrentProject()
+  const { projectId, currentProject, routeProjectId } = useCurrentProject()
   const { data: index, isLoading, error } = useQuery({ queryKey: ['wiki-index', projectId], queryFn: () => api.get<WikiIndex>(`/projects/${projectId}/documents/index`) })
   if (!projectId || !currentProject) return null
   if (isLoading) return <main className="flex flex-1 items-center justify-center p-10"><p className="text-sm text-muted-foreground">加载中…</p></main>
@@ -273,7 +277,7 @@ function WikiIndexView({ onNavigate, onCreate }: { onNavigate: (url: string) => 
         <ul className="mt-3 divide-y rounded-xl border" data-testid={`index-section-${section.kind ?? 'uncategorized'}`}>
           {section.items.map((row) => <li key={row.id} className="px-4 py-3">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <a href={documentUrl(row.id)} onClick={(event) => { event.preventDefault(); onNavigate(documentUrl(row.id)) }} className="font-medium hover:underline"><span className="mr-2 rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">{row.id}</span>{row.title}</a>
+              <a href={documentUrl(row.id, routeProjectId)} onClick={(event) => { event.preventDefault(); onNavigate(documentUrl(row.id, routeProjectId)) }} className="font-medium hover:underline"><span className="mr-2 rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">{row.id}</span>{row.title}</a>
               <span className="text-xs text-muted-foreground">{new Date(row.updated_at).toLocaleString()} · {authorDisplayName(row.author)}</span>
             </div>
             <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{row.summary}{row.missing_summary && <span className="ml-1 text-xs text-muted-foreground/70">(正文截断)</span>}</p>
@@ -286,7 +290,7 @@ function WikiIndexView({ onNavigate, onCreate }: { onNavigate: (url: string) => 
 }
 
 function DocumentEditor({ document, containerId, onDirtyChange, onRegisterSave, onSaved, onCancel }: { document?: DocumentRow; containerId: string | null; onDirtyChange: (dirty: boolean) => void; onRegisterSave: (save: () => Promise<boolean>) => void; onSaved: (document: DocumentRow) => void; onCancel: () => void }) {
-  const { projectId } = useCurrentProject()
+  const { projectId, routeProjectId } = useCurrentProject()
   const qc = useQueryClient()
   const [title, setTitle] = useState(document?.title ?? '')
   const [content, setContent] = useState(document?.content ?? '')
@@ -300,7 +304,7 @@ function DocumentEditor({ document, containerId, onDirtyChange, onRegisterSave, 
     setSubmitting(true)
     try {
       const payload = { title: title.trim() || '无标题', content }
-      const saved = document ? await api.patch<DocumentRow>(withProject(`/documents/wiki/${document.id}`), payload) : await api.post<DocumentRow>(`/projects/${projectId}/documents/wiki`, { ...payload, doc_type: 'wiki' as const, parent_id: containerId })
+      const saved = document ? await api.patch<DocumentRow>(withProject(`/documents/wiki/${document.id}`, routeProjectId), payload) : await api.post<DocumentRow>(`/projects/${projectId}/documents/wiki`, { ...payload, doc_type: 'wiki' as const, parent_id: containerId })
       await Promise.all([qc.invalidateQueries({ queryKey: ['document-tree', projectId] }), qc.invalidateQueries({ queryKey: ['document-node', 'wiki', saved.id] })])
       if (dirty) { setDirty(false); onDirtyChange(false) }
       if (saved.reference_warning && saved.reference_warning.count > 0) {
@@ -323,29 +327,29 @@ function DocumentDetail({ document, onEdit, onNavigate }: { document: DocumentRo
   const qc = useQueryClient()
   const navigate = useNavigate()
   const role = useProjectRole()
-  const { projectId } = useCurrentProject()
+  const { projectId, routeProjectId } = useCurrentProject()
   const canEdit = role === 'owner' || role === 'editor'
   const [versionsOpen, setVersionsOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [rollbackTarget, setRollbackTarget] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [brokenCreate, setBrokenCreate] = useState<string | null>(null)
-  const { data: versions } = useQuery({ queryKey: ['document-versions', 'wiki', document.id], queryFn: () => api.get<{ items: DocumentVersionRow[] }>(withProject(`/documents/wiki/${document.id}/versions`)), enabled: versionsOpen })
-  const { data: references } = useQuery({ queryKey: ['document-references', 'wiki', document.id], queryFn: () => api.get<{ count: number; items: ReferenceRow[] }>(withProject(`/documents/wiki/${document.id}/references`)) })
+  const { data: versions } = useQuery({ queryKey: ['document-versions', 'wiki', document.id, routeProjectId], queryFn: () => api.get<{ items: DocumentVersionRow[] }>(withProject(`/documents/wiki/${document.id}/versions`, routeProjectId)), enabled: versionsOpen })
+  const { data: references } = useQuery({ queryKey: ['document-references', 'wiki', document.id, routeProjectId], queryFn: () => api.get<{ count: number; items: ReferenceRow[] }>(withProject(`/documents/wiki/${document.id}/references`, routeProjectId)) })
   const links: WikiLinks | undefined = document.links
   const metadata = document.metadata ?? {}
   const kind = typeof metadata.doc_kind === 'string' ? metadata.doc_kind : null
   const summary = typeof metadata.summary === 'string' ? metadata.summary : null
   const tags = Array.isArray(metadata.tags) ? metadata.tags.map(String) : []
   const aliases = Array.isArray(metadata.aliases) ? metadata.aliases.map(String) : []
-  async function rollback(versionNo: number) { try { await api.post(withProject(`/documents/wiki/${document.id}/rollback`), { version_no: versionNo }); setRollbackTarget(null); setVersionsOpen(false); await qc.invalidateQueries({ queryKey: ['document-node'] }) } catch (err) { setError(err instanceof ApiError ? err.message : '回滚失败') } }
-  async function remove() { try { await api.post(withProject(`/documents/wiki/${document.id}/delete`)); navigate(moduleBase()) } catch (err) { setError(err instanceof ApiError ? err.message : '删除失败') } }
+  async function rollback(versionNo: number) { try { await api.post(withProject(`/documents/wiki/${document.id}/rollback`, routeProjectId), { version_no: versionNo }); setRollbackTarget(null); setVersionsOpen(false); await qc.invalidateQueries({ queryKey: ['document-node'] }) } catch (err) { setError(err instanceof ApiError ? err.message : '回滚失败') } }
+  async function remove() { try { await api.post(withProject(`/documents/wiki/${document.id}/delete`, routeProjectId)); navigate(moduleBase(routeProjectId)) } catch (err) { setError(err instanceof ApiError ? err.message : '删除失败') } }
   function handleContentClick(event: MouseEvent<HTMLDivElement>) {
     const target = event.target as HTMLElement
     const broken = target.closest('a.wiki-link-broken') as HTMLAnchorElement | null
     if (broken) { event.preventDefault(); setBrokenCreate(broken.dataset.wikiCreate ?? ''); return }
     const live = target.closest('a.wiki-link') as HTMLAnchorElement | null
-    if (live?.dataset.wikiCode) { event.preventDefault(); onNavigate(documentUrl(live.dataset.wikiCode)) }
+    if (live?.dataset.wikiCode) { event.preventDefault(); onNavigate(documentUrl(live.dataset.wikiCode, routeProjectId)) }
   }
   return <main className="mx-auto w-full max-w-5xl px-6 py-10 sm:px-10"><div className="mx-auto max-w-3xl"><div className="flex flex-wrap items-start justify-between gap-4 border-b pb-5"><div><div className="flex flex-wrap items-center gap-2"><span className="rounded-md bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">{kindLabel(kind)}</span><span className="font-mono text-xs text-muted-foreground">{document.id}</span></div><h1 className="mt-3 text-3xl font-semibold tracking-tight">{document.title}</h1><p className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">更新于 {new Date(document.updated_at).toLocaleString()} · <AuthorBadge author={document.author} compact /></p></div>{canEdit && <div className="flex gap-2"><Button variant="destructive" onClick={() => setDeleteOpen(true)}><Trash2 className="mr-2 h-4 w-4" />删除</Button><Button variant="outline" onClick={() => setVersionsOpen(true)}><History className="mr-2 h-4 w-4" />版本</Button><Button onClick={onEdit}><Pencil className="mr-2 h-4 w-4" />编辑</Button></div>}</div>
   {summary && <p className="mt-4 rounded-lg bg-muted/50 px-4 py-3 text-sm text-muted-foreground" data-testid="frontmatter-summary">{summary}</p>}
@@ -357,12 +361,12 @@ function DocumentDetail({ document, onEdit, onNavigate }: { document: DocumentRo
   {links && (links.outgoing.length > 0 || links.incoming.length > 0) && <section className="mt-8 grid gap-4 sm:grid-cols-2" aria-label="双链与反链">
     <div className="rounded-xl border p-5"><h2 className="flex items-center gap-2 font-medium"><Link2 className="h-4 w-4" />链接({links.outgoing.length})</h2><ul className="mt-3 space-y-2 text-sm">{links.outgoing.length ? links.outgoing.map((link, index) => <li key={`${link.raw_text}-${index}`} className="flex flex-wrap items-center gap-2">{link.broken || !link.to_code
       ? <button type="button" className="text-destructive hover:underline" title="断链:点击创建该页面" onClick={() => setBrokenCreate(link.raw_text)}>{link.display ?? link.raw_text}{link.section ? ` #${link.section}` : ''}</button>
-      : <a href={documentUrl(link.to_code)} className="text-primary hover:underline" onClick={(event) => { event.preventDefault(); onNavigate(documentUrl(link.to_code!)) }}>{link.display ?? link.to_title ?? link.raw_text}{link.section ? ` #${link.section}` : ''}</a>}
+      : <a href={documentUrl(link.to_code, routeProjectId)} className="text-primary hover:underline" onClick={(event) => { event.preventDefault(); onNavigate(documentUrl(link.to_code!, routeProjectId)) }}>{link.display ?? link.to_title ?? link.raw_text}{link.section ? ` #${link.section}` : ''}</a>}
       <LinkBadge broken={link.broken || !link.to_code} /></li>) : <li className="text-muted-foreground">暂无出链</li>}</ul></div>
-    <div className="rounded-xl border p-5"><h2 className="flex items-center gap-2 font-medium"><Link2 className="h-4 w-4" />反链({links.incoming.length})</h2><ul className="mt-3 space-y-2 text-sm">{links.incoming.length ? links.incoming.map((link, index) => <li key={`${link.from_code}-${index}`}><a href={documentUrl(link.from_code)} className="text-primary hover:underline" onClick={(event) => { event.preventDefault(); onNavigate(documentUrl(link.from_code)) }}>{link.from_title}</a><span className="text-muted-foreground"> → 此处(经「{link.raw_text}」)</span></li>) : <li className="text-muted-foreground">暂无反链</li>}</ul></div>
+    <div className="rounded-xl border p-5"><h2 className="flex items-center gap-2 font-medium"><Link2 className="h-4 w-4" />反链({links.incoming.length})</h2><ul className="mt-3 space-y-2 text-sm">{links.incoming.length ? links.incoming.map((link, index) => <li key={`${link.from_code}-${index}`}><a href={documentUrl(link.from_code, routeProjectId)} className="text-primary hover:underline" onClick={(event) => { event.preventDefault(); onNavigate(documentUrl(link.from_code, routeProjectId)) }}>{link.from_title}</a><span className="text-muted-foreground"> → 此处(经「{link.raw_text}」)</span></li>) : <li className="text-muted-foreground">暂无反链</li>}</ul></div>
   </section>}
-  <section className="mt-8 rounded-xl border p-5"><h2 className="font-medium">引用</h2><div className="mt-3 space-y-2 text-sm">{references?.items.length ? references.items.map((reference) => { const outgoing = reference.from_id === document.id; const type = outgoing ? reference.to_type : reference.from_type; const id = outgoing ? reference.to_id : reference.from_id; const title = outgoing ? reference.to_title : reference.from_title; const href = referenceHref(type, id); return <p key={reference.id}>{outgoing ? '引用至' : '被引用于'} {href ? <a href={href} className="text-primary hover:underline">{title ?? id}</a> : type === 'task' ? <TaskRefLink taskId={id}>{title ?? id}</TaskRefLink> : (title ?? id)}</p> }) : <p className="text-muted-foreground">暂无引用</p>}</div></section><section className="mt-8"><AttachmentList targetType="document" targetId={document.id} /></section></div><ErrorNotification message={error} />
-  <CreateFromBrokenLinkDialog initialTitle={brokenCreate ?? ''} source={document} open={brokenCreate !== null} onOpenChange={(open) => { if (!open) setBrokenCreate(null) }} onCreated={async (createdId) => { await qc.invalidateQueries({ queryKey: ['document-node'] }); await qc.invalidateQueries({ queryKey: ['wiki-index', projectId] }); navigate(`${documentUrl(createdId)}?mode=edit`) }} />
+  <section className="mt-8 rounded-xl border p-5"><h2 className="font-medium">引用</h2><div className="mt-3 space-y-2 text-sm">{references?.items.length ? references.items.map((reference) => { const outgoing = reference.from_id === document.id; const type = outgoing ? reference.to_type : reference.from_type; const id = outgoing ? reference.to_id : reference.from_id; const title = outgoing ? reference.to_title : reference.from_title; const href = referenceHref(type, id, routeProjectId); return <p key={reference.id}>{outgoing ? '引用至' : '被引用于'} {href ? <a href={href} className="text-primary hover:underline">{title ?? id}</a> : type === 'task' ? <TaskRefLink taskId={id}>{title ?? id}</TaskRefLink> : (title ?? id)}</p> }) : <p className="text-muted-foreground">暂无引用</p>}</div></section><section className="mt-8"><AttachmentList targetType="document" targetId={document.id} projectId={routeProjectId} /></section></div><ErrorNotification message={error} />
+  <CreateFromBrokenLinkDialog initialTitle={brokenCreate ?? ''} source={document} open={brokenCreate !== null} onOpenChange={(open) => { if (!open) setBrokenCreate(null) }} onCreated={async (createdId) => { await qc.invalidateQueries({ queryKey: ['document-node'] }); await qc.invalidateQueries({ queryKey: ['wiki-index', projectId] }); navigate(`${documentUrl(createdId, routeProjectId)}?mode=edit`) }} />
   <Dialog open={versionsOpen} onOpenChange={setVersionsOpen}><DialogContent><DialogHeader><DialogTitle>版本历史</DialogTitle><DialogDescription>回滚会恢复该版本内容并创建新版本。</DialogDescription></DialogHeader><div className="max-h-96 space-y-2 overflow-y-auto">{versions?.items.map((version) => <div key={version.id} className="flex items-center justify-between rounded border p-3 text-sm"><span>版本 {version.version_no} · {version.title}{version.author ? ` · ${authorDisplayName(version.author)}` : ''}</span>{canEdit && <Button size="sm" variant="outline" onClick={() => setRollbackTarget(version.version_no)}><RotateCcw className="mr-1.5 h-3.5 w-3.5" />回滚</Button>}</div>)}</div></DialogContent></Dialog><Dialog open={rollbackTarget !== null} onOpenChange={(open) => !open && setRollbackTarget(null)}><DialogContent><DialogHeader><DialogTitle>确认回滚</DialogTitle><DialogDescription>标题和正文会恢复为所选版本。</DialogDescription></DialogHeader><DialogFooter><Button variant="outline" onClick={() => setRollbackTarget(null)}>取消</Button><Button onClick={() => rollbackTarget !== null && void rollback(rollbackTarget)}>确认回滚</Button></DialogFooter></DialogContent></Dialog><Dialog open={deleteOpen} onOpenChange={setDeleteOpen}><DialogContent><DialogHeader><DialogTitle>删除文档</DialogTitle><DialogDescription>此操作会将文档移入已删除状态。</DialogDescription></DialogHeader><DialogFooter><Button variant="outline" onClick={() => setDeleteOpen(false)}>取消</Button><Button variant="destructive" onClick={() => void remove()}>确认删除</Button></DialogFooter></DialogContent></Dialog></main>
 }
 
@@ -374,7 +378,7 @@ function WikiWorkbenchPage() {
   const params = useParams<{ id?: string }>()
   const location = useLocation()
   const navigate = useNavigate()
-  const { currentProject, isLoading: loadingProject } = useCurrentProject()
+  const { currentProject, isLoading: loadingProject, routeProjectId } = useCurrentProject()
   const { registerBlocker } = useDocumentNavigation()
   const role = useProjectRole()
   const selected = parseNodeFromRoute(params.id)
@@ -383,7 +387,16 @@ function WikiWorkbenchPage() {
   const [dirty, setDirty] = useState(false)
   const [pendingUrl, setPendingUrl] = useState<string | null>(null)
   const saveRef = useRef<() => Promise<boolean>>(async () => false)
-  const { data: document, isLoading: documentLoading, error: documentError } = useQuery({ queryKey: ['document-node', 'wiki', selected?.id], queryFn: () => api.get<DocumentRow>(withProject(`/documents/wiki/${selected?.id}`)), enabled: selected?.kind === 'document' })
+  const { data: document, isLoading: documentLoading, error: documentError } = useQuery({
+    queryKey: ['document-node', 'wiki', selected?.id, routeProjectId ?? currentProject?.id],
+    queryFn: async () => {
+      const path = `/documents/wiki/${encodeURIComponent(selected!.id)}`
+      const result = await api.get<DocumentRow>(withProject(path, routeProjectId))
+      if (routeProjectId && result.project_id !== routeProjectId) throw new ApiError(404, '文档不存在或无访问权限')
+      return result
+    },
+    enabled: selected?.kind === 'document',
+  })
   const canEdit = role === 'owner' || role === 'editor'
   function requestNavigation(url: string) { if (dirty) setPendingUrl(url); else navigate(url) }
   async function saveAndNavigate() { if (pendingUrl && await saveRef.current()) { const target = pendingUrl; setPendingUrl(null); navigate(target) } }
@@ -392,5 +405,5 @@ function WikiWorkbenchPage() {
   if (!currentProject) return <NoProject />
   if (documentError) return <ErrorNotification message={(documentError as Error).message} />
   const editing = mode === 'new' || mode === 'edit'
-  return <div className="-m-6 flex h-[calc(100dvh-3rem)] min-h-0 bg-background"><ModuleTreeSidebar selected={selected} onNavigate={requestNavigation} />{documentLoading ? <p className="p-8 text-sm text-muted-foreground">加载中…</p> : mode === 'new' && canEdit ? <DocumentEditor key={`new-wiki-${containerId ?? 'root'}`} containerId={containerId} onDirtyChange={setDirty} onRegisterSave={(save) => { saveRef.current = save }} onSaved={(saved) => navigate(documentUrl(saved.id))} onCancel={() => requestNavigation(moduleBase())} /> : document && editing && canEdit ? <DocumentEditor key={document.id} document={document} containerId={document.parent_id} onDirtyChange={setDirty} onRegisterSave={(save) => { saveRef.current = save }} onSaved={(saved) => navigate(documentUrl(saved.id))} onCancel={() => requestNavigation(documentUrl(document.id))} /> : document ? <DocumentDetail document={document} onEdit={() => navigate(`${documentUrl(document.id)}?mode=edit`)} onNavigate={requestNavigation} /> : <WikiIndexView onNavigate={requestNavigation} onCreate={() => requestNavigation(`${moduleBase()}?mode=new`)} />}<Dialog open={pendingUrl !== null} onOpenChange={(open) => !open && setPendingUrl(null)}><DialogContent><DialogHeader><DialogTitle>未保存的更改</DialogTitle><DialogDescription>切换前请选择如何处理当前文档。</DialogDescription></DialogHeader><DialogFooter className="sm:justify-between"><Button variant="ghost" onClick={() => setPendingUrl(null)}>留在当前文档</Button><div className="flex gap-2"><Button variant="outline" onClick={() => { const target = pendingUrl; setDirty(false); setPendingUrl(null); if (target) navigate(target) }}>放弃更改并切换</Button><Button onClick={() => void saveAndNavigate()}>保存并切换</Button></div></DialogFooter></DialogContent></Dialog></div>
+  return <div className="-m-6 flex h-[calc(100dvh-3rem)] min-h-0 bg-background"><ModuleTreeSidebar selected={selected} onNavigate={requestNavigation} />{documentLoading ? <p className="p-8 text-sm text-muted-foreground">加载中…</p> : mode === 'new' && canEdit ? <DocumentEditor key={`new-wiki-${containerId ?? 'root'}`} containerId={containerId} onDirtyChange={setDirty} onRegisterSave={(save) => { saveRef.current = save }} onSaved={(saved) => navigate(documentUrl(saved.id, routeProjectId))} onCancel={() => requestNavigation(moduleBase(routeProjectId))} /> : document && editing && canEdit ? <DocumentEditor key={document.id} document={document} containerId={document.parent_id} onDirtyChange={setDirty} onRegisterSave={(save) => { saveRef.current = save }} onSaved={(saved) => navigate(documentUrl(saved.id, routeProjectId))} onCancel={() => requestNavigation(documentUrl(document.id, routeProjectId))} /> : document ? <DocumentDetail document={document} onEdit={() => navigate(`${documentUrl(document.id, routeProjectId)}?mode=edit`)} onNavigate={requestNavigation} /> : <WikiIndexView onNavigate={requestNavigation} onCreate={() => requestNavigation(`${moduleBase(routeProjectId)}?mode=new`)} />}<Dialog open={pendingUrl !== null} onOpenChange={(open) => !open && setPendingUrl(null)}><DialogContent><DialogHeader><DialogTitle>未保存的更改</DialogTitle><DialogDescription>切换前请选择如何处理当前文档。</DialogDescription></DialogHeader><DialogFooter className="sm:justify-between"><Button variant="ghost" onClick={() => setPendingUrl(null)}>留在当前文档</Button><div className="flex gap-2"><Button variant="outline" onClick={() => { const target = pendingUrl; setDirty(false); setPendingUrl(null); if (target) navigate(target) }}>放弃更改并切换</Button><Button onClick={() => void saveAndNavigate()}>保存并切换</Button></div></DialogFooter></DialogContent></Dialog></div>
 }

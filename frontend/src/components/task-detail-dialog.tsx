@@ -34,7 +34,7 @@ import {
   type TaskRow,
 } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
-import { useProjectRole } from '@/lib/current-project'
+import { useCurrentProject } from '@/lib/current-project'
 import { canSetTaskStatus } from '@/lib/task-perms'
 
 // 任务详情弹窗(ADR 0003):任务收归需求后不再有独立详情页,由需求详情任务面板打开。
@@ -51,17 +51,17 @@ export function TaskDetailDialog({
 }) {
   const { user } = useAuth()
   const qc = useQueryClient()
-  const role = useProjectRole()
+  const { role, routeProjectId } = useCurrentProject()
   const [error, setError] = useState<string | null>(null)
 
   const projectId = task?.project_id
 
   const { data: fresh } = useQuery({
-    queryKey: ['task', task?.id],
+    queryKey: ['task', task?.id, projectId],
     queryFn: () => api.get<TaskRow>(withProject(`/tasks/${task?.id}`, projectId)),
     enabled: open && !!task,
   })
-  const t = fresh ?? task
+  const t = fresh && (!routeProjectId || fresh.project_id === routeProjectId) ? fresh : task
   const { data: requirements } = useQuery({
     queryKey: ['requirements', projectId],
     queryFn: () =>
@@ -179,7 +179,7 @@ export function TaskDetailDialog({
               onSelect={(s) => void setStatus(s)}
               disabled={!canStatus}
             />
-            <WatchButton targetType="task" targetId={t.id} />
+            {!routeProjectId && <WatchButton targetType="task" targetId={t.id} />}
             {t.assignee ? (
               <Badge variant="outline" className="gap-1.5">
                 <UserAvatar
@@ -297,7 +297,7 @@ export function TaskDetailDialog({
           <ErrorNotification message={error} />
 
           <div className="rounded-lg border p-2">
-            <ActivityStream targetType="task" targetId={t.id} />
+            <ActivityStream targetType="task" targetId={t.id} projectId={routeProjectId} />
           </div>
         </div>
       </DialogContent>
