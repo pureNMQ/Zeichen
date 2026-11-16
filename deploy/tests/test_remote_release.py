@@ -2,6 +2,7 @@
 import importlib.util
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
@@ -103,6 +104,50 @@ class SafetyTests(unittest.TestCase):
             item.activate()
         item.save.assert_called_with("manual_recovery_required")
         self.assertFalse(any("old.json" in call.args[0] for call in command.call_args_list))
+
+    @patch.object(release.Release, "activate")
+    @patch.object(release.Release, "preflight")
+    @patch.object(release.Release, "compose")
+    @patch.object(release.Release, "test_migration")
+    @patch.object(release, "inspect", return_value={"Id": "sha256:fixture"})
+    @patch.object(release, "run", return_value="candidate-head (head)")
+    @patch.object(release.shutil, "disk_usage", return_value=Mock(free=10 * 1024**3))
+    def test_candidate_checks_use_disposable_builds_and_skip_production(
+        self, disk_usage, command, inspect, migrate, compose, preflight, activate
+    ):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "archive"
+            source.mkdir()
+            state = root / "checks"
+            args = ["remote_release.py", "--candidate-source", str(source),
+                    "--root", str(state), "--commit", "a" * 40, "--check-only"]
+            with patch.object(sys, "argv", args):
+                release.main()
+            results = list(state.glob("*/result.json"))
+            self.assertEqual(len(results), 1)
+            self.assertIn('"database_target": "candidate-head"', results[0].read_text())
+            self.assertIn('"status": "verified"', results[0].read_text())
+        preflight.assert_not_called()
+        activate.assert_not_called()
+        compose.assert_not_called()
+        migrate.assert_called_once_with("zeichen-check-backend-test:" + "a" * 40)
+        for call in command.call_args_list:
+            cmd = call.args[0]
+            self.assertEqual(cmd[0], "docker")
+            if cmd[1] == "run":
+                self.assertEqual(cmd[cmd.index("--network") + 1], "none")
+                self.assertNotIn("-v", cmd)
+        self.assertTrue(any("/workspace/deploy/tests" in call.args[0] for call in command.call_args_list))
+
+    @patch.object(release.Release, "activate")
+    def test_candidate_source_cannot_activate(self, activate):
+        args = ["remote_release.py", "--candidate-source", "/fake",
+                "--root", "/fake", "--commit", "a" * 40]
+        with patch.object(sys, "argv", args), self.assertRaises(SystemExit) as error:
+            release.main()
+        self.assertEqual(error.exception.code, 2)
+        activate.assert_not_called()
 
 
 if __name__ == "__main__":

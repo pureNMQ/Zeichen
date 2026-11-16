@@ -103,18 +103,23 @@ class Release:
     def __init__(self, args):
         self.args = args
         self.root = args.root.resolve()
-        self.state = self.root / ".release"
+        self.candidate = args.candidate_source is not None
+        self.state = self.root if self.candidate else self.root / ".release"
         self.state.mkdir(mode=0o700, exist_ok=True)
         self.state.chmod(0o700)
         stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        self.directory = self.state / f"{stamp}-{args.commit[:12]}"
+        suffix = f"-{time.time_ns()}" if self.candidate else ""
+        self.directory = self.state / f"{stamp}-{args.commit[:12]}{suffix}"
         self.directory.mkdir(mode=0o700)
         self.source = self.directory / "source"
-        shutil.copytree(Path(__file__).resolve().parent.parent, self.source)
+        source = args.candidate_source if self.candidate else Path(__file__).resolve().parent.parent
+        shutil.copytree(source, self.source, symlinks=True)
         self.environment = os.environ.copy()
-        self.backend = f"zeichen-release-backend:{args.commit}"
-        self.frontend = f"zeichen-release-frontend:{args.commit}"
-        self.record = {"commit": args.commit, "started_utc": stamp, "status": "checking"}
+        self.image_prefix = "zeichen-check" if self.candidate else "zeichen-release"
+        self.backend = f"{self.image_prefix}-backend:{args.commit}"
+        self.frontend = f"{self.image_prefix}-frontend:{args.commit}"
+        self.record = {"commit": args.commit, "started_utc": stamp, "status": "checking",
+                       "mode": "candidate" if self.candidate else "release"}
 
     def save(self, status):
         self.record["status"] = status
@@ -159,14 +164,21 @@ class Release:
         self.save("checking")
 
     def build_and_test(self):
-        run([sys.executable, "-m", "unittest", "discover", "-s", self.source / "deploy/tests"])
+        if not self.candidate:
+            run([sys.executable, "-m", "unittest", "discover", "-s", self.source / "deploy/tests"])
         for component in ("backend", "frontend"):
-            image = f"zeichen-release-{component}-test:{self.args.commit}"
+            image = f"{self.image_prefix}-{component}-test:{self.args.commit}"
             dockerfile = self.source / f"deploy/Dockerfile.release-{component}"
+            if not dockerfile.resolve().is_relative_to(self.source):
+                raise RuntimeError(f"{component}: Dockerfile must be inside the source archive")
             run(["docker", "build", "--target", "test", "-t", image, "-f", dockerfile, self.source])
             run(["docker", "run", "--rm", "--network", "none", "--cpus", "1",
                  "--memory", "1536m", image])
             if component == "backend":
+                if self.candidate:
+                    run(["docker", "run", "--rm", "--network", "none", "--cpus", "1",
+                         "--memory", "512m", image, "python", "-m", "unittest", "discover",
+                         "-s", "/workspace/deploy/tests"])
                 self.test_migration(image)
             target = self.backend if component == "backend" else self.frontend
             run(["docker", "build", "--target", "runtime", "-t", target, "-f", dockerfile, self.source])
@@ -176,13 +188,16 @@ class Release:
         self.environment.update(ZEICHEN_BACKEND_IMAGE=self.backend, ZEICHEN_FRONTEND_IMAGE=self.frontend)
         heads = run(["docker", "run", "--rm", "--network", "none", self.backend,
                      "alembic", "heads"], capture=True)
-        self.target_revision = heads.split()[0]
         if len(heads.splitlines()) != 1:
             raise RuntimeError("Expected one Alembic head")
-        if self.target_revision != self.old_revision and not self.args.allow_migration:
-            raise RuntimeError(f"Migration {self.old_revision} -> {self.target_revision} requires -AllowMigration")
+        self.target_revision = heads.split()[0]
         self.record.update(backend_image=self.backend, frontend_image=self.frontend,
                            database_target=self.target_revision)
+        if self.candidate:
+            self.save("verified")
+            return
+        if self.target_revision != self.old_revision and not self.args.allow_migration:
+            raise RuntimeError(f"Migration {self.old_revision} -> {self.target_revision} requires -AllowMigration")
         self.files = [self.source / "docker-compose.yml", self.source / "deploy/docker-compose.prod.yml"]
         self.files += [self.root / p for p in ENVIRONMENT_OVERRIDES if (self.root / p).exists()]
         self.files += [self.source / "deploy/docker-compose.release.yml"]
@@ -336,21 +351,28 @@ def main():
     parser.add_argument("--commit", required=True)
     parser.add_argument("--check-only", action="store_true")
     parser.add_argument("--allow-migration", action="store_true")
+    parser.add_argument("--candidate-source", type=Path)
     args = parser.parse_args()
     if not re.fullmatch(r"[0-9a-f]{40}", args.commit):
         parser.error("Expected a full Git commit SHA")
+    if args.candidate_source is not None and (not args.check_only or args.allow_migration):
+        parser.error("Candidate sources require --check-only without --allow-migration")
     os.umask(0o077)
-    state = args.root / ".release"
+    state = args.root if args.candidate_source is not None else args.root / ".release"
     state.mkdir(mode=0o700, exist_ok=True)
     with (state / "lock").open("w") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            raise SystemExit("Another release is running")
+            raise SystemExit("Another check or release is running in this state directory")
         release = Release(args)
         print("Release evidence: " + str(release.directory), flush=True)
         try:
-            release.preflight()
+            if release.candidate:
+                if shutil.disk_usage(release.state).free < 5 * 1024**3:
+                    raise RuntimeError("At least 5 GiB free disk required")
+            else:
+                release.preflight()
             release.build_and_test()
             if not args.check_only:
                 release.activate()
