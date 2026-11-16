@@ -1,0 +1,3 @@
+name: 标准模式 + zeichen MCP
+description: 标准模式的全部能力，外加 Zeichen(贼船) MCP 工具集（requirements.* / tasks.* / docs.* 等 60+ 项目管理工具，Agent mocha 身份）。
+order: 5

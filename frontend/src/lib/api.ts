@@ -195,7 +195,7 @@ export interface FilterViewRow {
   updated_at: string
 }
 
-export type DocumentType = 'wiki' | 'glossary'
+export type DocumentType = 'wiki'
 
 export type RepositoryVcsType = 'git' | 'svn' | 'other'
 
@@ -214,6 +214,39 @@ export interface RepositoryRow {
   deleted_at: string | null
 }
 
+// REQ-59:溯源标识(人名或 agent 名+其主人,ADR 0004)
+export interface AuthorIdentity {
+  id: string
+  username: string
+  nickname: string | null
+  is_agent: boolean
+  owner: { id: string; username: string; nickname: string | null } | null
+}
+
+// REQ-59:[[双链]]聚合(outgoing 含断链;incoming=谁链我)
+export interface WikiLinkOutgoing {
+  raw_text: string
+  display: string | null
+  section: string | null
+  to_code: string | null
+  to_title: string | null
+  broken: boolean
+}
+
+export interface WikiLinkIncoming {
+  from_code: string
+  from_title: string
+  raw_text: string
+  display: string | null
+  section: string | null
+}
+
+export interface WikiLinks {
+  outgoing: WikiLinkOutgoing[]
+  incoming: WikiLinkIncoming[]
+  broken_count: number
+}
+
 export interface DocumentRow {
   id: string
   node_kind: 'document'
@@ -223,31 +256,45 @@ export interface DocumentRow {
   metadata: Record<string, unknown>
   project_id: string
   created_by: string | null
+  author: AuthorIdentity | null
   created_at: string
   updated_at: string
   deleted_at: string | null
   parent_id: string | null
-  directory_id: string | null
   has_children: boolean
-  reference_warning?: { count: number; items: ReferenceRow[] }
+  links?: WikiLinks
+  reference_warning?: { count: number; items: { raw_text: string; reason: string; display: string | null }[] }
 }
 
-export interface DocumentDirectoryRow {
+export type DocumentNode = DocumentRow
+
+// REQ-59:INDEX 投影行(与检索结果同构)
+export interface WikiIndexRow {
   id: string
-  node_kind: 'directory'
-  name: string
   title: string
-  module_type: Exclude<DocumentType, 'wiki'>
-  project_id: string
-  parent_id: string | null
-  created_by: string | null
-  created_at: string
+  doc_kind: string | null
+  summary: string
+  missing_summary: boolean
   updated_at: string
-  deleted_at: string | null
-  has_children: boolean
+  author: AuthorIdentity | null
 }
 
-export type DocumentNode = DocumentRow | DocumentDirectoryRow
+export interface WikiIndexSection {
+  kind: string | null
+  label: string
+  items: WikiIndexRow[]
+}
+
+export interface WikiIndex {
+  project_id: string
+  total: number
+  sections: WikiIndexSection[]
+  lint: {
+    missing_kind: { id: string; title: string }[]
+    missing_summary: { id: string; title: string }[]
+    broken_links: { from: string; from_title: string | null; raw_text: string }[]
+  }
+}
 
 export interface DocumentVersionRow {
   id: string
@@ -256,6 +303,7 @@ export interface DocumentVersionRow {
   content: string
   metadata: DocumentRow['metadata']
   created_by: string | null
+  author: AuthorIdentity | null
   created_at: string
 }
 
@@ -291,6 +339,9 @@ export interface SearchItem {
   status?: string
   doc_type?: string
   kind?: string
+  /** REQ-59:文档域命中片段(首个命中词上下文);其余域无此字段 */
+  snippet?: string | null
+  doc_kind?: string | null
 }
 
 export interface AttachmentRow {

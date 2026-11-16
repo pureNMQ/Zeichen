@@ -1,8 +1,10 @@
-"""MCP 工具集:requirements.* / tasks.* / comment.* / ref.* / project.* / agent.*(28 工具)。
+"""MCP 工具集:requirements.* / tasks.* / docs.wiki.* / comment.* / ref.* / project.* / agent.*(51 工具)。
 
 - 每个工具复用 backend service 层,错误四件套映射为 MCP 错误消息前缀 `code: message`
 - cursor 分页统一(pagination.py);删除类 = 软删 + restore
 - 点号命名空间 + 小写工具名(规格书 §4.1)
+- REQ-59:glossary 并入 wiki,docs.glossary.* 下线;新增 docs.wiki.index / docs.search;
+  docs.wiki.get 聚合返回正文+元数据+双链+反链
 """
 
 import contextvars
@@ -446,20 +448,21 @@ def _register_all(mcp) -> None:
             db, task_svc.restore_task(db, actor, id, project_id=_require_scope(project_id))
         )
 
-    # ---------- docs.wiki.* / docs.glossary.* ----------
-    def _doc_create(project_id: str, title: str, module: str, content: str, metadata: dict | None, parent_id: str | None = None, directory_id: str | None = None) -> dict:
+    # ---------- docs.wiki.* ----------
+    def _doc_create(project_id: str, title: str, module: str, content: str, metadata: dict | None, parent_id: str | None = None) -> dict:
         db, actor = dbc()
-        document = document_svc.create_document(
+        document, link_warning = document_svc.create_document(
             db, actor, uuid.UUID(project_id), title, module, content, metadata,
-            parent_id or None, directory_id or None,
+            parent_id or None,
         )
-        return document_svc._document_dict(db, document)
+        return document_svc._document_dict(db, document, warning=link_warning, with_links=True)
 
     def _doc_get(id: str, module: str, project_id: str) -> dict:
         db, actor = dbc()
         return document_svc._document_dict(
             db,
             document_svc.get_document(db, actor, id, module, project_id=_require_scope(project_id)),
+            with_links=True,
         )
 
     def _doc_children(project_id: str, module: str, parent_id: str | None, cursor: str | None, limit: int | None) -> dict:
@@ -474,21 +477,21 @@ def _register_all(mcp) -> None:
         db, actor = dbc()
         scope = _require_scope(project_id)
         document = document_svc.get_document(db, actor, id, module, project_id=scope)
-        saved, warning = document_svc.update_document(
+        saved, link_warning = document_svc.update_document(
             db, actor, document.code, title, content,
             metadata if metadata is not None else document_svc._UNSET, project_id=scope,
         )
-        return document_svc._document_dict(db, saved, warning)
+        return document_svc._document_dict(db, saved, warning=link_warning, with_links=True)
 
     def _doc_move(
-        id: str, module: str, parent_id: str = "", directory_id: str = "",
+        id: str, module: str, parent_id: str = "",
         project_id: str = "",
     ) -> dict:
         db, actor = dbc()
         scope = _require_scope(project_id)
         document = document_svc.get_document(db, actor, id, module, project_id=scope)
         moved = document_svc.move_document(
-            db, actor, document.code, parent_id or None, directory_id or None, project_id=scope
+            db, actor, document.code, parent_id or None, project_id=scope
         )
         return document_svc._document_dict(db, moved)
 
@@ -516,22 +519,41 @@ def _register_all(mcp) -> None:
         db, actor = dbc()
         return document_svc.ancestor_path(db, actor, uuid.UUID(project_id), module, node_kind, id)
 
-    def _doc_deleted(project_id: str, module: str, cursor: str | None, limit: int | None) -> dict:
-        db, actor = dbc()
-        cursor, limit = _paged({"project_id": project_id, "module": module, "deleted": True}, cursor, limit)
-        return document_svc.list_deleted_nodes(db, actor, uuid.UUID(project_id), module, cursor, limit)
-
     @mcp.tool(name="docs.wiki.create")
     @sessioned
-    def docs_wiki_create(project_id: str, title: str, content: str = "", parent_id: str | None = None) -> dict:
-        """创建根 Wiki 或指定父 Wiki 下的子 Wiki。"""
-        return _doc_create(project_id, title, "wiki", content, {}, parent_id=parent_id)
+    def docs_wiki_create(project_id: str, title: str, content: str = "", parent_id: str | None = None, metadata: dict | None = None) -> dict:
+        """创建根 Wiki 或指定父 Wiki 下的子 Wiki。
+
+        正文顶部可带 YAML frontmatter(summary/doc_kind/tags/aliases),
+        写入时解析合并进 metadata;[[双链]]写入时落表,断链在返回的 link_warnings。"""
+        return _doc_create(project_id, title, "wiki", content, metadata, parent_id=parent_id)
 
     @mcp.tool(name="docs.wiki.get")
     @sessioned
     def docs_wiki_get(id: str, project_id: str) -> dict:
-        """Wiki 详情。project_id 必传:短码按项目内寻址,无缺省项目路径。"""
+        """Wiki 详情:正文+frontmatter 元数据+正向链接(含断链)+反向链接(谁链我)。
+        project_id 必传:短码按项目内寻址。"""
         return _doc_get(id, "wiki", project_id)
+
+    @mcp.tool(name="docs.wiki.index")
+    @sessioned
+    def docs_wiki_index(project_id: str) -> dict:
+        """项目知识 INDEX(后端投影,零维护):doc_kind 分节+未分类兜底,
+        每页一行(短码/标题/summary/更新时间/溯源);附带 lint 信号
+        (missing_kind/missing_summary/broken_links)。读路径:先读 INDEX 再钻页。"""
+        db, actor = dbc()
+        return document_svc.project_index(db, actor, uuid.UUID(project_id))
+
+    @mcp.tool(name="docs.search")
+    @sessioned
+    def docs_search(project_id: str, q: str, limit: int | None = None, cursor: str | None = None) -> dict:
+        """项目内 wiki 关键词检索(多关键词 AND,标题/正文/别名参与):
+        返回与 INDEX 行同构的结果(短码/标题/doc_kind/summary/命中片段),cursor 分页。
+        INDEX 未覆盖(词没进目录/跨概念)时用此工具兜底定位。"""
+        db, actor = dbc()
+        return search_svc.search_documents_paged(
+            db, actor, uuid.UUID(project_id), q, cursor=cursor, limit=limit
+        )
 
     @mcp.tool(name="docs.wiki.children")
     @sessioned
@@ -554,14 +576,16 @@ def _register_all(mcp) -> None:
     @sessioned
     def docs_wiki_update(
         id: str, project_id: str, title: str | None = None, content: str | None = None,
+        metadata: dict | None = None,
     ) -> dict:
-        """更新 Wiki。project_id 必传:短码按项目内寻址。"""
-        return _doc_update(id, "wiki", title, content, project_id=project_id)
+        """更新 Wiki(正文 frontmatter 写入时解析合并进 metadata;[[双链]]落表)。
+        project_id 必传:短码按项目内寻址。"""
+        return _doc_update(id, "wiki", title, content, metadata=metadata, project_id=project_id)
 
     @mcp.tool(name="docs.wiki.move")
     @sessioned
     def docs_wiki_move(id: str, project_id: str, parent_id: str = "") -> dict:
-        """移动 Wiki；省略 parent_id 或传空字符串移动到根节点。project_id 必传:短码按项目内寻址。"""
+        """移动 Wiki;省略 parent_id 或传空字符串移动到根节点。project_id 必传:短码按项目内寻址。"""
         return _doc_move(id, "wiki", parent_id=parent_id, project_id=project_id)
 
     @mcp.tool(name="docs.wiki.versions")
@@ -578,14 +602,12 @@ def _register_all(mcp) -> None:
     @mcp.tool(name="docs.wiki.rollback")
     @sessioned
     def docs_wiki_rollback(id: str, project_id: str, version_no: int) -> dict:
-        """回滚 Wiki 版本。project_id 必传:短码按项目内寻址。"""
+        """回滚 Wiki 版本(双链按回滚后正文重建)。project_id 必传:短码按项目内寻址。"""
         db, actor = dbc()
-        return document_svc._document_dict(
-            db,
-            document_svc.rollback_document(
-                db, actor, id, version_no, "wiki", project_id=_require_scope(project_id)
-            ),
+        rolled, link_warning = document_svc.rollback_document(
+            db, actor, id, version_no, "wiki", project_id=_require_scope(project_id)
         )
+        return document_svc._document_dict(db, rolled, warning=link_warning, with_links=True)
 
     @mcp.tool(name="docs.wiki.delete")
     @sessioned
@@ -599,123 +621,8 @@ def _register_all(mcp) -> None:
         """恢复已删 Wiki。project_id 必传:短码按项目内寻址。"""
         return _doc_restore(id, "wiki", project_id)
 
-    def _register_directory_tools(mcp, module: str) -> None:
-        @mcp.tool(name=f"docs.{module}.directory_create")
-        @sessioned
-        def directory_create(project_id: str, name: str, parent_id: str | None = None) -> dict:
-            db, actor = dbc()
-            directory = document_svc.create_directory(db, actor, uuid.UUID(project_id), module, name, parent_id or None)
-            return document_svc._directory_dict(db, directory)
-
-        @mcp.tool(name=f"docs.{module}.directory_move")
-        @sessioned
-        def directory_move(id: str, project_id: str, parent_id: str = "") -> dict:
-            """移动目录；省略 parent_id 或传空字符串移动到根节点。project_id 必传:短码按项目内寻址。"""
-            db, actor = dbc()
-            scope = _require_scope(project_id)
-            directory = document_svc.get_directory(db, actor, id, module, project_id=scope)
-            moved = document_svc.move_directory(
-                db, actor, directory.code, parent_id or None, project_id=scope
-            )
-            return document_svc._directory_dict(db, moved)
-
-        @mcp.tool(name=f"docs.{module}.directory_rename")
-        @sessioned
-        def directory_rename(id: str, project_id: str, name: str) -> dict:
-            """重命名目录。project_id 必传:短码按项目内寻址。"""
-            db, actor = dbc()
-            scope = _require_scope(project_id)
-            directory = document_svc.get_directory(db, actor, id, module, project_id=scope)
-            return document_svc._directory_dict(
-                db,
-                document_svc.rename_directory(db, actor, directory.code, name, project_id=scope),
-            )
-
-        @mcp.tool(name=f"docs.{module}.directory_delete")
-        @sessioned
-        def directory_delete(id: str, project_id: str) -> dict:
-            """删除目录。project_id 必传:短码按项目内寻址。"""
-            db, actor = dbc()
-            scope = _require_scope(project_id)
-            directory = document_svc.get_directory(db, actor, id, module, project_id=scope)
-            impact = document_svc.delete_impact_directory(db, actor, directory.code, project_id=scope)
-            document_svc.delete_directory(db, actor, directory.code, project_id=scope)
-            return {"deleted": True, "id": id, "impact": impact}
-
-        @mcp.tool(name=f"docs.{module}.directory_restore")
-        @sessioned
-        def directory_restore(id: str, project_id: str) -> dict:
-            """恢复已删目录。project_id 必传:短码按项目内寻址。"""
-            db, actor = dbc()
-            directory = document_svc.restore_directory(db, actor, id, project_id=_require_scope(project_id))
-            if directory.module_type != module:
-                raise ToolError("not_found: 目录不存在")
-            return document_svc._directory_dict(db, directory)
-
-    @mcp.tool(name="docs.glossary.create")
-    @sessioned
-    def docs_glossary_create(project_id: str, title: str, content: str = "", directory_id: str | None = None) -> dict:
-        return _doc_create(project_id, title, "glossary", content, {}, directory_id=directory_id)
-
-    @mcp.tool(name="docs.glossary.get")
-    @sessioned
-    def docs_glossary_get(project_id: str, title: str | None = None, id: str | None = None) -> dict:
-        """词条详情(id 或 project_id + title)。project_id 必传:短码/标题均按项目内寻址。"""
-        db, actor = dbc()
-        scope = _require_scope(project_id)
-        if id:
-            return _doc_get(id, "glossary", project_id)
-        if not title:
-            raise ToolError("invalid_request: 需要 id 或 project_id + title")
-        return document_svc._document_dict(db, document_svc.get_glossary_term(db, actor, scope, title))
-
-    @mcp.tool(name="docs.glossary.children")
-    @sessioned
-    def docs_glossary_children(project_id: str, parent_id: str | None = None, cursor: str | None = None, limit: int | None = None) -> dict:
-        return _doc_children(project_id, "glossary", parent_id, cursor, limit)
-
-    @mcp.tool(name="docs.glossary.list")
-    @sessioned
-    def docs_glossary_list(project_id: str, cursor: str | None = None, limit: int | None = None) -> dict:
-        return _doc_children(project_id, "glossary", None, cursor, limit)
-
-    @mcp.tool(name="docs.glossary.ancestors")
-    @sessioned
-    def docs_glossary_ancestors(project_id: str, id: str, node_kind: str = "document") -> dict:
-        return _doc_path(project_id, "glossary", node_kind, id)
-
-    @mcp.tool(name="docs.glossary.update")
-    @sessioned
-    def docs_glossary_update(
-        id: str, project_id: str, title: str | None = None, content: str | None = None,
-    ) -> dict:
-        """更新词条。project_id 必传:短码按项目内寻址。"""
-        return _doc_update(id, "glossary", title, content, project_id=project_id)
-
-    @mcp.tool(name="docs.glossary.move")
-    @sessioned
-    def docs_glossary_move(id: str, project_id: str, directory_id: str = "") -> dict:
-        """移动术语；省略 directory_id 或传空字符串移动到根节点。project_id 必传:短码按项目内寻址。"""
-        return _doc_move(id, "glossary", directory_id=directory_id, project_id=project_id)
-
-    @mcp.tool(name="docs.glossary.deleted")
-    @sessioned
-    def docs_glossary_deleted(project_id: str, cursor: str | None = None, limit: int | None = None) -> dict:
-        return _doc_deleted(project_id, "glossary", cursor, limit)
-
-    @mcp.tool(name="docs.glossary.delete")
-    @sessioned
-    def docs_glossary_delete(id: str, project_id: str) -> dict:
-        """删除词条。project_id 必传:短码按项目内寻址。"""
-        return _doc_delete(id, "glossary", project_id)
-
-    @mcp.tool(name="docs.glossary.restore")
-    @sessioned
-    def docs_glossary_restore(id: str, project_id: str) -> dict:
-        """恢复已删词条。project_id 必传:短码按项目内寻址。"""
-        return _doc_restore(id, "glossary", project_id)
-
-    _register_directory_tools(mcp, "glossary")
+    # REQ-59:glossary 并入 wiki,docs.glossary.* 工具组与目录工具下线;
+    # 词条成为普通 wiki 页(TERM-n 短码保留,经 docs.wiki.* 泛型寻址)。
 
     # ---------- comment.* ----------
     @mcp.tool(name="comment.create")

@@ -44,7 +44,7 @@ def collision(db: Session, world: dict) -> dict:
         r = req_svc.create_requirement(db, admin, project.id, "需求")
         r.status = "backlog"  # 直改 ORM:全局 set_status 会撞多命中(即本缺陷)
         t = task_svc.create_task(db, admin, project.id, "任务", requirement_id=r.code)
-        d = document_svc.create_document(db, admin, project.id, "文档", "wiki", "", None, None, None)
+        d, _ = document_svc.create_document(db, admin, project.id, "文档", "wiki", "", None, None, None)
         built.setdefault("req", r.code)
         built.setdefault("task", t.code)
         built.setdefault("doc", d.code)

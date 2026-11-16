@@ -207,16 +207,16 @@ def test_agent_claim_to_requirement_done(mcp_server: dict):
     assert client.session_id is None, "stateless 模式不签发 Mcp-Session-Id"
 
     tools = client.list_tools()
-    assert len(tools) >= 50  # 当前注册 64 个;移除 memory.* 后同步放宽下限
-    for ns in ("requirements.", "tasks.", "repositories.", "docs.wiki.", "docs.glossary.", "comment.", "ref.", "project.", "agent."):
+    assert len(tools) >= 40  # 当前注册 54 个;REQ-59 移除 docs.glossary.* 后同步放宽下限
+    for ns in ("requirements.", "tasks.", "repositories.", "docs.wiki.", "comment.", "ref.", "project.", "agent."):
         assert any(t.startswith(ns) for t in tools), f"缺少 {ns} 工具"
     assert not any(t.startswith("docs.code.") for t in tools), "docs.code.* 工具应随 API 参考模块移除"
     assert "requirements.set_status" in tools and "requirements.complete" not in tools
     assert "tasks.set_status" in tools and "tasks.start" not in tools and "tasks.complete" not in tools
     assert not any(t.startswith("memory.") for t in tools), "REQ-57:记忆工具应随记忆系统下线移除"
+    assert not any(t.startswith("docs.glossary.") for t in tools), "REQ-59:词条工具应随 glossary 合并 wiki 下线"
     for name in (
-        "docs.wiki.children", "docs.wiki.ancestors", "docs.wiki.move",
-        "docs.glossary.directory_create", "docs.glossary.directory_move",
+        "docs.wiki.children", "docs.wiki.ancestors", "docs.wiki.move", "docs.wiki.index", "docs.search",
         "repositories.list", "repositories.create", "repositories.update", "repositories.delete", "repositories.restore",
     ):
         assert name in tools
@@ -346,20 +346,43 @@ def test_task_requirement_link_over_mcp(mcp_server: dict):
 
 
 def test_document_hierarchy_over_mcp(mcp_server: dict):
-    """MCP 与 HTTP 共用层级/目录 service，而不是第二套规则。"""
+    """MCP 与 HTTP 共用层级 service,而不是第二套规则;REQ-59 附带双链/INDEX/docs.search 冒烟。"""
     client = RawMcpClient(mcp_server["url"], mcp_server["token"])
     client.initialize()
     project_id = mcp_server["project_id"]
-    root = client.call("docs.wiki.create", project_id=project_id, title="MCP 根")
-    child = client.call("docs.wiki.create", project_id=project_id, title="MCP 子", parent_id=root["id"])
+    root = client.call(
+        "docs.wiki.create", project_id=project_id, title="MCP 根",
+        content="---\ndoc_kind: concept\nsummary: 根页摘要\naliases: [根页别名]\n---\n根正文",
+    )
+    child = client.call(
+        "docs.wiki.create", project_id=project_id, title="MCP 子",
+        parent_id=root["id"], content=f"参见 [[MCP 根]] 与 [[悬空页]]",
+    )
+    assert child["reference_warning"]["count"] == 1  # 断链警告随保存返回
+    assert child["metadata"].get("doc_kind") is None
     children = client.call("docs.wiki.children", project_id=project_id, parent_id=root["id"])
     assert [node["id"] for node in children["items"]] == [child["id"]]
     path = client.call("docs.wiki.ancestors", project_id=project_id, id=child["id"])
     assert [node["id"] for node in path["items"]] == [root["id"], child["id"]]
     assert "invalid_request" in client.call("docs.wiki.move", id=root["id"], project_id=project_id, parent_id=child["id"])["error"]
-    directory = client.call("docs.glossary.directory_create", project_id=project_id, name="MCP 术语")
-    invalid_move = client.call("docs.glossary.directory_move", id=directory["id"], project_id=project_id, parent_id="null")
-    assert "invalid_request" in str(invalid_move), invalid_move
+
+    detail = client.call("docs.wiki.get", id=root["id"], project_id=project_id)
+    assert detail["metadata"]["doc_kind"] == "concept"
+    assert [item["from_code"] for item in detail["links"]["incoming"]] == [child["id"]]  # 反链
+    assert detail["author"]["is_agent"] is True and detail["author"]["owner"]["username"] == "admin"
+
+    index = client.call("docs.wiki.index", project_id=project_id)
+    assert index["total"] >= 2
+    concept = next(section for section in index["sections"] if section["kind"] == "concept")
+    assert any(item["id"] == root["id"] for item in concept["items"])
+    assert index["lint"]["broken_links"] and index["lint"]["broken_links"][0]["raw_text"] == "悬空页"
+
+    by_alias = client.call("docs.search", project_id=project_id, q="根页别名")
+    assert any(item["id"] == root["id"] for item in by_alias["items"])
+    by_multi = client.call("docs.search", project_id=project_id, q="根页 摘要")
+    assert any(item["id"] == root["id"] for item in by_multi["items"])  # 多词 AND,别名+summary 参与
+    in_body = client.call("docs.search", project_id=project_id, q="根正文")
+    assert in_body["items"] and in_body["items"][0]["snippet"]  # 正文命中返回片段
 
 
 def test_cursor_pagination_over_mcp(mcp_server: dict):

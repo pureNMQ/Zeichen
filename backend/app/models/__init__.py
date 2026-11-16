@@ -2,7 +2,7 @@ from .base import Base
 from .user import ApiKey, PasswordSetupToken, User
 from .team_project import Project, ProjectMember, Team, WorkspaceMember
 from .requirement import Requirement, Task, TaskBlocker
-from .document import Document, DocumentDirectory, DocumentVersion
+from .document import Document, DocLink, DocumentVersion
 from .repository import Repository
 from .polymorphic import Activity, Attachment, Comment, Reference
 from .notification import EntityWatch, Notification, NotificationPreference
@@ -22,7 +22,7 @@ __all__ = [
     "Task",
     "TaskBlocker",
     "Document",
-    "DocumentDirectory",
+    "DocLink",
     "DocumentVersion",
     "Repository",
     "Comment",

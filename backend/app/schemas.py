@@ -118,11 +118,10 @@ class TaskAssignBody(BaseModel):
 
 class DocumentCreate(BaseModel):
     title: str = Field(min_length=1, max_length=256)
-    doc_type: Literal["wiki", "glossary"]
+    doc_type: Literal["wiki"]
     content: str | None = None
     metadata: dict = {}
     parent_id: str | None = None
-    directory_id: str | None = None
 
 
 class DocumentUpdate(BaseModel):
@@ -165,20 +164,6 @@ class RepositoryUpdate(BaseModel):
 
 
 class DocumentMove(BaseModel):
-    parent_id: str | None = None
-    directory_id: str | None = None
-
-
-class DirectoryCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=128)
-    parent_id: str | None = None
-
-
-class DirectoryRename(BaseModel):
-    name: str = Field(min_length=1, max_length=128)
-
-
-class DirectoryMove(BaseModel):
     parent_id: str | None = None
 
 

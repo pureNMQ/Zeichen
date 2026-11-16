@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Navigate, Route, Routes, useNavigate } from 'react-router-dom'
+import { Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom'
 import { AppShell } from '@/components/app-shell'
 import { api } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
@@ -18,10 +18,15 @@ import { RepositoriesPage } from '@/pages/repositories'
 import { SearchPage } from '@/pages/search'
 import { ManualPage } from '@/pages/manual'
 
+/** REQ-59:旧词条 URL(TERM-n)重定向到 wiki 工作台同短码页面。 */
+function WikiTermRedirect() {
+  const { id } = useParams<{ id: string }>()
+  return <Navigate to={`/documents/wiki/${id ?? ''}`} replace />
+}
+
 function BootstrapGate() {
   const navigate = useNavigate()
   const { loading } = useAuth()
-
   useEffect(() => {
     if (loading) return
     void (async () => {
@@ -93,9 +98,10 @@ export function App() {
         <Route path="requirements/:id" element={<RequirementDetailPage />} />
         <Route path="documents/wiki" element={<DocumentWorkbenchPage module="wiki" />} />
         <Route path="documents/wiki/:id" element={<DocumentWorkbenchPage module="wiki" />} />
-        <Route path="documents/glossary" element={<DocumentWorkbenchPage module="glossary" />} />
-        <Route path="documents/glossary/directory/:id" element={<DocumentWorkbenchPage module="glossary" routeNodeKind="directory" />} />
-        <Route path="documents/glossary/term/:id" element={<DocumentWorkbenchPage module="glossary" routeNodeKind="document" />} />
+        {/* REQ-59:glossary 并入 wiki,旧词条 URL 重定向保持不断链 */}
+        <Route path="documents/glossary" element={<Navigate to="/documents/wiki" replace />} />
+        <Route path="documents/glossary/directory/:id" element={<Navigate to="/documents/wiki" replace />} />
+        <Route path="documents/glossary/term/:id" element={<WikiTermRedirect />} />
         <Route path="repositories" element={<RepositoriesPage />} />
         <Route path="search" element={<SearchPage />} />
         <Route path="manual" element={<ManualPage />} />

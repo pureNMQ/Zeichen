@@ -9,7 +9,7 @@
 from sqlalchemy.orm import Session
 
 from ..errors import invalid_request, not_found
-from ..models import Document, DocumentDirectory, Requirement, Task, User
+from ..models import Document, Requirement, Task, User
 from .permissions import get_accessible_project
 from .projects import list_projects
 from .short_codes import require_valid_code
@@ -18,8 +18,8 @@ _TARGET_MODELS = {
     "requirement": Requirement,
     "task": Task,
     "document": Document,
+    # glossary 已并入 wiki(REQ-59):TERM-n 仍按 document 泛型寻址
     "glossary_term": Document,
-    "document_directory": DocumentDirectory,
 }
 
 

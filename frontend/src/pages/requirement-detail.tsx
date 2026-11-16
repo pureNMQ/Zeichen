@@ -41,11 +41,11 @@ import { useAuth } from '@/lib/auth'
 import { useCurrentProject, useProjectRole } from '@/lib/current-project'
 import { canSetTaskStatus } from '@/lib/task-perms'
 
-function referenceHref(type: string, id: string, module?: string | null) {
+function referenceHref(type: string, id: string, _module?: string | null) {
   if (type === 'requirement') return `/requirements/${id}`
   // task 引用走 TaskRefLink(任务无独立页面,ADR 0003)
-  if (type === 'document' && module === 'wiki') return `/documents/wiki/${id}`
-  if (type === 'document' && module === 'glossary') return `/documents/glossary/term/${id}`
+  // REQ-59:glossary 并入 wiki,文档引用统一走 wiki 工作台(TERM-n 短码同样可达)
+  if (type === 'document') return `/documents/wiki/${id}`
   return null
 }
 

@@ -52,7 +52,7 @@ function SearchResultCard({ item }: { item: SearchItem }) {
           )}
           {item.doc_type && (
             <Badge variant="outline" className="text-xs">
-              {item.doc_type === 'wiki' ? 'Wiki' : '词条'}
+              Wiki
             </Badge>
           )}
           {item.kind && (
@@ -61,6 +61,9 @@ function SearchResultCard({ item }: { item: SearchItem }) {
         </div>
         {item.summary && (
           <p className="line-clamp-2 text-sm text-muted-foreground">{item.summary}</p>
+        )}
+        {item.snippet && (
+          <p className="line-clamp-2 rounded bg-muted/60 px-2 py-1 font-mono text-xs text-muted-foreground" data-testid="search-snippet">…{item.snippet}…</p>
         )}
         <p className="text-xs text-muted-foreground/70">{item.project_name}</p>
       </CardContent>

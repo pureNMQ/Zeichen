@@ -1,4 +1,4 @@
-"""模块限定的文档工作台 HTTP API。"""
+"""Wiki 文档工作台 HTTP API(REQ-59:glossary 合并进 wiki,单模块)。"""
 
 import uuid
 
@@ -7,15 +7,7 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..models import User
-from ..schemas import (
-    DirectoryCreate,
-    DirectoryMove,
-    DirectoryRename,
-    DocumentCreate,
-    DocumentMove,
-    DocumentUpdate,
-    RollbackBody,
-)
+from ..schemas import DocumentCreate, DocumentMove, DocumentUpdate, RollbackBody
 from ..services import documents as service
 from ..services.pagination import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from .deps import current_user
@@ -64,6 +56,16 @@ def ancestors(
     return service.ancestor_path(db, user, project_id, module, node_kind, node_id)
 
 
+@router.get("/projects/{project_id}/documents/index")
+def project_index(
+    project_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """项目知识 INDEX(后端投影,kind 分节+未分类兜底+lint 信号)。"""
+    return service.project_index(db, user, project_id)
+
+
 @router.post("/projects/{project_id}/documents/{module}", status_code=201)
 def create_document(
     project_id: uuid.UUID,
@@ -75,19 +77,10 @@ def create_document(
     if body.doc_type != module:
         from ..errors import invalid_request
         raise invalid_request("文档类型必须与当前模块一致")
-    document = service.create_document(db, user, project_id, body.title, module, body.content, body.metadata, body.parent_id, body.directory_id)
-    return service._document_dict(db, document)
-
-
-@router.post("/projects/{project_id}/documents/{module}/directories", status_code=201)
-def create_directory(
-    project_id: uuid.UUID,
-    module: str,
-    body: DirectoryCreate,
-    user: User = Depends(current_user),
-    db: Session = Depends(get_db),
-) -> dict:
-    return service._directory_dict(db, service.create_directory(db, user, project_id, module, body.name, body.parent_id))
+    document, link_warning = service.create_document(
+        db, user, project_id, body.title, module, body.content, body.metadata, body.parent_id
+    )
+    return service._document_dict(db, document, warning=link_warning, with_links=True)
 
 
 @router.get("/documents/{module}/{document_id}")
@@ -99,7 +92,9 @@ def get_document(
     db: Session = Depends(get_db),
 ) -> dict:
     return service._document_dict(
-        db, service.get_document(db, user, document_id, module, project_id=project_id)
+        db,
+        service.get_document(db, user, document_id, module, project_id=project_id),
+        with_links=True,
     )
 
 
@@ -114,10 +109,10 @@ def update_document(
 ) -> dict:
     document = service.get_document(db, user, document_id, module, project_id=project_id)
     metadata = body.metadata if "metadata" in body.model_fields_set else service._UNSET
-    saved, warning = service.update_document(
+    saved, link_warning = service.update_document(
         db, user, document.code, body.title, body.content, metadata, project_id=project_id
     )
-    return service._document_dict(db, saved, warning)
+    return service._document_dict(db, saved, warning=link_warning, with_links=True)
 
 
 @router.post("/documents/{module}/{document_id}/move")
@@ -133,7 +128,7 @@ def move_document(
     return service._document_dict(
         db,
         service.move_document(
-            db, user, document.code, body.parent_id, body.directory_id, project_id=project_id
+            db, user, document.code, body.parent_id, project_id=project_id
         ),
     )
 
@@ -202,12 +197,10 @@ def rollback_document(
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    return service._document_dict(
-        db,
-        service.rollback_document(
-            db, user, document_id, body.version_no, module, project_id=project_id
-        ),
+    saved, link_warning = service.rollback_document(
+        db, user, document_id, body.version_no, module, project_id=project_id
     )
+    return service._document_dict(db, saved, warning=link_warning, with_links=True)
 
 
 @router.get("/documents/{module}/{document_id}/references")
@@ -219,90 +212,3 @@ def document_references(
     db: Session = Depends(get_db),
 ) -> dict:
     return service.document_references(db, user, document_id, module, project_id=project_id)
-
-
-@router.get("/directories/{module}/{directory_id}")
-def get_directory(
-    module: str,
-    directory_id: str,
-    project_id: uuid.UUID | None = None,
-    user: User = Depends(current_user),
-    db: Session = Depends(get_db),
-) -> dict:
-    return service._directory_dict(
-        db, service.get_directory(db, user, directory_id, module, project_id=project_id)
-    )
-
-
-@router.patch("/directories/{module}/{directory_id}")
-def rename_directory(
-    module: str,
-    directory_id: str,
-    body: DirectoryRename,
-    project_id: uuid.UUID | None = None,
-    user: User = Depends(current_user),
-    db: Session = Depends(get_db),
-) -> dict:
-    directory = service.get_directory(db, user, directory_id, module, project_id=project_id)
-    return service._directory_dict(
-        db, service.rename_directory(db, user, directory.code, body.name, project_id=project_id)
-    )
-
-
-@router.post("/directories/{module}/{directory_id}/move")
-def move_directory(
-    module: str,
-    directory_id: str,
-    body: DirectoryMove,
-    project_id: uuid.UUID | None = None,
-    user: User = Depends(current_user),
-    db: Session = Depends(get_db),
-) -> dict:
-    directory = service.get_directory(db, user, directory_id, module, project_id=project_id)
-    return service._directory_dict(
-        db, service.move_directory(db, user, directory.code, body.parent_id, project_id=project_id)
-    )
-
-
-@router.get("/directories/{module}/{directory_id}/delete-impact")
-def directory_delete_impact(
-    module: str,
-    directory_id: str,
-    project_id: uuid.UUID | None = None,
-    user: User = Depends(current_user),
-    db: Session = Depends(get_db),
-) -> dict:
-    directory = service.get_directory(db, user, directory_id, module, project_id=project_id)
-    return service.delete_impact_directory(db, user, directory.code, project_id=project_id)
-
-
-@router.post("/directories/{module}/{directory_id}/delete")
-def delete_directory(
-    module: str,
-    directory_id: str,
-    project_id: uuid.UUID | None = None,
-    user: User = Depends(current_user),
-    db: Session = Depends(get_db),
-) -> dict:
-    directory = service.get_directory(db, user, directory_id, module, project_id=project_id)
-    service.delete_directory(db, user, directory.code, project_id=project_id)
-    return {"ok": True}
-
-
-@router.post("/directories/{module}/{directory_id}/restore")
-def restore_directory(
-    module: str,
-    directory_id: str,
-    project_id: uuid.UUID | None = None,
-    user: User = Depends(current_user),
-    db: Session = Depends(get_db),
-) -> dict:
-    directory = service._editable_directory(
-        db, user, directory_id, include_deleted=True, project_id=project_id
-    )
-    if directory.module_type != module:
-        from ..errors import not_found
-        raise not_found("目录不存在")
-    return service._directory_dict(
-        db, service.restore_directory(db, user, directory.code, project_id=project_id)
-    )
