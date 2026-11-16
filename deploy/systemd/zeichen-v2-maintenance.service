@@ -1,0 +1,11 @@
+[Unit]
+Description=Zeichen v2 file grants and staging maintenance
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/zeichen
+# Generate this private env file from the active v2 release before installation.
+ExecStart=/usr/bin/docker compose --env-file /srv/zeichen/.release/v2-maintenance.env -f /srv/zeichen/deploy/docker-compose.maintenance.yml run --rm --no-deps -T maintenance
+TimeoutStartSec=5min

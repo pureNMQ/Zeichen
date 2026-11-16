@@ -1,0 +1,29 @@
+# Enabled separately after the v2 cutover. Resolve these inputs from the
+# activated API service; use its immutable image ID and exact volume/network.
+name: zeichen-v2-maintenance
+
+services:
+  maintenance:
+    image: ${ZEICHEN_BACKEND_IMAGE:?Set the activated v2 backend image ID}
+    pull_policy: never
+    restart: "no"
+    command: ["python", "-m", "app.workers.maintenance"]
+    environment:
+      DATABASE_URL: ${ZEICHEN_MAINTENANCE_DATABASE_URL:?Set the activated v2 database URL}
+      ATTACHMENT_STORAGE_DIR: /srv/zeichen/storage/attachments
+    volumes:
+      - attachments:/srv/zeichen/storage/attachments
+    networks:
+      - database
+    mem_limit: 256m
+    cpus: 0.5
+
+volumes:
+  attachments:
+    external: true
+    name: ${ZEICHEN_MAINTENANCE_VOLUME:?Set the activated v2 attachment volume}
+
+networks:
+  database:
+    external: true
+    name: ${ZEICHEN_MAINTENANCE_NETWORK:?Set the activated v2 database network}

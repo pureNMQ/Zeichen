@@ -17,10 +17,10 @@ _PROBE_BYTES = 16 * 1024
 
 
 def file_path(project_id: UUID, file_id: UUID) -> Path:
-    return _root() / str(project_id) / f"{file_id}.bin"
+    return library_root() / str(project_id) / f"{file_id}.bin"
 
 
-def _root() -> Path:
+def library_root() -> Path:
     return Path(get_settings().attachment_storage_dir) / "library-v2"
 
 
@@ -108,13 +108,25 @@ class StagedFile:
 
 @contextmanager
 def stage_file(*, byte_limit: int | None = None) -> Iterator[StagedFile]:
-    scratch = _root() / ".staging"
+    scratch = library_root() / ".staging"
     scratch.mkdir(exist_ok=True, parents=True)
     stream = NamedTemporaryFile(dir=scratch, suffix=".part", delete=False)
     path = Path(stream.name)
+    lock_fd = None
     try:
+        if os.name == "posix":
+            from fcntl import LOCK_EX, flock
+
+            # Publish closes the stream before linking. Keep its lock until
+            # the pathname is either published or removed.
+            lock_fd = os.dup(stream.fileno())
+            flock(lock_fd, LOCK_EX)
         limit = get_settings().file_library_max_file_bytes if byte_limit is None else byte_limit
         yield StagedFile(stream, path, limit)
     finally:
-        stream.close()
-        path.unlink(missing_ok=True)
+        try:
+            stream.close()
+            path.unlink(missing_ok=True)
+        finally:
+            if lock_fd is not None:
+                os.close(lock_fd)

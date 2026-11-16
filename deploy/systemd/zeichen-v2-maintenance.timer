@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Zeichen v2 maintenance daily
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=15min
+Persistent=true
+Unit=zeichen-v2-maintenance.service
+
+[Install]
+WantedBy=timers.target
