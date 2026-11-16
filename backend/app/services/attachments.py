@@ -143,16 +143,17 @@ def list_attachments(
 
     project = resolve_target(db, target_type, target_id, user=user, project_id=project_id)
     get_accessible_project(db, user.id, project.id, min_level="viewer")
-    filters = {"type": target_type, "id": str(target_id)}
+    filters = {"project_id": str(project.id), "type": target_type, "id": str(target_id)}
     offset = decode_cursor(filters, cursor)
     rows = db.scalars(
         select(Attachment)
         .where(
+            Attachment.project_id == project.id,
             Attachment.target_type == target_type,
             Attachment.target_id == target_id,
             Attachment.deleted_at.is_(None),
         )
-        .order_by(Attachment.created_at.desc())
+        .order_by(Attachment.created_at.desc(), Attachment.id.desc())
         .offset(offset)
         .limit(limit)
     ).all()

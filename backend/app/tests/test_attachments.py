@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.errors import AppError
-from app.models import Attachment
+from app.models import Attachment, Project
 from app.services import attachments as svc
 from app.services import requirements as req_svc
 from app.services import tasks as task_svc
@@ -70,8 +70,6 @@ class TestAttachmentService:
         assert e.value.code == "conflict"
 
     def test_cross_project_target_rejected(self, db: Session, world: dict, isolated_storage):
-        from app.models import Project
-
         other = Project(team_id=world["team"].id, name="other")
         db.add(other)
         db.commit()
@@ -96,6 +94,30 @@ class TestAttachmentService:
         assert len(remaining["items"]) == 1
         svc.restore(db, world["admin"], aid)
         assert len(svc.list_attachments(db, world["member"], "requirement", rid, None, 20)["items"]) == 2
+
+    def test_same_requirement_code_separates_project_lists_and_cursors(self, db: Session, world: dict):
+        project = world["project"]
+        other = Project(team_id=world["team"].id, name="other")
+        db.add(other)
+        db.commit()
+        rid = make_requirement(db, world)["id"]
+        other_req = req_svc.create_requirement(db, world["admin"], other.id, "另一个项目的需求")
+        assert other_req.code == rid
+        for name in ["one.txt", "two.txt"]:
+            svc.upload(db, world["agent"], project.id, "requirement", rid, name, b"x")
+        svc.upload(db, world["admin"], other.id, "requirement", rid, "unrelated.txt", b"y")
+
+        first_page = svc.list_attachments(db, world["member"], "requirement", rid, None, 1, project.id)
+        assert first_page["next_cursor"]
+        second_page = svc.list_attachments(
+            db, world["member"], "requirement", rid, first_page["next_cursor"], 1, project.id
+        )
+        assert {item["file_name"] for item in first_page["items"] + second_page["items"]} == {"one.txt", "two.txt"}
+        with pytest.raises(AppError) as error:
+            svc.list_attachments(db, world["admin"], "requirement", rid, first_page["next_cursor"], 1, other.id)
+        assert error.value.code == "invalid_request"
+        other_page = svc.list_attachments(db, world["admin"], "requirement", rid, None, 20, other.id)
+        assert [item["file_name"] for item in other_page["items"]] == ["unrelated.txt"]
 
     def test_delete_follows_parent(self, db: Session, world: dict, isolated_storage):
         r = make_requirement(db, world)
