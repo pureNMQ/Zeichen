@@ -10,6 +10,9 @@ COPY backend/alembic.ini ./
 RUN pip install --index-url "${PIP_INDEX_URL}" -c requirements.release.txt .
 
 FROM base AS test
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
 RUN pip install --index-url "${PIP_INDEX_URL}" -c requirements.release.txt '.[dev]'
 COPY . /workspace
 ENV PYTHONPATH=/workspace/backend DATABASE_URL=sqlite:// SESSION_SECRET=test-session-secret-0123456789abcdef
