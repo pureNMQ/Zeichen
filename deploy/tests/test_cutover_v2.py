@@ -136,13 +136,22 @@ class CutoverTests(unittest.TestCase):
             prepared = root / "prepared.json"
             prepared.write_text("{}")
             proof = root / "rehearsal.json"
-            proof.write_text(json.dumps({"status": "verified", "mode": "synthetic_only", "candidate_commit": SHA}))
+            rehearsal = {"status": "verified", "mode": "synthetic_only", "candidate_commit": SHA}
+            proof.write_text(json.dumps(rehearsal))
             accepted = {
                 "candidate_commit": SHA, "prepared_manifest_sha256": fingerprint(prepared),
                 "checks": {check: {"passed": True, "evidence": "synthetic result"} for check in ACCEPTANCE_IDS},
                 "migration_exceptions_reviewed": True,
                 "restore_rehearsal": {"path": str(proof), "sha256": fingerprint(proof)},
             }
+            with self.assertRaisesRegex(RuntimeError, "effective Agent authorization"):
+                validate_acceptance(accepted, prepared, {"candidate_commit": SHA})
+            rehearsal["authentication"] = {
+                "active_key": "accepted", "revoked_key": "rejected", "suspended_agent": "rejected",
+                "owner_permissions": "inherited_and_rechecked",
+            }
+            proof.write_text(json.dumps(rehearsal))
+            accepted["restore_rehearsal"]["sha256"] = fingerprint(proof)
             validate_acceptance(accepted, prepared, {"candidate_commit": SHA})
             accepted["checks"].pop("AC-31")
             with self.assertRaises(RuntimeError):

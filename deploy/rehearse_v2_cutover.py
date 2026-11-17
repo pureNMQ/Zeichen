@@ -18,8 +18,8 @@ from remote_release import write_json
 
 
 LABEL = "zeichen.rehearsal"
-PROJECT, USER, TEAM, COMMENT, FILE, AVATAR, BOT, KEY = [
-    str(uuid.UUID(int=number)) for number in range(1, 9)
+PROJECT, USER, TEAM, COMMENT, FILE, AVATAR, BOT, KEY, REVOKED, SUSPENDED, SUSPENDED_KEY, MEMBER, GRANT = [
+    str(uuid.UUID(int=number)) for number in range(1, 14)
 ]
 PDF_BYTES = b"%PDF-1.7\nsynthetic cutover rehearsal bytes\n"
 AVATAR_BYTES = b"\x89PNG\r\n\x1a\nsynthetic avatar bytes"
@@ -27,7 +27,12 @@ FILE_PATH = f"{PROJECT}/{FILE}.bin"
 AVATAR_PATH = f"{AVATAR}.png"
 FILE_SHA = hashlib.sha256(PDF_BYTES).hexdigest()
 AVATAR_SHA = hashlib.sha256(AVATAR_BYTES).hexdigest()
-KEY_HASH = hashlib.sha256(b"synthetic-rehearsal-key").hexdigest()
+ACTIVE_TOKEN, REVOKED_TOKEN, SUSPENDED_TOKEN = (
+    "synthetic-rehearsal-key", "synthetic-revoked-key", "synthetic-suspended-agent-key",
+)
+KEY_HASH, REVOKED_HASH, SUSPENDED_HASH = (
+    hashlib.sha256(token.encode()).hexdigest() for token in (ACTIVE_TOKEN, REVOKED_TOKEN, SUSPENDED_TOKEN)
+)
 TIMELINE_BODY = "synthetic history survives cutover"
 WIKI_BODY = "synthetic knowledge survives cutover"
 
@@ -37,9 +42,15 @@ INSERT INTO "user" (id,username,password_hash,is_agent,is_bootstrap)
 VALUES ('{USER}','fixture-owner','',false,false);
 INSERT INTO "user" (id,username,password_hash,is_agent,is_bootstrap,owner_id)
 VALUES ('{BOT}','fixture-bot','',true,false,'{USER}');
-INSERT INTO api_key (id,user_id,token_hash,token_encrypted)
-VALUES ('{KEY}','{BOT}','{KEY_HASH}','synthetic-legacy-ciphertext');
+INSERT INTO "user" (id,username,password_hash,is_agent,is_bootstrap,owner_id,deleted_at)
+VALUES ('{SUSPENDED}','fixture-suspended','',true,false,'{USER}',now());
+INSERT INTO api_key (id,user_id,token_hash,token_encrypted,revoked_at)
+VALUES ('{KEY}','{BOT}','{KEY_HASH}','synthetic-legacy-ciphertext',NULL),
+       ('{REVOKED}','{BOT}','{REVOKED_HASH}','synthetic-revoked-ciphertext',now()),
+       ('{SUSPENDED_KEY}','{SUSPENDED}','{SUSPENDED_HASH}','synthetic-suspended-ciphertext',NULL);
+INSERT INTO workspace_member (id,team_id,user_id,role) VALUES ('{MEMBER}','{TEAM}','{USER}','member');
 INSERT INTO project (id,team_id,name) VALUES ('{PROJECT}','{TEAM}','Synthetic');
+INSERT INTO project_member (id,project_id,user_id,role) VALUES ('{GRANT}','{PROJECT}','{USER}','editor');
 INSERT INTO requirement (project_id,code,title,status)
 VALUES ('{PROJECT}','REQ-1','Synthetic requirement','backlog');
 INSERT INTO comment (id,project_id,target_type,target_id,body,author_id)
@@ -65,6 +76,57 @@ import sys
 from pathlib import Path
 root = Path("/fixture")
 print(json.dumps({name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in sys.argv[1:]}))
+"""
+
+VERIFY_AUTH = """
+import asyncio
+import json
+import os
+import sys
+from uuid import UUID
+
+from sqlalchemy import delete, update
+from sqlalchemy.engine import make_url
+
+from app.db import SessionLocal
+from app.errors import AppError
+from app.mcp_server.auth import ApiKeyTokenVerifier
+from app.models import ProjectMember
+from app.services.permissions import get_accessible_project, get_project_role
+
+database, raw_project, raw_owner, raw_agent, key_id, active, revoked, suspended = sys.argv[1:]
+assert database.startswith("zeichen_v2_rehearsal_") and make_url(os.environ["DATABASE_URL"]).database == database
+project, owner, agent = map(UUID, (raw_project, raw_owner, raw_agent))
+
+async def check_tokens():
+    verifier = ApiKeyTokenVerifier()
+    token = await verifier.verify_token(active)
+    assert token is not None and token.subject == str(agent) and token.client_id == key_id
+    assert await verifier.verify_token(revoked) is None
+    assert await verifier.verify_token(suspended) is None
+
+asyncio.run(check_tokens())
+with SessionLocal() as db:
+    membership = (ProjectMember.project_id == project, ProjectMember.user_id == owner)
+    assert get_project_role(db, agent, project) == "editor"
+    db.execute(update(ProjectMember).where(*membership).values(role="viewer"))
+    assert get_project_role(db, agent, project) == "viewer"
+    try:
+        get_accessible_project(db, agent, project, min_level="editor")
+    except AppError as exc:
+        assert exc.code == "permission_denied"
+    else:
+        raise AssertionError("demoted owner still grants write access to its agent")
+    db.execute(delete(ProjectMember).where(*membership))
+    try:
+        get_accessible_project(db, agent, project)
+    except AppError as exc:
+        assert exc.code == "not_found"
+    else:
+        raise AssertionError("revoked membership still grants agent project access")
+    db.rollback()
+print(json.dumps({"active_key": "accepted", "revoked_key": "rejected",
+                  "suspended_agent": "rejected", "owner_permissions": "inherited_and_rechecked"}))
 """
 
 
@@ -148,6 +210,8 @@ class Rehearsal:
         return self.psql("zeichen", f"""
 SELECT version_num FROM alembic_version;
 SELECT token_hash || ':' || token_encrypted FROM api_key WHERE id='{KEY}';
+SELECT count(*) FROM api_key WHERE id='{REVOKED}' AND revoked_at IS NOT NULL;
+SELECT role FROM project_member WHERE id='{GRANT}';
 SELECT body FROM comment WHERE id='{COMMENT}';
 SELECT content FROM document WHERE code='DOC-1';
 SELECT file_name || ':' || storage_path FROM attachment WHERE id='{FILE}';
@@ -252,9 +316,20 @@ WHERE table_schema='public' AND table_name='api_key' AND column_name='token_encr
         ]
         if target.splitlines() != expected:
             raise RuntimeError("clone preserved rows do not match the synthetic fixture")
+        self.phase = "verify_legacy_authentication"
+        auth = self.run.docker(
+            "run", "--rm", "--pull=never", "--network", self.network, "--env-file",
+            str(self.evidence / "database.env"), "--entrypoint", "python", self.backend, "-c", VERIFY_AUTH,
+            self.target, PROJECT, USER, BOT, KEY, ACTIVE_TOKEN, REVOKED_TOKEN, SUSPENDED_TOKEN, capture=True,
+        )
+        auth_report = json.loads(auth)
+        if auth_report != {"active_key": "accepted", "revoked_key": "rejected", "suspended_agent": "rejected",
+                            "owner_permissions": "inherited_and_rechecked"} or self.legacy_state() != source_state:
+            raise RuntimeError("synthetic credential or permission rehearsal failed")
+        self.record["authentication"] = auth_report
         self.record["verified"] = ["v1 schema, records and bytes intact", "v2 timeline, Wiki and file rows",
                                    "v2 file hashes and legacy avatar fallback", "Key digest retained without reread data",
-                                   "no historical notifications emitted"]
+                                   "no historical notifications emitted", "legacy Key and owner permission behavior"]
 
     def execute(self) -> None:
         self.candidate = candidate_record(self.args.candidate)

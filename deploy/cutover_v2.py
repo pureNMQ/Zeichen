@@ -73,6 +73,10 @@ def validate_acceptance(acceptance, prepared_path, manifest):
     require(report.get("status") == "verified" and report.get("mode") == "synthetic_only"
             and report.get("candidate_commit") == manifest["candidate_commit"],
             "restore rehearsal must verify this exact candidate")
+    require(report.get("authentication") == {
+        "active_key": "accepted", "revoked_key": "rejected", "suspended_agent": "rejected",
+        "owner_permissions": "inherited_and_rechecked",
+    }, "restore rehearsal must verify legacy claims and effective Agent authorization")
 
 
 class Cutover:

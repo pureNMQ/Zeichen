@@ -43,6 +43,8 @@ rehearsal=/path/to/new/synthetic-rehearsal
 python3 "$tools/rehearse_v2_cutover.py" --candidate "$result" --output "$rehearsal"
 ```
 
+演练结果需要包含真实候选后端对合成的有效旧 Key、已吊销 Key 及停用 Agent 的验证，以及 Agent 对主人项目角色变化的即时继承结果。早期只比较旧 Key 校验值的证据不满足这个切换门槛。
+
 确认部署和恢复窗口后，按顺序关闭业务写入、生成同一窗口的备份并准备独立目标。旧 Compose 必须是当前 v1 固定镜像的私有已解析配置，可从 `.release/current.json` 的 `compose_file` 核对。目标网络须与实际 PostgreSQL 和 Zeichen 应用网络一致。
 
 ```bash
