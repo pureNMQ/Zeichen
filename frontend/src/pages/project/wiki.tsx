@@ -212,6 +212,11 @@ function WikiEditor({ projectId, url, document, parentId }: WikiScope & {
 
 function WikiReader({ projectId, url, canWrite, id, editing }: WikiScope & { id: string; editing: boolean }) {
   const [action, setAction] = useState<WikiAction | null>(null)
+  const [params, setParams] = useSearchParams()
+  const rawVersion = params.get('version') ?? ''
+  const version = /^[1-9][0-9]{0,9}$/u.test(rawVersion) && Number(rawVersion) <= 2_147_483_647
+    ? Number(rawVersion) : undefined
+  const visibleAction = version ? 'history' : action
   const detail = useQuery({
     queryKey: ['wiki-v2', projectId, 'detail', id],
     queryFn: ({ signal }) => api.get<WikiDocument>(`${url}/${encodeURIComponent(id)}`, signal),
@@ -258,8 +263,15 @@ function WikiReader({ projectId, url, canWrite, id, editing }: WikiScope & { id:
         {document.summary && <p className="whitespace-pre-wrap text-sm text-muted-foreground">{document.summary}</p>}
       </header>
       <VditorMarkdownViewer markdown={document.body} />
-      {action && <WikiLifecycle action={action} projectId={projectId} url={url} canWrite={canWrite}
-        document={document} onClose={() => setAction(null)} />}
+      {visibleAction && <WikiLifecycle key={version ?? visibleAction} action={visibleAction} projectId={projectId} url={url}
+        canWrite={canWrite} document={document} initialVersion={version} onClose={() => {
+          setAction(null)
+          if (version) setParams((current) => {
+            const next = new URLSearchParams(current)
+            next.delete('version')
+            return next
+          }, { replace: true })
+        }} />}
     </article>
   )
 }

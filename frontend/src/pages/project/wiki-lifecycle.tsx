@@ -12,7 +12,7 @@ import { projectResourceHref } from '@/lib/project-links'
 import { orderWikiTree, useWikiList, type WikiContent, type WikiDocument, type WikiReceipt, type WikiScope, type WikiSummary } from '@/lib/project-wiki'
 
 export type WikiAction = 'history' | 'move' | 'delete'
-type ActionProps = WikiScope & { document: WikiDocument; onClose: () => void }
+type ActionProps = WikiScope & { document: WikiDocument; onClose: () => void; initialVersion?: number }
 type VersionSummary = { version: number; title: string; created_at: string }
 type VersionPage = { items: VersionSummary[]; next_before: number | null }
 type Snapshot = WikiContent & WikiReceipt
@@ -46,9 +46,9 @@ function documentEndpoint(url: string, documentId: string) {
   return `${url}/${encodeURIComponent(documentId)}`
 }
 
-function WikiHistory({ projectId, url, canWrite, document, onClose }: ActionProps) {
+function WikiHistory({ projectId, url, canWrite, document, onClose, initialVersion }: ActionProps) {
   const [expectedVersion] = useState(document.version)
-  const [selected, setSelected] = useState<number | null>(null)
+  const [selected, setSelected] = useState<number | null>(initialVersion ?? null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const qc = useQueryClient()

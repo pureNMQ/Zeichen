@@ -43,6 +43,8 @@ let wikiParent: string | null = null
 let deleteAttempts = 0
 let wikiDeleted = false
 let fileRestored = false
+let fileName = '橘猫.png'
+let fileDeleted = false
 
 function respond(path: string, options?: RequestInit) {
   const url = new URL(path, 'https://app.test')
@@ -94,14 +96,32 @@ function respond(path: string, options?: RequestInit) {
     if (url.searchParams.get('state') === 'deleted') {
       return Response.json({ items: fileRestored ? [] : items, next_cursor: null })
     }
-    return Response.json({ items, next_cursor: url.searchParams.has('cursor') ? null : 'file / more' })
+    return Response.json({ items: fileDeleted ? [] : items, next_cursor: url.searchParams.has('cursor') ? null : 'file / more' })
   }
   if (bare === `/api/v2/projects/${a}/files/limits`) {
     return Response.json({ max_file_bytes: 4096, project_quota_bytes: 32768 })
   }
-  if (bare === `/api/v2/projects/${a}/files/${attachment}`) return Response.json(fileCandidate(a))
+  if (bare === `/api/v2/projects/${a}/files/${attachment}`) {
+    if (options?.method === 'PATCH') fileName = JSON.parse(String(options.body)).name
+    if (options?.method === 'DELETE') {
+      fileDeleted = true
+      return Response.json({ id: attachment, project_id: a, deleted: true })
+    }
+    return Response.json(fileCandidate(a))
+  }
+  if (bare === `/api/v2/projects/${a}/files/${attachment}/usage`) {
+    const history = url.searchParams.get('include_history') === 'true'
+      ? [{ href: `/projects/${a}/wiki/DOC-1?version=2`, label: '设计手册 · v2', kind: 'wiki', current: false }]
+      : []
+    return Response.json({
+      items: [{ href: `/projects/${a}/wiki/DOC-1`, label: '设计手册', kind: 'wiki', current: true }, ...history,
+        { href: `/projects/${b}/wiki/DOC-1`, label: '其他项目引用', kind: 'wiki', current: true }],
+      next_cursor: null,
+    })
+  }
   if (bare === `/api/v2/projects/${a}/files/${attachment}/restore`) {
     fileRestored = true
+    fileDeleted = false
     return Response.json(fileCandidate(a))
   }
   if (bare === `/api/projects/${projectId}/requirements/REQ-1` || bare === '/api/requirements/REQ-1') {
@@ -186,7 +206,7 @@ function personCandidate(projectId: string) {
 function fileCandidate(projectId: string) {
   return {
     id: attachment, project_id: projectId,
-    name: projectId === a ? '橘猫.png' : '其他项目图片',
+    name: projectId === a ? fileName : '其他项目图片',
     media_type: 'image/png', size: 346,
     href: `/projects/${projectId}/files/${attachment}`,
     preview_href: `/api/v2/projects/${projectId}/files/${attachment}/content?inline=true`,
@@ -236,6 +256,8 @@ beforeEach(() => {
   deleteAttempts = 0
   wikiDeleted = false
   fileRestored = false
+  fileDeleted = false
+  fileName = '橘猫.png'
   vi.stubGlobal('fetch', fetchMock)
 })
 
@@ -509,6 +531,36 @@ describe('canonical project routes', () => {
     expect(await screen.findByText('没有可恢复的文件')).toBeVisible()
     expect(fetchMock).toHaveBeenCalledWith(`/api/v2/projects/${a}/files/${attachment}/restore`,
       expect.objectContaining({ method: 'POST' }))
+  })
+
+  it('opens the selected Wiki snapshot from a historical file usage link', async () => {
+    const user = open(`/projects/${a}/files/${attachment}`)
+    expect(await screen.findByRole('link', { name: '设计手册' })).toBeVisible()
+    expect(screen.queryByText('其他项目引用')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '包含历史版本' }))
+    await user.click(await screen.findByRole('link', { name: '设计手册 · v2' }))
+    const dialog = within(await screen.findByRole('dialog'))
+    expect(await dialog.findByText('第 2 版正文')).toBeVisible()
+    await user.click(dialog.getByRole('button', { name: '关闭' }))
+    expect(await screen.findByRole('heading', { name: '同码 Wiki A' })).toBeVisible()
+  })
+
+  it('shows cross-reference impact before deleting the scoped file', async () => {
+    const user = open(`/projects/${a}/files/${attachment}`)
+    await user.click(await screen.findByRole('button', { name: '重命名' }))
+    const rename = within(await screen.findByRole('dialog'))
+    const name = rename.getByRole('textbox', { name: '文件名称' })
+    await user.clear(name)
+    await user.type(name, '更新文件名.png')
+    await user.click(rename.getByRole('button', { name: '保存名称' }))
+    expect(await screen.findByRole('heading', { name: '更新文件名.png' })).toBeVisible()
+    await user.click(screen.getByRole('button', { name: '删除' }))
+    const confirmation = within(await screen.findByRole('dialog'))
+    expect(await confirmation.findByRole('link', { name: '设计手册 · v2' })).toBeVisible()
+    expect(confirmation.queryByText('其他项目引用')).not.toBeInTheDocument()
+    await user.click(confirmation.getByRole('button', { name: '确认删除' }))
+    expect(await screen.findByRole('heading', { name: '项目文件' })).toBeVisible()
+    expect(fetchMock).toHaveBeenCalledWith(`/api/v2/projects/${a}/files/${attachment}`, expect.objectContaining({ method: 'DELETE' }))
   })
 
   it('loads an older timeline page and jumps from a reply to its parent context', async () => {
