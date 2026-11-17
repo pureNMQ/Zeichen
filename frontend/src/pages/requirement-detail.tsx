@@ -435,7 +435,8 @@ function RequirementDetail({ id }: { id: string }) {
       <Card>
         <CardContent className="p-4">
           {routeProjectId
-            ? <RequirementTimeline projectId={routeProjectId} requirementId={req.id} canWrite={canEdit} />
+            ? <RequirementTimeline projectId={routeProjectId} requirementId={req.id} canWrite={canEdit}
+              canModerate={role === 'owner'} />
             : <CommentStream targetType="requirement" targetId={req.id} canEdit={req.status !== 'cancelled'} />}
         </CardContent>
       </Card>

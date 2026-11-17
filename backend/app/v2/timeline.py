@@ -253,12 +253,22 @@ def _reply_lookup(db: Session, scope: ResourceRef, items) -> dict[UUID, dict[str
     }
 
 
+def _recorded_actors(db: Session, rows) -> dict[UUID, User]:
+    actor_ids = {entry.actor_id for entry, _ in rows if entry.actor_id is not None}
+    if not actor_ids:
+        return {}
+    return {user.id: user for user in db.scalars(select(User).where(User.id.in_(actor_ids)))}
+
+
 def _entry_data(entry: TimelineEntry, revision: TimelineRevision | None,
-                replies: dict[UUID, dict[str, Any]], *,
+                replies: dict[UUID, dict[str, Any]], actors: dict[UUID, User], *,
                 detail: bool = False, keyword: str | None = None) -> dict[str, Any]:
+    author = actors.get(entry.actor_id)
     result = {
         "id": str(entry.id), "project_id": str(entry.project_id), "requirement_id": entry.requirement_code,
         "kind": entry.kind, "actor_id": str(entry.actor_id) if entry.actor_id else None,
+        "actor_name": (author.nickname or author.username) if author else None,
+        "actor_is_agent": bool(author and author.is_agent),
         "occurred_at": _utc(entry.occurred_at).isoformat(), "source_task": entry.source_task_code,
         "reply_to": replies.get(entry.reply_to_id), "version": entry.latest_version,
         "revised": bool(revision and revision.version > 1),
@@ -322,7 +332,8 @@ def list_entries(
     if len(rows) > limit:
         last = items[-1][0]
         next_cursor = _encode(cursor_scope, [_utc(last.occurred_at).isoformat(), str(last.id)])
-    return {"items": [_entry_data(entry, revision, replies, keyword=keyword) for entry, revision in items],
+    actors = _recorded_actors(db, items)
+    return {"items": [_entry_data(entry, revision, replies, actors, keyword=keyword) for entry, revision in items],
             "next_cursor": next_cursor}
 
 
@@ -331,7 +342,7 @@ def get_entry(db: Session, actor: User, scope: ResourceRef, entry_id: UUID) -> d
     row = db.execute(_current(scope).where(_E.id == entry_id)).one_or_none()
     if row is None:
         raise not_found("时间轴记录不存在")
-    return _entry_data(*row, _reply_lookup(db, scope, [row]), detail=True)
+    return _entry_data(*row, _reply_lookup(db, scope, [row]), _recorded_actors(db, [row]), detail=True)
 
 
 def get_context(db: Session, actor: User, scope: ResourceRef, entry_id: UUID,
@@ -353,8 +364,9 @@ def get_context(db: Session, actor: User, scope: ResourceRef, entry_id: UUID,
     )).order_by(_E.occurred_at.desc(), _E.id.desc()).limit(radius)).all()
     rows = [*reversed(newer), anchor, *older]
     replies = _reply_lookup(db, scope, rows)
+    actors = _recorded_actors(db, rows)
     return {"anchor_id": str(entry_id), "items": [
-        _entry_data(entry, revision, replies) for entry, revision in rows
+        _entry_data(entry, revision, replies, actors) for entry, revision in rows
     ]}
 
 

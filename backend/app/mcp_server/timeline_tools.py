@@ -34,6 +34,8 @@ class Entry(BaseModel):
     requirement_id: str
     kind: EntryKind
     actor_id: str | None
+    actor_name: str | None
+    actor_is_agent: bool
     occurred_at: datetime
     source_task: str | None
     reply_to: ReplySummary | None

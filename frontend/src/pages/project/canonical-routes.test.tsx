@@ -490,6 +490,12 @@ describe('canonical project routes', () => {
     expect(document.getElementById(`timeline-${older}`)).toHaveFocus()
   })
 
+  it('opens a notification or search hash directly in the record context', async () => {
+    open(`/projects/${a}/requirements/REQ-1#timeline-${older}`)
+    expect(await screen.findByText('较早记录的完整正文')).toBeVisible()
+    expect(document.getElementById(`timeline-${older}`)).toHaveFocus()
+  })
+
   it('retains the reply and reuses its request id when an append is retried', async () => {
     const user = open(`/projects/${a}/requirements/REQ-1`)
     await user.click(await screen.findByRole('button', { name: '回复' }))

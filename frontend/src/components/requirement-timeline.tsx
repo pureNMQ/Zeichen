@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 
 import { MarkdownComposer, type CompletionCandidate } from '@/components/markdown-composer'
 import { VditorMarkdownViewer } from '@/components/vditor-ir-editor'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ErrorNotification } from '@/components/ui/notification'
 import { api, STATUS_LABEL, type Page, type WorkflowStatus } from '@/lib/api'
+import { useAuth } from '@/lib/auth'
 import { useProjectCompletion } from '@/lib/project-completion'
 import { projectFileUpload } from '@/lib/project-files'
 import { projectResourceHref } from '@/lib/project-links'
@@ -25,11 +28,14 @@ type TimelineEntry = {
   requirement_id: string
   kind: 'manual' | 'system'
   actor_id: string | null
+  actor_name?: string | null
+  actor_is_agent?: boolean
   occurred_at: string
   source_task: string | null
   reply_to: TimelineReply | null
   revised: boolean
   withdrawn: boolean
+  version: number | null
   event_type: string | null
   event_data: Record<string, unknown> | null
   body_preview: string | null
@@ -40,6 +46,86 @@ type ContextWindow = { anchor_id: string; items: TimelineEntry[] }
 type AppendInput = { body: string; replyTo: string | null; requestId: string }
 
 const dateFormat = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' })
+
+type Revision = { version: number; kind: string; body: string | null; reason: string | null; created_at: string }
+
+function TimelineHistory({ endpoint }: { endpoint: string }) {
+  const result = useInfiniteQuery({
+    queryKey: ['timeline-revisions', endpoint],
+    initialPageParam: '',
+    queryFn: ({ pageParam }) => api.get<Page<Revision>>(`${endpoint}/revisions?${new URLSearchParams({
+      limit: '5', ...(pageParam ? { cursor: pageParam } : {}),
+    })}`),
+    getNextPageParam: (last) => last.next_cursor ?? undefined,
+  })
+  return (
+    <div className="space-y-2">
+      <ErrorNotification message={result.error?.message} />
+      {result.isLoading && <p role="status">正在读取历史…</p>}
+      {result.data?.pages.flatMap((page) => page.items).map((revision) => (
+        <details key={revision.version} className="rounded-md border p-2">
+          <summary className="cursor-pointer text-sm">
+            第 {revision.version} 版 · {dateFormat.format(new Date(revision.created_at))}
+          </summary>
+          {revision.reason && <p className="text-sm text-muted-foreground">{revision.reason}</p>}
+          {revision.body === null ? <p className="text-sm">此版本撤回了正文。</p>
+            : <VditorMarkdownViewer markdown={revision.body} />}
+        </details>
+      ))}
+      {result.hasNextPage && <Button size="sm" variant="outline" disabled={result.isFetchingNextPage}
+        onClick={() => void result.fetchNextPage()}>更早版本</Button>}
+      {result.isError && <Button size="sm" variant="outline" onClick={() => void result.refetch()}>重试</Button>}
+    </div>
+  )
+}
+
+function TimelineChange({ endpoint, mode, detail, actorIsAuthor, onSaved }: {
+  endpoint: string; mode: 'revise' | 'withdraw'; detail: EntryDetail; actorIsAuthor: boolean; onSaved: () => void
+}) {
+  const [body, setBody] = useState(detail.body ?? '')
+  const [reason, setReason] = useState('')
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const lastRequest = useRef<{ payload: string; id: string } | null>(null)
+  const lookup = useProjectCompletion(detail.project_id)
+
+  async function submit(event: FormEvent) {
+    event.preventDefault()
+    if (pending || detail.version === null || (!actorIsAuthor && !reason.trim()) || (mode === 'revise' && !body.trim())) return
+    const payload = { expected_version: detail.version, reason: reason.trim() || null,
+      ...(mode === 'revise' ? { body } : {}) }
+    const signature = JSON.stringify(payload)
+    const requestId = lastRequest.current?.payload === signature ? lastRequest.current.id : crypto.randomUUID()
+    lastRequest.current = { payload: signature, id: requestId }
+    setPending(true)
+    setError(null)
+    try {
+      const request = { ...payload, request_id: requestId }
+      if (mode === 'revise') await api.patch(endpoint, request)
+      else await api.post(`${endpoint}/withdraw`, request)
+      onSaved()
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : '保存失败，请重试')
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <form className="space-y-3" onSubmit={(event) => void submit(event)}>
+      {mode === 'revise' && <MarkdownComposer id={`timeline-revise-${detail.id}`} label="修订正文"
+        value={body} disabled={pending} onChange={setBody} lookup={lookup} />}
+      <Input autoComplete="off" aria-label="操作原因" placeholder={actorIsAuthor ? '操作原因（选填）' : '操作原因（必填）'}
+        required={!actorIsAuthor} value={reason} maxLength={512} onChange={(event) => setReason(event.target.value)} />
+      {error && <p className="text-sm text-destructive">{error}</p>}
+      <DialogFooter>
+        <Button type="submit" variant={mode === 'withdraw' ? 'destructive' : 'default'} disabled={pending}>
+          {mode === 'withdraw' ? '确认撤回' : '保存修订'}
+        </Button>
+      </DialogFooter>
+    </form>
+  )
+}
 
 function eventLabel(eventType: string | null) {
   switch (eventType) {
@@ -64,7 +150,9 @@ function replyLabel(reply: TimelineReply) {
   return reply.kind === 'system' ? eventLabel(reply.event_type) : reply.body_preview ?? '原记录'
 }
 
-function TimelineActor({ projectId, actorId }: { projectId: string; actorId: string | null }) {
+function TimelineActor({ projectId, actorId, fallback, isAgent }: {
+  projectId: string; actorId: string | null; fallback?: string | null; isAgent?: boolean
+}) {
   const path = actorId ? projectResourceHref(projectId, 'people', actorId) : null
   const { data: person, isError } = useQuery({
     queryKey: ['project-person', projectId, actorId],
@@ -74,12 +162,12 @@ function TimelineActor({ projectId, actorId }: { projectId: string; actorId: str
     retry: false,
   })
   if (!path) return <span>系统</span>
-  if (isError || !person || person.href !== path) return <span>历史人员</span>
+  if (isError || !person || person.href !== path) return <span>{fallback ?? '历史人员'}{isAgent && ' · Agent'}</span>
   return <Link to={path} className="font-medium hover:underline">{person.label}</Link>
 }
 
 function TimelineRecord({
-  entry, projectId, url, queryKey, focused, linkToEntry, onReply,
+  entry, projectId, url, queryKey, focused, linkToEntry, onReply, canModerate,
 }: {
   entry: TimelineEntry
   projectId: string
@@ -88,13 +176,20 @@ function TimelineRecord({
   focused: boolean
   linkToEntry: (entryId: string) => string
   onReply?: (entry: TimelineEntry) => void
+  canModerate: boolean
 }) {
   const [expanded, setExpanded] = useState(false)
+  const [action, setAction] = useState<'history' | 'revise' | 'withdraw' | null>(null)
+  const { user } = useAuth()
+  const client = useQueryClient()
+  const endpoint = `${url}/${encodeURIComponent(entry.id)}`
+  const actorIsAuthor = !!user && user.id === entry.actor_id
+  const canManage = entry.kind === 'manual' && !entry.withdrawn && !!onReply && (actorIsAuthor || canModerate)
   const showBody = !entry.withdrawn && entry.kind === 'manual' && (expanded || focused)
   const detail = useQuery({
     queryKey: [...queryKey, 'detail', entry.id],
-    queryFn: ({ signal }) => api.get<EntryDetail>(`${url}/${encodeURIComponent(entry.id)}`, signal),
-    enabled: showBody,
+    queryFn: ({ signal }) => api.get<EntryDetail>(endpoint, signal),
+    enabled: showBody || action === 'revise' || action === 'withdraw',
     retry: false,
   })
   const currentDetail = detail.data?.project_id === entry.project_id
@@ -111,7 +206,7 @@ function TimelineRecord({
       className={`space-y-2 rounded-lg border px-3 py-2.5 ${focused ? 'border-ring' : ''}`}
     >
       <div className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
-        <TimelineActor projectId={projectId} actorId={entry.actor_id} />
+        <TimelineActor projectId={projectId} actorId={entry.actor_id} fallback={entry.actor_name} isAgent={entry.actor_is_agent} />
         <time dateTime={entry.occurred_at}>{dateFormat.format(new Date(entry.occurred_at))}</time>
         {entry.revised && !entry.withdrawn && <span>已修订</span>}
         {entry.source_task && <Link className="hover:underline" to={projectResourceHref(projectId, 'tasks', entry.source_task)}>
@@ -141,19 +236,43 @@ function TimelineRecord({
           </Button>
         )}
         {onReply && <Button type="button" size="sm" variant="ghost" onClick={() => onReply(entry)}>回复</Button>}
+        {entry.kind === 'manual' && (entry.revised || entry.withdrawn) &&
+          <Button size="sm" variant="ghost" onClick={() => setAction('history')}>历史记录</Button>}
+        {canManage && <Button size="sm" variant="ghost" onClick={() => setAction('revise')}>修订</Button>}
+        {canManage && <Button size="sm" variant="ghost" onClick={() => setAction('withdraw')}>撤回</Button>}
         {!focused && <Link to={linkToEntry(entry.id)} className="text-xs text-muted-foreground hover:underline">定位记录</Link>}
       </div>
+      {action && <Dialog open onOpenChange={(open) => { if (!open) setAction(null) }}>
+        <DialogContent className="max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{action === 'history' ? '历史记录' : action === 'revise' ? '修订记录' : '撤回记录'}</DialogTitle>
+            <DialogDescription>原文与操作历史会保留。</DialogDescription>
+          </DialogHeader>
+          {action === 'history' ? <TimelineHistory endpoint={endpoint} /> : currentDetail ? <TimelineChange
+            endpoint={endpoint} mode={action} detail={currentDetail} actorIsAuthor={actorIsAuthor}
+            onSaved={() => {
+              setAction(null)
+              void client.invalidateQueries({ queryKey })
+              void client.invalidateQueries({ queryKey: ['timeline-revisions', endpoint] })
+            }}
+          /> : detail.isError
+            ? <Button variant="outline" onClick={() => void detail.refetch()}>重新读取记录</Button>
+            : <p role="status">正在读取记录…</p>}
+        </DialogContent>
+      </Dialog>}
     </li>
   )
 }
 
-export function RequirementTimeline({ projectId, requirementId, canWrite }: {
+export function RequirementTimeline({ projectId, requirementId, canWrite, canModerate }: {
   projectId: string
   requirementId: string
   canWrite: boolean
+  canModerate: boolean
 }) {
   const [searchParams, setSearchParams] = useSearchParams()
-  const anchor = searchParams.get('entry')
+  const { hash } = useLocation()
+  const anchor = searchParams.get('entry') ?? (hash.startsWith('#timeline-') ? hash.slice(10) : null)
   const queryKey = ['requirement-timeline', projectId, requirementId] as const
   const url = `${projectResourceHref(projectId, 'requirements', requirementId)}/timeline`
   const lookup = useProjectCompletion(projectId)
@@ -271,6 +390,7 @@ export function RequirementTimeline({ projectId, requirementId, canWrite }: {
           projectId={projectId}
           url={url}
           queryKey={queryKey}
+          canModerate={canModerate}
           focused={entry.id === anchor}
           linkToEntry={(entryId) => `?${paramsForEntry(entryId)}`}
           onReply={canWrite && !saving && !uploading ? selectReply : undefined}

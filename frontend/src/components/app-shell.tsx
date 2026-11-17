@@ -255,12 +255,14 @@ function ThemeToggleButton() {
 function GlobalSearchBox() {
   const [query, setQuery] = useState('')
   const navigate = useNavigate()
+  const { currentProject } = useCurrentProject()
 
   function onSubmit(e: FormEvent) {
     e.preventDefault()
     const trimmed = query.trim()
     if (!trimmed) return
-    navigate(`/search?q=${encodeURIComponent(trimmed)}`)
+    const prefix = currentProject ? `/projects/${encodeURIComponent(currentProject.id)}/search` : '/search'
+    navigate(`${prefix}?q=${encodeURIComponent(trimmed)}`)
   }
 
   return (

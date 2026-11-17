@@ -19,6 +19,7 @@ import { SetPasswordPage } from '@/pages/set-password'
 import { DocumentWorkbenchPage } from '@/pages/documents'
 import { RepositoriesPage } from '@/pages/repositories'
 import { SearchPage } from '@/pages/search'
+import { ProjectSearchPage } from '@/pages/project/search-v2'
 import { ManualPage } from '@/pages/manual'
 
 /** REQ-59:旧词条 URL(TERM-n)重定向到 wiki 工作台同短码页面。 */
@@ -116,6 +117,7 @@ export function App() {
         <Route path="documents/glossary/term/:id" element={<WikiTermRedirect />} />
         <Route path="repositories" element={<RepositoriesPage />} />
         <Route path="search" element={<SearchPage />} />
+        <Route path="projects/:projectId/search" element={<ProjectSearchPage />} />
         <Route path="manual" element={<ManualPage />} />
         <Route path="members" element={<MembersPage />} />
       </Route>
