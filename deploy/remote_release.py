@@ -372,6 +372,8 @@ def main():
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise SystemExit("Another check or release is running in this state directory")
+        if args.candidate_source is None and (state / "v2-cutover-active.json").exists():
+            raise SystemExit("This deployment is under the side-by-side v2 cutover workflow")
         release = Release(args)
         print("Release evidence: " + str(release.directory), flush=True)
         try:
