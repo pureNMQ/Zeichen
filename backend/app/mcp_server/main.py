@@ -52,10 +52,12 @@ mcp = FastMCP(
 from . import tools  # noqa: E402
 from .file_tools import register_file_tools  # noqa: E402
 from .search_tools import register_search_tools  # noqa: E402
+from .timeline_tools import register_timeline_tools  # noqa: E402
 from .wiki_tools import register_wiki_tools  # noqa: E402
 
 tools._register_all(mcp)
 register_file_tools(mcp)
+register_timeline_tools(mcp)
 register_wiki_tools(mcp)
 register_search_tools(mcp)
 
