@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react'
-import { Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
+import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { AppShell } from '@/components/app-shell'
+import { ErrorNotification } from '@/components/ui/notification'
 import { api } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { DocumentNavigationProvider } from '@/lib/document-navigation'
 import { CurrentProjectProvider } from '@/lib/current-project'
+import { projectResourceHref } from '@/lib/project-links'
 import { BootstrapPage } from '@/pages/bootstrap'
 import { LoginPage } from '@/pages/login'
 import { MembersPage } from '@/pages/members'
@@ -27,6 +30,25 @@ import { ManualPage } from '@/pages/manual'
 function WikiTermRedirect() {
   const { id } = useParams<{ id: string }>()
   return <Navigate to={`/documents/wiki/${id ?? ''}`} replace />
+}
+
+function LegacyRequirementRedirect() {
+  const { id = '' } = useParams<{ id: string }>()
+  const { search, hash } = useLocation()
+  const params = new URLSearchParams(search)
+  const scope = params.get('project_id')
+  const path = `/requirements/${encodeURIComponent(id)}`
+  const requirement = useQuery({
+    queryKey: ['legacy-requirement-project', scope, id],
+    queryFn: () => api.get<{ project_id: string }>(scope ? `${path}?project_id=${encodeURIComponent(scope)}` : path),
+    enabled: !!id,
+  })
+  if (requirement.error) return <ErrorNotification message={requirement.error.message} />
+  if (!requirement.data) return <p role="status" className="text-sm text-muted-foreground">加载中…</p>
+  params.delete('project_id')
+  const query = params.toString()
+  const href = projectResourceHref(requirement.data.project_id, 'requirements', id)
+  return <Navigate to={`${href}${query ? `?${query}` : ''}${hash}`} replace />
 }
 
 function BootstrapGate() {
@@ -110,7 +132,7 @@ export function App() {
           <Route path="files/:id" element={<ProjectFileDetailPage />} />
         </Route>
         <Route path="requirements" element={<RequirementsPage />} />
-        <Route path="requirements/:id" element={<RequirementDetailPage />} />
+        <Route path="requirements/:id" element={<LegacyRequirementRedirect />} />
         <Route path="documents/wiki" element={<DocumentWorkbenchPage module="wiki" readOnly />} />
         <Route path="documents/wiki/:id" element={<DocumentWorkbenchPage module="wiki" readOnly />} />
         {/* REQ-59:glossary 并入 wiki,旧词条 URL 重定向保持不断链 */}

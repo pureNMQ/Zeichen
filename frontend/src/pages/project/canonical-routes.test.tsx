@@ -345,6 +345,8 @@ describe('canonical project routes', () => {
     open('/requirements/REQ-1')
     expect(await screen.findByRole('heading', { name: /同码需求 A/ })).toBeVisible()
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/requirements/REQ-1', expect.anything()))
+    expect(fetchMock).toHaveBeenCalledWith(`/api/projects/${a}/requirements/REQ-1/timeline?limit=20`, expect.anything())
+    expect(fetchMock.mock.calls.some(([path]) => path.includes('/comments'))).toBe(false)
   })
 
   it('looks up mentions and files from the canonical Wiki editor using its project', async () => {
