@@ -42,6 +42,7 @@ let appendAttempts = 0
 let wikiParent: string | null = null
 let deleteAttempts = 0
 let wikiDeleted = false
+let fileRestored = false
 
 function respond(path: string, options?: RequestInit) {
   const url = new URL(path, 'https://app.test')
@@ -89,12 +90,20 @@ function respond(path: string, options?: RequestInit) {
     return Response.json({ ...timelineEntry(appended, '', projectId), body: '发布后的完整正文' })
   }
   if (bare === `/api/v2/projects/${a}/files`) {
-    return Response.json({ items: [fileCandidate(a), fileCandidate(b)], next_cursor: null })
+    const items = [fileCandidate(a), fileCandidate(b)]
+    if (url.searchParams.get('state') === 'deleted') {
+      return Response.json({ items: fileRestored ? [] : items, next_cursor: null })
+    }
+    return Response.json({ items, next_cursor: url.searchParams.has('cursor') ? null : 'file / more' })
   }
   if (bare === `/api/v2/projects/${a}/files/limits`) {
     return Response.json({ max_file_bytes: 4096, project_quota_bytes: 32768 })
   }
   if (bare === `/api/v2/projects/${a}/files/${attachment}`) return Response.json(fileCandidate(a))
+  if (bare === `/api/v2/projects/${a}/files/${attachment}/restore`) {
+    fileRestored = true
+    return Response.json(fileCandidate(a))
+  }
   if (bare === `/api/projects/${projectId}/requirements/REQ-1` || bare === '/api/requirements/REQ-1') {
     return Response.json({ id: 'REQ-1', project_id: projectId, title: `同码需求 ${name}`, status: 'backlog' })
   }
@@ -226,6 +235,7 @@ beforeEach(() => {
   wikiParent = null
   deleteAttempts = 0
   wikiDeleted = false
+  fileRestored = false
   vi.stubGlobal('fetch', fetchMock)
 })
 
@@ -473,6 +483,32 @@ describe('canonical project routes', () => {
     const contentUrl = `/api/v2/projects/${a}/files/${attachment}/content`
     expect(screen.getByRole('img', { name: '橘猫.png' })).toHaveAttribute('src', `${contentUrl}?inline=true`)
     expect(screen.getByRole('link', { name: '下载文件' })).toHaveAttribute('href', contentUrl)
+  })
+
+  it('browses and uploads files in the selected project library', async () => {
+    const attempts = mockUploadRequests()
+    const user = open(`/projects/${a}/files`)
+    expect(await screen.findByRole('heading', { name: '项目文件' })).toBeVisible()
+    expect(await screen.findByRole('link', { name: '橘猫.png' })).toHaveAttribute('href', `/projects/${a}/files/${attachment}`)
+    expect(screen.queryByText('其他项目图片')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '只看图片' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      `/api/v2/projects/${a}/files?query=&limit=20&images_only=true`, expect.anything()))
+    const file = new File(['file bytes'], '新图片.png', { type: 'image/png' })
+    await user.upload(screen.getByLabelText('选择项目文件'), file)
+    expect(await screen.findByRole('progressbar', { name: '项目文件上传进度' })).toHaveAttribute('value', '50')
+    expect(attempts[0].body).toBe(file)
+    await act(async () => attempts[0].finish(201))
+    expect(screen.getByRole('status')).toHaveTextContent('已上传 橘猫.png')
+  })
+
+  it('restores a file through its scoped project library', async () => {
+    const user = open(`/projects/${a}/files?state=deleted`)
+    expect(await screen.findByRole('heading', { name: '文件回收站' })).toBeVisible()
+    await user.click(await screen.findByRole('button', { name: '恢复 橘猫.png' }))
+    expect(await screen.findByText('没有可恢复的文件')).toBeVisible()
+    expect(fetchMock).toHaveBeenCalledWith(`/api/v2/projects/${a}/files/${attachment}/restore`,
+      expect.objectContaining({ method: 'POST' }))
   })
 
   it('loads an older timeline page and jumps from a reply to its parent context', async () => {

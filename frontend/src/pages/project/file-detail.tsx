@@ -1,10 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 
 import { ErrorNotification } from '@/components/ui/notification'
 import { api } from '@/lib/api'
 import { useCurrentProject } from '@/lib/current-project'
 import { projectFileApiPath, projectFileContentUrl, type ProjectFileSummary } from '@/lib/project-files'
+import { projectResourceHref } from '@/lib/project-links'
 
 function FilePreview({ file }: { file: ProjectFileSummary }) {
   if (!file.preview_href) return null
@@ -34,6 +35,7 @@ export function ProjectFileDetailPage() {
   return (
     <section className="space-y-4">
       <header className="space-y-2">
+        <Link to={projectResourceHref(file.project_id, 'files')} className="text-sm text-primary hover:underline">返回文件</Link>
         <h1 className="break-all text-xl font-semibold">{file.name}</h1>
         <p className="text-sm text-muted-foreground">
           {file.media_type} · {new Intl.NumberFormat('zh-CN').format(file.size)} 字节

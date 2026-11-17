@@ -286,11 +286,15 @@ function GlobalSearchBox() {
 
 export function AppShell() {
   const { user, logout, refresh } = useAuth()
+  const { projectId } = useCurrentProject()
   const navigate = useNavigate()
   const [pwdOpen, setPwdOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
 
   const isAdmin = user?.workspace_role === 'admin'
+  const workspaceNav = projectId
+    ? [...WORKSPACE_NAV, { to: projectResourceHref(projectId, 'files'), label: '文件' }]
+    : WORKSPACE_NAV
 
   return (
     <div className="flex h-screen min-h-0 overflow-hidden">
@@ -300,7 +304,7 @@ export function AppShell() {
         <nav className="flex-1 space-y-1 overflow-y-auto px-2">
           <NavGroup title="团队功能" items={TEAM_NAV} isAdmin={isAdmin} />
           <div className="mx-3 my-1 border-t" />
-          <NavGroup title="工作区" items={WORKSPACE_NAV} isAdmin={isAdmin} />
+          <NavGroup title="工作区" items={workspaceNav} isAdmin={isAdmin} />
           <DocumentNav />
         </nav>
         <ProjectSwitcher />

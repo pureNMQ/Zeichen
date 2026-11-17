@@ -10,7 +10,7 @@ export type ProjectFileSummary = {
   size: number
   href: string
   preview_href: string | null
-  download_href: string
+  download_href: string | null
 }
 
 const UUID = '[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}'
