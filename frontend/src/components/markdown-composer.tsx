@@ -25,6 +25,13 @@ export type CompletionLookup = (
   signal: AbortSignal,
 ) => Promise<readonly CompletionCandidate[]>
 
+export type ComposerUpload = (
+  file: File,
+  requestId: string,
+  signal: AbortSignal,
+  onProgress: (percent: number) => void,
+) => Promise<{ name: string; href: string; image: boolean }>
+
 type Selection = { start: number; end: number }
 type Picker = { mode: Exclude<CompletionMode, 'people'>; selection: Selection; value: string; query: string }
 type SearchRequest = { lookup: CompletionLookup; mode: CompletionMode; query: string; attempt: number }
@@ -54,7 +61,7 @@ function getMention(value: string, selection: Selection) {
   }
 }
 
-function formatLink(candidate: CompletionCandidate, mode: CompletionMode): string {
+function formatLink(candidate: Pick<CompletionCandidate, 'label' | 'href'>, mode: CompletionMode): string {
   const name = candidate.label.replace(/\s+/gu, ' ').replace(/[\\[\]`<>*_~&]/gu, '\\$&')
   const label = mode === 'people' ? `@${name}` : name
   return `${mode === 'image' ? '!' : ''}[${label}](<${candidate.href}>)`
@@ -64,6 +71,8 @@ type MarkdownComposerProps = {
   value: string
   onChange: (markdown: string) => void
   lookup: CompletionLookup
+  upload?: ComposerUpload
+  onUploadPending?: (uploading: boolean) => void
   id?: string
   label?: string
   disabled?: boolean
@@ -71,12 +80,17 @@ type MarkdownComposerProps = {
 }
 
 export function MarkdownComposer({
-  value, onChange, lookup, id, label = 'Markdown 正文', disabled = false, className,
+  value, onChange, lookup, upload, onUploadPending, id, label = 'Markdown 正文', disabled = false, className,
 }: MarkdownComposerProps) {
   const editorRef = useRef<HTMLTextAreaElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLUListElement>(null)
   const pendingCaretRef = useRef<{ value: string; offset: number } | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const uploadController = useRef<AbortController | null>(null)
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const [failedUpload, setFailedUpload] = useState<{ file: File; requestId: string } | null>(null)
   const [selection, setSelection] = useState<Selection>({ start: 0, end: 0 })
   const [editorFocused, setEditorFocused] = useState(false)
   const [composing, setComposing] = useState(false)
@@ -87,10 +101,11 @@ export function MarkdownComposer({
   const [retryCount, setRetryCount] = useState(0)
   const listId = useId()
 
-  const mention = !disabled && editorFocused && !composing && !picker ? getMention(value, selection) : null
+  const unavailable = disabled || uploadProgress !== null
+  const mention = !unavailable && editorFocused && !composing && !picker ? getMention(value, selection) : null
   const mentionKey = mention ? `${mention.selection.start}:${mention.query}` : ''
   const activeMention = mentionKey !== dismissedMention ? mention : null
-  const activePicker = !disabled && picker?.value === value ? picker : null
+  const activePicker = !unavailable && picker?.value === value ? picker : null
   const mode = activePicker?.mode ?? (activeMention ? 'people' : null)
   const query = activePicker?.query.trim() ?? activeMention?.query ?? ''
   const request = useMemo<SearchRequest | null>(
@@ -102,6 +117,8 @@ export function MarkdownComposer({
   const activeIndex = highlight && highlight.request === request && highlight.index < items.length ? highlight.index : 0
   const activeId = items.length ? `${listId}-${activeIndex}` : undefined
   const pickerOpen = activePicker !== null
+
+  useEffect(() => () => { uploadController.current?.abort() }, [])
 
   useEffect(() => {
     if (!request) return
@@ -135,7 +152,7 @@ export function MarkdownComposer({
     if (pending.value !== value) return
     editorRef.current?.focus()
     editorRef.current?.setSelectionRange(pending.offset, pending.offset)
-  }, [value, pickerOpen])
+  }, [value, pickerOpen, uploadProgress])
 
   useEffect(() => {
     const list = listRef.current
@@ -149,7 +166,7 @@ export function MarkdownComposer({
 
   function openPicker(mode: Picker['mode']) {
     const editor = editorRef.current
-    if (!editor || disabled) return
+    if (!editor || unavailable) return
     setHighlight(null)
     setResult(null)
     setPicker({ mode, selection: readSelection(editor), value, query: '' })
@@ -162,18 +179,62 @@ export function MarkdownComposer({
     if (activePicker) editorRef.current?.focus()
   }
 
-  function insert(candidate: CompletionCandidate) {
-    const replace = activePicker?.selection ?? activeMention?.selection
-    if (!mode || !replace) return
+  function insertLink(link: string, replace: Selection) {
     const tail = value.slice(replace.end)
-    const link = formatLink(candidate, mode)
     const suffix = /^\s/u.test(tail) ? '' : ' '
     const markdown = value.slice(0, replace.start) + link + suffix + tail
     const offset = replace.start + link.length + (tail.startsWith(' ') ? 1 : suffix.length)
     pendingCaretRef.current = { value: markdown, offset }
     setSelection({ start: offset, end: offset })
-    closePicker()
     onChange(markdown)
+  }
+
+  function insert(candidate: CompletionCandidate) {
+    const replace = activePicker?.selection ?? activeMention?.selection
+    if (!mode || !replace) return
+    closePicker()
+    insertLink(formatLink(candidate, mode), replace)
+  }
+
+  async function uploadFile(file: File, requestId: string) {
+    const editor = editorRef.current
+    if (!upload || !editor || unavailable || uploadController.current) return
+    const replace = readSelection(editor)
+    const controller = new AbortController()
+    uploadController.current = controller
+    setUploadError(null)
+    setFailedUpload(null)
+    setUploadProgress(0)
+    onUploadPending?.(true)
+    closePicker()
+    try {
+      const saved = await upload(file, requestId, controller.signal, setUploadProgress)
+      if (!controller.signal.aborted) {
+        insertLink(formatLink({ label: saved.name, href: saved.href }, saved.image ? 'image' : 'reference'), replace)
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        setUploadError(error instanceof Error ? error.message : '文件上传失败，请重试。')
+        setFailedUpload({ file, requestId })
+        pendingCaretRef.current = { value, offset: replace.end }
+      }
+    } finally {
+      uploadController.current = null
+      if (!controller.signal.aborted) {
+        setUploadProgress(null)
+        onUploadPending?.(false)
+      }
+    }
+  }
+
+  function acceptFiles(files: FileList | null) {
+    if (!files?.length || unavailable || uploadController.current) return
+    if (files.length > 1) {
+      setFailedUpload(null)
+      setUploadError('请一次上传一份文件。')
+      return
+    }
+    void uploadFile(files[0], crypto.randomUUID())
   }
 
   function handleKeys(event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) {
@@ -203,6 +264,14 @@ export function MarkdownComposer({
   return (
     <div
       className={cn('min-w-0 space-y-2', className)}
+      onDragOver={(event) => {
+        if (upload && event.dataTransfer.types.includes('Files')) event.preventDefault()
+      }}
+      onDrop={(event) => {
+        if (!upload || !event.dataTransfer.files.length) return
+        event.preventDefault()
+        acceptFiles(event.dataTransfer.files)
+      }}
       onBlur={(event) => {
         if (event.currentTarget.contains(event.relatedTarget)) return
         setEditorFocused(false)
@@ -210,11 +279,24 @@ export function MarkdownComposer({
       }}
     >
       <div className="flex flex-wrap gap-1">
-        <Button type="button" size="sm" variant="ghost" disabled={disabled} aria-keyshortcuts="Alt+K" title="Alt+K"
+        <Button type="button" size="sm" variant="ghost" disabled={unavailable} aria-keyshortcuts="Alt+K" title="Alt+K"
           onClick={() => openPicker('reference')}>插入引用</Button>
-        <Button type="button" size="sm" variant="ghost" disabled={disabled} aria-keyshortcuts="Alt+Shift+K" title="Alt+Shift+K"
+        <Button type="button" size="sm" variant="ghost" disabled={unavailable} aria-keyshortcuts="Alt+Shift+K" title="Alt+Shift+K"
           onClick={() => openPicker('image')}>插入图片</Button>
+        {upload && <>
+          <input ref={fileInputRef} type="file" autoComplete="off" hidden aria-label="选择上传文件" disabled={unavailable}
+            onChange={(event) => { acceptFiles(event.currentTarget.files); event.currentTarget.value = '' }} />
+          <Button type="button" size="sm" variant="ghost" disabled={unavailable}
+            onClick={() => fileInputRef.current?.click()}>上传文件</Button>
+        </>}
+        {failedUpload && <Button type="button" size="sm" variant="outline" disabled={unavailable}
+          onClick={() => void uploadFile(failedUpload.file, failedUpload.requestId)}>重试上传</Button>}
       </div>
+      <ErrorNotification message={uploadError} />
+      {uploadProgress !== null && <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <progress aria-label="上传进度" max={100} value={uploadProgress} />
+        <span>{uploadProgress}%</span>
+      </div>}
       <Textarea
         id={id}
         ref={editorRef}
@@ -225,7 +307,7 @@ export function MarkdownComposer({
         autoComplete="off"
         placeholder="输入 Markdown，键入 @ 提及成员或 Agent"
         className="min-h-32 font-mono"
-        disabled={disabled}
+        disabled={unavailable}
         value={value}
         onFocus={(event) => {
           setEditorFocused(true)
@@ -243,6 +325,11 @@ export function MarkdownComposer({
           setSelection(readSelection(event.currentTarget))
         }}
         onKeyDown={handleKeys}
+        onPaste={(event) => {
+          if (!upload || !event.clipboardData.files.length) return
+          event.preventDefault()
+          acceptFiles(event.clipboardData.files)
+        }}
       />
       {mode && (
         <div className="space-y-1 rounded-lg border bg-popover p-2 text-popover-foreground shadow-xs">

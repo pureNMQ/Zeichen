@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { ErrorNotification } from '@/components/ui/notification'
 import { api, STATUS_LABEL, type Page, type WorkflowStatus } from '@/lib/api'
 import { useProjectCompletion } from '@/lib/project-completion'
+import { projectFileUpload } from '@/lib/project-files'
 import { projectResourceHref } from '@/lib/project-links'
 
 type TimelineReply = {
@@ -160,6 +161,7 @@ export function RequirementTimeline({ projectId, requirementId, canWrite }: {
   const [draft, setDraft] = useState('')
   const [reply, setReply] = useState<TimelineEntry | null>(null)
   const [saving, setSaving] = useState(false)
+  const [uploading, setUploading] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const previousRequest = useRef<AppendInput | null>(null)
 
@@ -202,7 +204,7 @@ export function RequirementTimeline({ projectId, requirementId, canWrite }: {
 
   async function append(event: FormEvent) {
     event.preventDefault()
-    if (!canWrite || saving || !draft.trim()) return
+    if (!canWrite || saving || uploading || !draft.trim()) return
     const replyTo = reply?.id ?? null
     const prior = previousRequest.current
     const requestId = prior?.body === draft && prior.replyTo === replyTo ? prior.requestId : crypto.randomUUID()
@@ -249,10 +251,11 @@ export function RequirementTimeline({ projectId, requirementId, canWrite }: {
         <ErrorNotification message={saveError} />
         {reply && <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <span className="min-w-0 truncate">回复：{replyLabel({ ...reply, entry_id: reply.id })}</span>
-          <Button type="button" size="sm" variant="ghost" disabled={saving} onClick={() => setReply(null)}>取消回复</Button>
+          <Button type="button" size="sm" variant="ghost" disabled={saving || uploading} onClick={() => setReply(null)}>取消回复</Button>
         </div>}
-        <MarkdownComposer id="timeline-draft" label="时间轴正文" value={draft} onChange={setDraft} lookup={lookup} disabled={saving} />
-        <Button type="submit" size="sm" disabled={saving || !draft.trim()}>
+        <MarkdownComposer id="timeline-draft" label="时间轴正文" value={draft} onChange={setDraft} lookup={lookup} disabled={saving}
+          upload={projectFileUpload(projectId)} onUploadPending={setUploading} />
+        <Button type="submit" size="sm" disabled={saving || uploading || !draft.trim()}>
           {saving ? '发布中…' : reply ? '发布回复' : '发布记录'}
         </Button>
       </form>}
@@ -270,7 +273,7 @@ export function RequirementTimeline({ projectId, requirementId, canWrite }: {
           queryKey={queryKey}
           focused={entry.id === anchor}
           linkToEntry={(entryId) => `?${paramsForEntry(entryId)}`}
-          onReply={canWrite && !saving ? selectReply : undefined}
+          onReply={canWrite && !saving && !uploading ? selectReply : undefined}
         />)}
       </ol>
       {!anchor && history.hasNextPage && <Button type="button" variant="outline" size="sm"

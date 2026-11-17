@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Link, MemoryRouter, Outlet } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -90,6 +90,9 @@ function respond(path: string, options?: RequestInit) {
   }
   if (bare === `/api/v2/projects/${a}/files`) {
     return Response.json({ items: [fileCandidate(a), fileCandidate(b)], next_cursor: null })
+  }
+  if (bare === `/api/v2/projects/${a}/files/limits`) {
+    return Response.json({ max_file_bytes: 4096, project_quota_bytes: 32768 })
   }
   if (bare === `/api/v2/projects/${a}/files/${attachment}`) return Response.json(fileCandidate(a))
   if (bare === `/api/projects/${projectId}/requirements/REQ-1` || bare === '/api/requirements/REQ-1') {
@@ -182,6 +185,39 @@ function fileCandidate(projectId: string) {
 }
 
 const fetchMock = vi.fn((path: string, options?: RequestInit) => Promise.resolve(respond(path, options)))
+type UploadAttempt = { url: string; body: File; finish: (status: number) => void }
+
+function mockUploadRequests() {
+  const attempts: UploadAttempt[] = []
+  vi.stubGlobal('XMLHttpRequest', class extends EventTarget {
+    upload = new EventTarget()
+    status = 0
+    response: unknown
+    url = ''
+
+    open(_method: string, url: string) { this.url = url }
+
+    send(file: File) {
+      attempts.push({
+        url: this.url,
+        body: file,
+        finish: (status) => {
+          this.status = status
+          this.response = status === 201 ? fileCandidate(a) : { message: '请重试上传' }
+          this.dispatchEvent(new Event('load'))
+          this.dispatchEvent(new Event('loadend'))
+        },
+      })
+      this.upload.dispatchEvent(new ProgressEvent('progress', { lengthComputable: true, loaded: 1, total: 2 }))
+    }
+
+    abort() {
+      this.dispatchEvent(new Event('abort'))
+      this.dispatchEvent(new Event('loadend'))
+    }
+  })
+  return attempts
+}
 
 beforeEach(() => {
   localStorage.setItem('zeichen.currentProjectId', a)
@@ -285,6 +321,35 @@ describe('canonical project routes', () => {
     )
     await user.keyboard('{Enter}')
     expect(editor).toHaveValue(`正文 A [@橘猫](</projects/${a}/people/${author}>) ![橘猫.png](</projects/${a}/files/${attachment}>) `)
+  })
+
+  it('uploads pasted file bytes to the project and reuses the request id on retry', async () => {
+    const attempts = mockUploadRequests()
+    const user = open(`/projects/${a}/wiki/DOC-1?mode=edit`)
+    const editor = await screen.findByRole<HTMLTextAreaElement>('textbox', { name: 'Markdown 正文' })
+    await user.click(editor)
+    await user.keyboard(' ')
+    editor.setSelectionRange(editor.value.length, editor.value.length)
+    const file = new File(['image bytes'], '橘猫.png', { type: 'image/png' })
+    fireEvent.paste(editor, { clipboardData: { files: [file] } })
+    expect(await screen.findByRole('progressbar', { name: '上传进度' })).toHaveAttribute('value', '50')
+    expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
+    expect(attempts[0].body).toBe(file)
+    const attemptPath = new URL(attempts[0].url, 'https://example.invalid')
+    expect(attemptPath.pathname).toBe(`/api/v2/projects/${a}/files`)
+    expect(attemptPath.searchParams.get('name')).toBe(file.name)
+    expect(attemptPath.searchParams.get('request_id')).toMatch(/^[a-f0-9-]{36}$/)
+    await act(async () => attempts[0].finish(503))
+    expect(await screen.findByRole('alert')).toHaveTextContent('请重试上传')
+    expect(editor).toHaveValue('正文 A ')
+    await user.click(screen.getByRole('button', { name: '重试上传' }))
+    await waitFor(() => expect(attempts).toHaveLength(2))
+    expect(attempts[1].url).toBe(attempts[0].url)
+    await act(async () => attempts[1].finish(201))
+    expect(editor).toHaveFocus()
+    expect(editor).toHaveValue(`正文 A ![橘猫.png](</projects/${a}/files/${attachment}>) `)
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '保存' })).toBeEnabled()
   })
 
   it('opens migrated TERM references and retains the old Wiki route during transition', async () => {

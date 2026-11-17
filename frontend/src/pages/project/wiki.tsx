@@ -14,6 +14,7 @@ import { ApiError, api } from '@/lib/api'
 import { useCurrentProject } from '@/lib/current-project'
 import { useDocumentNavigation } from '@/lib/document-navigation'
 import { useProjectCompletion } from '@/lib/project-completion'
+import { projectFileUpload } from '@/lib/project-files'
 import { projectResourceHref } from '@/lib/project-links'
 import { orderWikiTree, useWikiList, type WikiDocument, type WikiReceipt, type WikiScope, type WikiSummary } from '@/lib/project-wiki'
 import { WikiLifecycle, WikiTrash, type WikiAction } from '@/pages/project/wiki-lifecycle'
@@ -81,6 +82,7 @@ function WikiEditor({ projectId, url, document, parentId }: WikiScope & {
   }))
   const [draft, setDraft] = useState(() => ({ ...initial }))
   const [busy, setBusy] = useState(false)
+  const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [pendingUrl, setPendingUrl] = useState<string | null>(null)
   const createAttempt = useRef<{ key: string; requestId: string } | null>(null)
@@ -106,7 +108,7 @@ function WikiEditor({ projectId, url, document, parentId }: WikiScope & {
 
   async function save(event: FormEvent) {
     event.preventDefault()
-    if (busy || !draft.title.trim()) return
+    if (busy || uploading || !draft.title.trim()) return
     const fields = {
       title: draft.title.trim(),
       summary: draft.summary.trim() || null,
@@ -161,9 +163,9 @@ function WikiEditor({ projectId, url, document, parentId }: WikiScope & {
         <h1 className="text-xl font-semibold">{document ? '编辑 Wiki' : '新建 Wiki'}</h1>
         <div className="flex gap-1">
           {document && error && <a href={cancelHref} target="_blank" rel="noopener noreferrer" className="self-center px-2 text-sm hover:underline">查看当前版本</a>}
-          <Button type="button" size="sm" variant="outline" disabled={busy}
+          <Button type="button" size="sm" variant="outline" disabled={busy || uploading}
             onClick={() => dirty ? setPendingUrl(cancelHref) : navigation(cancelHref)}>取消</Button>
-          <Button type="submit" size="sm" disabled={busy || !draft.title.trim() || (!!document && !dirty)}>
+          <Button type="submit" size="sm" disabled={busy || uploading || !draft.title.trim() || (!!document && !dirty)}>
             {busy ? '保存中…' : '保存'}
           </Button>
         </div>
@@ -190,7 +192,8 @@ function WikiEditor({ projectId, url, document, parentId }: WikiScope & {
         <Textarea id="wiki-v2-summary" autoComplete="off" disabled={busy}
           value={draft.summary} onChange={(event) => change('summary', event.currentTarget.value)} />
       </div>
-      <MarkdownComposer value={draft.body} onChange={(body) => change('body', body)} lookup={lookup} disabled={busy} />
+      <MarkdownComposer value={draft.body} onChange={(body) => change('body', body)} lookup={lookup} disabled={busy}
+        upload={projectFileUpload(projectId)} onUploadPending={setUploading} />
       <Dialog open={pendingUrl !== null} onOpenChange={(open) => { if (!open) setPendingUrl(null) }}>
         <DialogContent>
           <DialogHeader>
