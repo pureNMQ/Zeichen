@@ -8,10 +8,12 @@ vi.mock('@/lib/api', () => {
   return {
   withProject: (path: string) => path, ApiError, api: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn(), upload: vi.fn() } }
 })
+vi.mock('@/lib/project-files', () => ({ uploadAssociatedFile: vi.fn() }))
 
 import { api } from '@/lib/api'
 import { CreateTaskDialog } from '@/components/create-task-dialog'
 import { CurrentProjectProvider } from '@/lib/current-project'
+import { uploadAssociatedFile } from '@/lib/project-files'
 
 function renderDialog(open: boolean, presetRequirementId: string | null = null) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -36,10 +38,10 @@ describe('任务创建表单引用与附件回填(REQ ee290fae)', () => {
     localStorage.setItem('zeichen.currentProjectId', 'p1')
   })
 
-  it('创建成功后按暂存顺序回填引用与附件', async () => {
+  it('文件回填失败后重试同一任务、同一次附件上传', async () => {
     const user = userEvent.setup()
     vi.mocked(api.post).mockResolvedValue({ id: 'new1' })
-    vi.mocked(api.upload).mockResolvedValue({})
+    vi.mocked(uploadAssociatedFile).mockRejectedValueOnce(new Error('断线')).mockResolvedValueOnce(undefined)
     renderDialog(true)
 
     await user.type(await screen.findByLabelText('标题'), '带关联的任务')
@@ -59,8 +61,14 @@ describe('任务创建表单引用与附件回填(REQ ee290fae)', () => {
       expect(api.post).toHaveBeenCalledWith('/targets/task/new1/references', {
         from_type: 'task', from_id: 'new1', to_type: 'requirement', to_id: 'r9', type: 'derives',
       })
-      expect(api.upload).toHaveBeenCalledWith('/targets/task/new1/attachments', file)
+      expect(uploadAssociatedFile).toHaveBeenCalledWith('p1', 'tasks', 'new1', { file, requestId: expect.any(String) })
     })
+    expect(await screen.findByText('任务已创建。部分引用或附件保存失败，请重试。')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: /创建/ }))
+    await waitFor(() => expect(uploadAssociatedFile).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(uploadAssociatedFile).mock.calls[0]).toEqual(vi.mocked(uploadAssociatedFile).mock.calls[1])
+    expect(vi.mocked(api.post).mock.calls.filter(([path]) => path === '/projects/p1/tasks')).toHaveLength(1)
+    expect(api.upload).not.toHaveBeenCalled()
   })
 })
 

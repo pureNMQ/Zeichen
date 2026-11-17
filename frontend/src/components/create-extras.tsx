@@ -13,6 +13,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { api } from '@/lib/api'
+import type { StagedProjectFile } from '@/lib/project-files'
 
 // 创建表单的引用与附件暂存(REQ ee290fae):实体创建成功后再回填这两类关联。
 
@@ -40,8 +41,8 @@ export function CreateExtras({
   projectId: string
   refs: StagedReference[]
   onRefsChange: (refs: StagedReference[]) => void
-  files: File[]
-  onFilesChange: (files: File[]) => void
+  files: StagedProjectFile[]
+  onFilesChange: (files: StagedProjectFile[]) => void
 }) {
   const [refType, setRefType] = useState('derives')
   const [targetType, setTargetType] = useState<'requirement' | 'document'>('requirement')
@@ -53,8 +54,8 @@ export function CreateExtras({
     enabled: targetType === 'requirement',
   })
   const { data: wikiDocs } = useQuery({
-    queryKey: ['document-tree', projectId, 'wiki', null],
-    queryFn: () => api.get<{ items: { id: string; title: string }[] }>(`/projects/${projectId}/documents/wiki/children?limit=100`),
+    queryKey: ['create-reference-wiki', projectId],
+    queryFn: () => api.get<{ items: { id: string; title: string }[] }>(`/v2/projects/${projectId}/wiki?limit=100`),
     enabled: targetType === 'document',
   })
 
@@ -138,19 +139,23 @@ export function CreateExtras({
           type="file"
           multiple
           autoComplete="off"
-          onChange={(e) => onFilesChange([...files, ...Array.from(e.target.files ?? [])])}
+          onChange={(e) => {
+            const selected = Array.from(e.currentTarget.files ?? [], (file) => ({ file, requestId: crypto.randomUUID() }))
+            e.currentTarget.value = ''
+            onFilesChange([...files, ...selected])
+          }}
         />
         {files.length > 0 && (
           <ul className="space-y-1" aria-label="待上传附件">
-            {files.map((f, index) => (
-              <li key={`${f.name}:${index}`} className="flex items-center justify-between gap-2 rounded-lg border px-2 py-1 text-xs">
-                <span className="truncate">{f.name}</span>
+            {files.map(({ file, requestId }) => (
+              <li key={requestId} className="flex items-center justify-between gap-2 rounded-lg border px-2 py-1 text-xs">
+                <span className="truncate">{file.name}</span>
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon-xs"
-                  aria-label={`移除附件 ${f.name}`}
-                  onClick={() => onFilesChange(files.filter((_, i) => i !== index))}
+                  aria-label={`移除附件 ${file.name}`}
+                  onClick={() => onFilesChange(files.filter((staged) => staged.requestId !== requestId))}
                 >
                   <X className="h-3 w-3" />
                 </Button>

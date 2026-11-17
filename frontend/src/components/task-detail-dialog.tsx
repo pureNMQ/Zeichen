@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { UserPlus, UserX, X } from 'lucide-react'
 
 import { ActivityStream } from '@/components/activity-stream'
+import { ProjectAttachments } from '@/components/attachment-list'
 import { StatusBadge } from '@/components/status-badge'
 import { StatusSelect } from '@/components/status-select'
 import { WatchButton } from '@/components/watch-button'
@@ -299,6 +300,8 @@ export function TaskDetailDialog({
 
           <ErrorNotification message={error} />
 
+          {routeProjectId && <ProjectAttachments key={`${routeProjectId}:${t.id}`} projectId={routeProjectId}
+            targetKind="tasks" targetId={t.id} canEdit={canEditTask} />}
           {!routeProjectId && <div className="rounded-lg border p-2">
             <ActivityStream targetType="task" targetId={t.id} />
           </div>}

@@ -13,7 +13,7 @@ from ..errors import AppError, invalid_request, not_found
 from ..models import Project, Requirement, Task
 from ..services.pagination import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from .file_models import FileAssociation, ProjectFile
-from .files import get_file, require_file_access
+from .files import file_summary, get_file, require_file_access
 from .page_cursor import decode_position, encode_position, scope_key
 from .resource_refs import ResourceKind, ResourceRef, parse_uuid
 from .timeline_models import TimelineEntry, TimelineFileReference
@@ -128,6 +128,43 @@ def _href(project_id: UUID, kind: TargetKind, target_id: str) -> str:
     return ResourceRef(project_id, ResourceKind(kind.value), target_id).path
 
 
+def _require_target(db: Session, project_id: UUID, kind: TargetKind, target_id: str) -> None:
+    _href(project_id, kind, target_id)
+    if kind != TargetKind.PROJECT:
+        model = _MODELS[kind]
+        visible = db.scalar(select(model.code).where(
+            model.project_id == project_id, model.code == target_id, _active_target(kind, project_id),
+        ))
+        if visible is None:
+            raise not_found("关联目标不存在或不可见")
+
+
+def list_associated_files(
+    db: Session, actor_id: UUID, project_id: UUID, *, kind: TargetKind, target_id: str,
+    cursor: str | None = None, limit: int = DEFAULT_PAGE_SIZE,
+) -> dict:
+    require_file_access(db, actor_id, project_id)
+    _require_target(db, project_id, kind, target_id)
+    if type(limit) is not int or not 1 <= limit <= MAX_PAGE_SIZE:
+        raise invalid_request(f"每页关联文件须为 1 至 {MAX_PAGE_SIZE} 条")
+    scope = scope_key("files.associations", str(actor_id), str(project_id), kind.value, target_id, limit)
+    position = decode_position(scope, cursor)
+    statement = select(ProjectFile).join(_ASSOC, and_(
+        _ASSOC.project_id == ProjectFile.project_id, _ASSOC.file_id == ProjectFile.id,
+    )).where(_ASSOC.project_id == project_id, _ASSOC.target_kind == kind.value, _ASSOC.target_id == target_id)
+    if position is not None:
+        if len(position) != 1 or not isinstance(position[0], str):
+            raise invalid_request("关联文件游标无效")
+        statement = statement.where(ProjectFile.id > parse_uuid(position[0], "cursor"))
+    rows = list(db.scalars(statement.order_by(ProjectFile.id).limit(limit + 1)))
+    items = [
+        file_summary(row) if row.deleted_at is None else {"id": str(row.id), "unavailable": True}
+        for row in rows[:limit]
+    ]
+    next_cursor = encode_position(scope, [str(rows[limit - 1].id)]) if len(rows) > limit else None
+    return {"items": items, "next_cursor": next_cursor}
+
+
 def list_usage(
     db: Session, actor_id: UUID, project_id: UUID, file_id: UUID, *, include_history: bool = False,
     cursor: str | None = None, limit: int = DEFAULT_PAGE_SIZE,
@@ -187,14 +224,7 @@ def set_association(
     ).with_for_update())
     if existing is None:
         raise not_found("文件不存在或不可用")
-    _href(project_id, kind, target_id)
-    if kind != TargetKind.PROJECT:
-        model = _MODELS[kind]
-        visible = db.scalar(select(model.code).where(
-            model.project_id == project_id, model.code == target_id, _active_target(kind, project_id),
-        ))
-        if visible is None:
-            raise not_found("关联目标不存在或不可见")
+    _require_target(db, project_id, kind, target_id)
     if linked:
         insert = {"postgresql": pg_insert, "sqlite": sqlite_insert}[db.get_bind().dialect.name]
         statement = insert(_ASSOC).values(

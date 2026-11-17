@@ -104,6 +104,9 @@ function respond(path: string, options?: RequestInit) {
   if (bare === `/api/v2/projects/${a}/files/limits`) {
     return Response.json({ max_file_bytes: 4096, project_quota_bytes: 32768 })
   }
+  if (bare === `/api/v2/projects/${projectId}/files/associations`) {
+    return Response.json({ items: [], next_cursor: null })
+  }
   if (bare === `/api/v2/projects/${a}/files/${attachment}`) {
     if (options?.method === 'PATCH') fileName = JSON.parse(String(options.body)).name
     if (options?.method === 'DELETE') {
@@ -307,7 +310,10 @@ describe('canonical project routes', () => {
     expect(fetchMock).toHaveBeenCalledWith(`/api/projects/${b}/requirements/REQ-1/timeline?limit=20`, expect.anything())
     expect(fetchMock.mock.calls.some(([path]) => path.includes('/comments') || path.includes('/activity'))).toBe(false)
     expect(screen.queryByRole('textbox', { name: '时间轴正文' })).not.toBeInTheDocument()
-    expect(fetchMock).toHaveBeenCalledWith(`/api/targets/requirement/REQ-1/attachments?project_id=${b}`, expect.anything())
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/v2/projects/${b}/files/associations?target_kind=requirements&target_id=REQ-1`, expect.anything(),
+    )
+    expect(fetchMock.mock.calls.some(([path]) => path.includes('/attachments'))).toBe(false)
     expect(localStorage.getItem('zeichen.currentProjectId')).toBe(a)
     expect(fetchMock.mock.calls.some(([path]) => path === '/api/requirements/REQ-1')).toBe(false)
 

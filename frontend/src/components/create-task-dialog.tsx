@@ -24,6 +24,7 @@ import { api, ApiError, type RequirementRow, withProject
 import { clearDraft, readDraft, writeDraft } from '@/lib/form-draft'
 import { CreateExtras, type StagedReference } from '@/components/create-extras'
 import { useCurrentProject } from '@/lib/current-project'
+import { uploadAssociatedFile, type StagedProjectFile } from '@/lib/project-files'
 
 export function CreateTaskDialog({
   open,
@@ -44,13 +45,15 @@ export function CreateTaskDialog({
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [refs, setRefs] = useState<StagedReference[]>([])
-  const [files, setFiles] = useState<File[]>([])
+  const [files, setFiles] = useState<StagedProjectFile[]>([])
+  const [createdId, setCreatedId] = useState<string | null>(null)
 
   const draftKey = projectId ? `zeichen.draft.task:${projectId}` : null
 
   useEffect(() => {
     if (open) {
       setError(null)
+      setCreatedId(null)
       if (draftKey) {
         const draft = readDraft<{ title: string; description: string; requirementId: string | null }>(draftKey)
         if (draft) {
@@ -108,34 +111,36 @@ export function CreateTaskDialog({
     setError(null)
     setSubmitting(true)
     try {
-      const created = await api.post<{ id: string }>(`/projects/${projectId}/tasks`, {
+      const id = createdId ?? (await api.post<{ id: string }>(`/projects/${projectId}/tasks`, {
         title: title.trim(),
         description: description.trim() || null,
         requirement_id: requirementId,
-      })
+      })).id
+      setCreatedId(id)
       // 依次回填暂存的引用与附件;失败保留剩余项,提示后可重试
       const remainingRefs = [...refs]
       const remainingFiles = [...files]
       try {
         while (remainingRefs.length > 0) {
           const r = remainingRefs[0]
-          await api.post(withProject(`/targets/task/${created.id}/references`, projectId), { from_type: 'task', from_id: created.id, to_type: r.toType, to_id: r.toId, type: r.type })
+          await api.post(withProject(`/targets/task/${id}/references`, projectId), { from_type: 'task', from_id: id, to_type: r.toType, to_id: r.toId, type: r.type })
           remainingRefs.shift()
         }
         while (remainingFiles.length > 0) {
-          await api.upload(withProject(`/targets/task/${created.id}/attachments`, projectId), remainingFiles[0])
+          await uploadAssociatedFile(projectId, 'tasks', id, remainingFiles[0])
           remainingFiles.shift()
         }
       } catch {
         setRefs(remainingRefs)
         setFiles(remainingFiles)
-        setError('已创建,但部分引用/附件回填失败,可稍后在详情页重试')
+        setError('任务已创建。部分引用或附件保存失败，请重试。')
         return
       }
       setRefs([])
       setFiles([])
       if (draftKey) clearDraft(draftKey)
       onOpenChange(false)
+      if (files.length) void qc.invalidateQueries({ queryKey: ['project-files', projectId] })
       await qc.invalidateQueries({ queryKey: ['tasks', projectId] })
       await qc.invalidateQueries({ queryKey: ['requirements', projectId] })
       onCreated?.()

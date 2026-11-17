@@ -13,6 +13,9 @@ export type ProjectFileSummary = {
   download_href: string | null
 }
 
+export type FileTargetKind = 'requirements' | 'tasks'
+export type StagedProjectFile = { file: File; requestId: string }
+
 const UUID = '[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}'
 const PROJECT_FILE_PATH = new RegExp(`^/projects/(${UUID})/files/(${UUID})$`)
 
@@ -22,6 +25,17 @@ export function projectFileApiPath(projectId: string, fileId: string) {
 
 export function projectFileContentUrl(projectId: string, fileId: string, inline = false) {
   return `/api${projectFileApiPath(projectId, fileId)}/content${inline ? '?inline=true' : ''}`
+}
+
+export function fileAssociationQuery(targetKind: FileTargetKind, targetId: string) {
+  return new URLSearchParams({ target_kind: targetKind, target_id: targetId })
+}
+
+export async function uploadAssociatedFile(
+  projectId: string, targetKind: FileTargetKind, targetId: string, attempt: StagedProjectFile,
+): Promise<void> {
+  const saved = await uploadFileToProject(projectId, attempt.file, attempt.requestId, new AbortController().signal, () => {})
+  await api.put(`${projectFileApiPath(projectId, saved.id)}/usage?${fileAssociationQuery(targetKind, targetId)}`, {})
 }
 
 export function previewUrlForFileLink(href: string) {

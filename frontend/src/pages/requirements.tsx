@@ -37,6 +37,7 @@ import { useCurrentProject, useProjectRole } from '@/lib/current-project'
 import { projectResourceHref } from '@/lib/project-links'
 import { clearDraft, readDraft, writeDraft } from '@/lib/form-draft'
 import { CreateExtras, type StagedReference } from '@/components/create-extras'
+import { uploadAssociatedFile, type StagedProjectFile } from '@/lib/project-files'
 
 const TIME_WINDOWS = [
   { value: '', label: '不限' },
@@ -483,13 +484,15 @@ function CreateRequirementDialog({ open, onOpenChange }: { open: boolean; onOpen
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [refs, setRefs] = useState<StagedReference[]>([])
-  const [files, setFiles] = useState<File[]>([])
+  const [files, setFiles] = useState<StagedProjectFile[]>([])
+  const [createdId, setCreatedId] = useState<string | null>(null)
 
   const draftKey = projectId ? `zeichen.draft.requirement:${projectId}` : null
 
   useEffect(() => {
     if (!open) return
     setError(null)
+    setCreatedId(null)
     const draft = draftKey ? readDraft<{ title: string; description: string }>(draftKey) : null
     setTitle(draft?.title ?? '')
     setDescription(draft?.description ?? '')
@@ -518,26 +521,31 @@ function CreateRequirementDialog({ open, onOpenChange }: { open: boolean; onOpen
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
+    if (!projectId) return
     setError(null)
     setSubmitting(true)
     try {
-      const created = await api.post<{ id: string }>(`/projects/${projectId}/requirements`, { title: title.trim(), description: description.trim() || null })
+      const id = createdId ?? (await api.post<{ id: string }>(`/projects/${projectId}/requirements`, {
+        title: title.trim(),
+        description: description.trim() || null,
+      })).id
+      setCreatedId(id)
       const remainingRefs = [...refs]
       const remainingFiles = [...files]
       try {
         while (remainingRefs.length > 0) {
           const r = remainingRefs[0]
-          await api.post(withProject(`/targets/requirement/${created.id}/references`, projectId), { from_type: 'requirement', from_id: created.id, to_type: r.toType, to_id: r.toId, type: r.type })
+          await api.post(withProject(`/targets/requirement/${id}/references`, projectId), { from_type: 'requirement', from_id: id, to_type: r.toType, to_id: r.toId, type: r.type })
           remainingRefs.shift()
         }
         while (remainingFiles.length > 0) {
-          await api.upload(withProject(`/targets/requirement/${created.id}/attachments`, projectId), remainingFiles[0])
+          await uploadAssociatedFile(projectId, 'requirements', id, remainingFiles[0])
           remainingFiles.shift()
         }
       } catch {
         setRefs(remainingRefs)
         setFiles(remainingFiles)
-        setError('已创建,但部分引用/附件回填失败,可稍后在详情页重试')
+        setError('需求已创建。部分引用或附件保存失败，请重试。')
         return
       }
       setRefs([])
@@ -546,6 +554,7 @@ function CreateRequirementDialog({ open, onOpenChange }: { open: boolean; onOpen
       setTitle('')
       setDescription('')
       onOpenChange(false)
+      if (files.length) void qc.invalidateQueries({ queryKey: ['project-files', projectId] })
       await qc.invalidateQueries({ queryKey: ['requirements', projectId] })
     } catch (err) {
       setError(err instanceof ApiError ? err.message : '创建失败,请重试')

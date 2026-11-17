@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, EyeOff, Eye, FolderOpen, Plus, Trash2, UserPlus } from 'lucide-react'
 
 import { ActivityStream } from '@/components/activity-stream'
-import { AttachmentList } from '@/components/attachment-list'
+import { AttachmentList, ProjectAttachments } from '@/components/attachment-list'
 import { CommentStream } from '@/components/comment-stream'
 import { CreateTaskDialog } from '@/components/create-task-dialog'
 import { Kanban } from '@/components/kanban'
@@ -440,7 +440,10 @@ function RequirementDetail({ id }: { id: string }) {
             : <CommentStream targetType="requirement" targetId={req.id} canEdit={req.status !== 'cancelled'} />}
         </CardContent>
       </Card>
-      <AttachmentList targetType="requirement" targetId={req.id} projectId={routeProjectId} />
+      {routeProjectId
+        ? <ProjectAttachments key={`${routeProjectId}:${req.id}`} projectId={routeProjectId} targetKind="requirements"
+          targetId={req.id} canEdit={canEdit} />
+        : <AttachmentList targetType="requirement" targetId={req.id} />}
       {!routeProjectId && <Card>
         <CardContent className="p-4">
           <ActivityStream targetType="requirement" targetId={req.id} />

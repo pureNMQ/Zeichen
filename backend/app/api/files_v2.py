@@ -111,6 +111,17 @@ async def upload_file(
     return await _receive_upload(request, db, get_settings().file_library_max_file_bytes, save)
 
 
+@router.get(_LIBRARY + "/associations")
+def associated_files(
+    project_id: UUID, target_kind: file_usage.TargetKind, target_id: str,
+    actor: Annotated[User, Depends(current_user)], db: Annotated[Session, Depends(get_db)],
+    cursor: Annotated[str | None, Query(max_length=256)] = None, limit: int = 20,
+) -> dict:
+    return file_usage.list_associated_files(
+        db, actor.id, project_id, kind=target_kind, target_id=target_id, cursor=cursor, limit=limit,
+    )
+
+
 @router.get(_LIBRARY + "/{file_id}")
 def read_metadata(project_id: UUID, file_id: UUID, actor: Annotated[User, Depends(current_user)], db: Annotated[Session, Depends(get_db)]) -> dict:
     return files.file_summary(files.get_file(db, actor.id, project_id, file_id), detail=True)

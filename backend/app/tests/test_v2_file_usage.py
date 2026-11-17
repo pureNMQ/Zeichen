@@ -70,8 +70,28 @@ def test_usage_merges_live_and_migrated_references_and_hides_deleted_targets(cli
     assert client.get(file["download_href"]).content == blob
     assert client.put(usage, params=target).json()["changed"] is True
     assert client.put(usage, params=target).json()["changed"] is False
+
+    reverse = f"{endpoint}/associations"
+    req_target = {"target_kind": "requirements", "target_id": "REQ-1"}
+    assert client.get(reverse, params=req_target).json() == {"items": [file], "next_cursor": None}
+    assert client.get(reverse, params={**req_target, "target_id": "REQ-2"}).status_code == 404
+    assert client.delete(f"{endpoint}/{file_id}").status_code == 200
+    assert client.get(reverse, params=req_target).json()["items"] == [{"id": str(file_id), "unavailable": True}]
+    assert client.post(f"{endpoint}/{file_id}/restore").status_code == 200
+    assert client.get(reverse, params=req_target).json()["items"] == [file]
+    second = client.post(endpoint, params={"name": "second.txt", "request_id": str(uuid4())}, content=blob).json()
+    assert client.put(f"{endpoint}/{second['id']}/usage", params=req_target).status_code == 200
+    first_page = client.get(reverse, params={**req_target, "limit": 1}).json()
+    assert first_page["next_cursor"] is not None
+    second_page = client.get(reverse, params={**req_target, "limit": 1, "cursor": first_page["next_cursor"]}).json()
+    assert {row["id"] for row in first_page["items"] + second_page["items"]} == {file["id"], second["id"]}
+    assert client.get(reverse, params={**target, "limit": 1, "cursor": first_page["next_cursor"]}).status_code == 400
+    assert client.delete(f"{endpoint}/{second['id']}/usage", params=req_target).status_code == 200
+    assert client.get(second["download_href"]).content == blob
+
     login(client, "bob", "synthetic-usage-reader")
     assert client.get(usage).status_code == 200
+    assert client.get(reverse, params=req_target).status_code == 200
     assert client.delete(usage, params=target).status_code == 403
 
 
