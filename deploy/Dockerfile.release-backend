@@ -2,17 +2,16 @@ FROM python:3.12-slim AS base
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 WORKDIR /srv/zeichen
 ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
-COPY backend/pyproject.toml ./
-COPY backend/requirements.release.txt ./
-COPY backend/app ./app
-COPY backend/alembic ./alembic
-COPY backend/alembic.ini ./
-RUN pip install --index-url "${PIP_INDEX_URL}" -c requirements.release.txt .
 
 FROM base AS test
-RUN apt-get update \
+# Keep Git installation independent of the candidate source so consecutive
+# release checks can reuse the operating system packages.
+RUN sed -i 's@http://deb.debian.org@https://mirrors.tuna.tsinghua.edu.cn@g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
     && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
+COPY backend/pyproject.toml backend/requirements.release.txt ./
+COPY backend/app ./app
 RUN pip install --index-url "${PIP_INDEX_URL}" -c requirements.release.txt '.[dev]'
 COPY . /workspace
 ENV PYTHONPATH=/workspace/backend DATABASE_URL=sqlite:// SESSION_SECRET=test-session-secret-0123456789abcdef
@@ -20,5 +19,10 @@ WORKDIR /workspace/backend
 CMD ["python", "-m", "pytest"]
 
 FROM base AS runtime
+COPY backend/pyproject.toml backend/requirements.release.txt ./
+COPY backend/app ./app
+COPY backend/alembic ./alembic
+COPY backend/alembic.ini ./
+RUN pip install --index-url "${PIP_INDEX_URL}" -c requirements.release.txt .
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
