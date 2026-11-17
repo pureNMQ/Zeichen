@@ -63,6 +63,13 @@ def register_wiki_tools(mcp) -> None:
         db, actor = dbc()
         return reads.summary(service.read_wiki(db, actor.id, parse_uuid(project_id, "project_id"), id))
 
+    @mcp.tool(name="wiki.ancestors", annotations=_READ)
+    @sessioned
+    def list_ancestors(project_id: str, id: str) -> list[reads.Ancestor]:
+        """从根到当前 Wiki 的路径，只含各节点的编号与标题。"""
+        db, actor = dbc()
+        return reads.ancestors(db, actor.id, parse_uuid(project_id, "project_id"), id)
+
     @mcp.tool(name="wiki.read", annotations=_READ)
     @sessioned
     def read_wiki(project_id: str, id: str, mode: reads.ReadMode = "range", start_line: StrictInt | None = None,

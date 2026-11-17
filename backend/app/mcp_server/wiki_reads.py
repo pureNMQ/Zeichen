@@ -50,6 +50,11 @@ class TrashedWiki(WikiSummary):
     deleted_by: UUID | None
 
 
+class Ancestor(BaseModel):
+    id: str
+    title: str
+
+
 class VersionSummary(BaseModel):
     version: int
     title: str
@@ -154,6 +159,26 @@ def list_wiki(db: Session, actor_id: UUID, project_id: UUID, *, query: str, pare
     entries, next_cursor = _project_list(db, actor_id, project_id, query=query, parent_id=parent_id,
                                          limit=limit, cursor=cursor, deleted=False)
     return Page(items=[summary(entry, preview=True) for entry in entries], next_cursor=next_cursor)
+
+
+def ancestors(db: Session, actor_id: UUID, project_id: UUID, code: str) -> list[Ancestor]:
+    get_accessible_project(db, actor_id, project_id)
+    ResourceRef(project_id, ResourceKind.WIKI, code)
+    path: list[Ancestor] = []
+    seen: set[str] = set()
+    node_id = code
+    while node_id is not None:
+        if node_id in seen:
+            raise not_found("Wiki 路径不存在")
+        seen.add(node_id)
+        node = db.execute(select(Wiki.code, Wiki.parent_id, Wiki.title).where(
+            Wiki.project_id == project_id, Wiki.code == node_id, Wiki.deleted_at.is_(None),
+        )).one_or_none()
+        if node is None:
+            raise not_found("Wiki 路径不存在")
+        path.append(Ancestor(id=node.code, title=node.title))
+        node_id = node.parent_id
+    return list(reversed(path))
 
 
 def list_trash(db: Session, actor_id: UUID, project_id: UUID, *, query: str,

@@ -332,18 +332,18 @@ class TestMcpDisambiguation:
         """多态工具:实体短码目标必传 project_id;project 目标(UUID 寻址)可省。"""
         mcp = mcp_two_projects["client"]
         missing = mcp.call(
-            "comment.create", target_type="requirement", target_id=same_codes["req"], body="x"
+            "comment.list", target_type="requirement", target_id=same_codes["req"]
         )
         assert "error" in missing and "invalid_request" in missing["error"], missing
         assert "project_id" in missing["error"], missing
         ok = mcp.call(
-            "comment.create", target_type="requirement", target_id=same_codes["req"],
-            body="x", project_id=mcp_two_projects["pa"],
+            "comment.list", target_type="requirement", target_id=same_codes["req"],
+            project_id=mcp_two_projects["pa"],
         )
         assert "error" not in ok, ok
         # project 目标无需 project_id
         proj = mcp.call(
-            "comment.create", target_type="project", target_id=mcp_two_projects["pa"], body="y"
+            "comment.list", target_type="project", target_id=mcp_two_projects["pa"]
         )
         assert "error" not in proj, proj
 

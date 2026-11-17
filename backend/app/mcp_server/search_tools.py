@@ -1,4 +1,4 @@
-"""Search the v2 project read models without changing the legacy all-project tool."""
+"""Search project-scoped v2 read models."""
 
 from mcp.types import ToolAnnotations
 from pydantic import StrictInt

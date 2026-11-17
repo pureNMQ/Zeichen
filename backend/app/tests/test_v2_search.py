@@ -119,7 +119,7 @@ def test_project_search_exposes_same_result_shape_in_mcp(mcp_server):
 
     client = RawMcpClient(mcp_server["url"], mcp_server["token"])
     client.initialize()
-    assert {"search.project", "search.query"}.issubset(client.list_tools())
+    assert "search.project" in client.list_tools()
     results = client.call("search.project", project_id=str(project_id), query=NEEDLE, domains=["timeline", "wiki"])
     assert set(results["domains"]) == {"timeline", "wiki"}
     for domain in results["domains"]:

@@ -16,6 +16,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from uuid import uuid4
 
 import httpx
 import pytest
@@ -208,19 +209,16 @@ def test_agent_claim_to_requirement_done(mcp_server: dict):
     assert client.session_id is None, "stateless 模式不签发 Mcp-Session-Id"
 
     tools = client.list_tools()
-    assert len(tools) >= 40  # 当前注册 54 个;REQ-59 移除 docs.glossary.* 后同步放宽下限
-    for ns in ("requirements.", "tasks.", "repositories.", "docs.wiki.", "comment.", "ref.", "project.", "agent."):
-        assert any(t.startswith(ns) for t in tools), f"缺少 {ns} 工具"
-    assert not any(t.startswith("docs.code.") for t in tools), "docs.code.* 工具应随 API 参考模块移除"
-    assert "requirements.set_status" in tools and "requirements.complete" not in tools
-    assert "tasks.set_status" in tools and "tasks.start" not in tools and "tasks.complete" not in tools
-    assert not any(t.startswith("memory.") for t in tools), "REQ-57:记忆工具应随记忆系统下线移除"
-    assert not any(t.startswith("docs.glossary.") for t in tools), "REQ-59:词条工具应随 glossary 合并 wiki 下线"
-    for name in (
-        "docs.wiki.children", "docs.wiki.ancestors", "docs.wiki.move", "docs.wiki.index", "docs.search",
-        "repositories.list", "repositories.create", "repositories.update", "repositories.delete", "repositories.restore",
-    ):
+    for ns in ("requirements.", "tasks.", "repositories.", "wiki.", "timeline.", "files.", "ref.", "project.", "agent."):
+        assert any(tool.startswith(ns) for tool in tools), f"缺少 {ns} 工具"
+    assert not any(tool.startswith(("docs.", "attachment.", "memory.")) for tool in tools)
+    assert {"comment.list", "requirements.set_status", "tasks.set_status", "search.project"}.issubset(tools)
+    assert {"comment.create", "comment.delete", "requirements.complete", "tasks.start",
+            "tasks.complete", "search.query"}.isdisjoint(tools)
+    for name in ("wiki.ancestors", "wiki.move", "repositories.list", "repositories.create",
+                 "repositories.update", "repositories.delete", "repositories.restore"):
         assert name in tools
+    assert "error" in client.call("attachment.download", attachment_id=str(uuid4()))
 
     me = client.call("agent.whoami")
     assert me["username"] == "agent-e2e"
@@ -290,10 +288,10 @@ def test_agent_claim_to_requirement_done(mcp_server: dict):
     err5 = client.call("requirements.cancel", id=rid, project_id=mcp_server["project_id"])
     assert "conflict" in err5["error"]
 
-    # 评论 + 双向引用 + 活动
-    client.call("comment.create", target_type="requirement", target_id=rid, body="e2e 评论", project_id=mcp_server["project_id"])
-    comments = client.call("comment.list", target_type="requirement", target_id=rid, project_id=mcp_server["project_id"])
-    assert len(comments["items"]) == 1
+    # 时间轴人工记录与双向结构化引用
+    scope = {"project_id": mcp_server["project_id"], "requirement_id": rid}
+    record = client.call("timeline.append", **scope, request_id=str(uuid4()), body="E2E timeline")
+    assert client.call("timeline.get", **scope, entry_id=record["entry_id"])["body"] == "E2E timeline"
     ref = client.call(
         "ref.create", from_type="requirement", from_id=rid, to_type="task", to_id=tid,
         type="implements", project_id=mcp_server["project_id"],
@@ -346,44 +344,34 @@ def test_task_requirement_link_over_mcp(mcp_server: dict):
     assert client.call("requirements.delete", id=r2["id"], project_id=mcp_server["project_id"])["deleted"] is True
 
 
-def test_document_hierarchy_over_mcp(mcp_server: dict):
-    """MCP 与 HTTP 共用层级 service,而不是第二套规则;REQ-59 附带双链/INDEX/docs.search 冒烟。"""
+def test_wiki_hierarchy_over_mcp(mcp_server: dict):
     client = RawMcpClient(mcp_server["url"], mcp_server["token"])
     client.initialize()
-    project_id = mcp_server["project_id"]
-    root = client.call(
-        "docs.wiki.create", project_id=project_id, title="MCP 根",
-        content="---\ndoc_kind: concept\nsummary: 根页摘要\naliases: [根页别名]\n---\n根正文",
-    )
-    child = client.call(
-        "docs.wiki.create", project_id=project_id, title="MCP 子",
-        parent_id=root["id"], content=f"参见 [[MCP 根]] 与 [[悬空页]]",
-    )
-    assert child["reference_warning"]["count"] == 1  # 断链警告随保存返回
-    assert child["metadata"].get("doc_kind") is None
-    children = client.call("docs.wiki.children", project_id=project_id, parent_id=root["id"])
+    scope = {"project_id": mcp_server["project_id"]}
+
+    root = client.call("wiki.create", **scope, request_id=str(uuid4()),
+                       content={"title": "MCP 根", "body": "根正文供搜索", "category": "concept"})
+    child = client.call("wiki.create", **scope, request_id=str(uuid4()),
+                        content={"title": "MCP 子", "body": "子正文"}, parent_id=root["id"])
+
+    children = client.call("wiki.list", **scope, parent_id=root["id"])
     assert [node["id"] for node in children["items"]] == [child["id"]]
-    path = client.call("docs.wiki.ancestors", project_id=project_id, id=child["id"])
-    assert [node["id"] for node in path["items"]] == [root["id"], child["id"]]
-    assert "invalid_request" in client.call("docs.wiki.move", id=root["id"], project_id=project_id, parent_id=child["id"])["error"]
+    assert all("body" not in node for node in children["items"])
+    path = client.call("wiki.ancestors", **scope, id=child["id"])
+    assert path == [{"id": root["id"], "title": "MCP 根"}, {"id": child["id"], "title": "MCP 子"}]
+    cycle = client.call("wiki.move", **scope, id=root["id"], parent_id=child["id"], expected_version=root["version"])
+    assert "conflict:" in cycle["error"]
+    body = client.call("wiki.read", **scope, id=root["id"], mode="full")
+    assert body["body"] == "根正文供搜索"
+    summary = client.call("wiki.get", **scope, id=root["id"])
+    assert summary["category"] == "concept" and "body" not in summary
 
-    detail = client.call("docs.wiki.get", id=root["id"], project_id=project_id)
-    assert detail["metadata"]["doc_kind"] == "concept"
-    assert [item["from_code"] for item in detail["links"]["incoming"]] == [child["id"]]  # 反链
-    assert detail["author"]["is_agent"] is True and detail["author"]["owner"]["username"] == "admin"
-
-    index = client.call("docs.wiki.index", project_id=project_id)
-    assert index["total"] >= 2
-    concept = next(section for section in index["sections"] if section["kind"] == "concept")
-    assert any(item["id"] == root["id"] for item in concept["items"])
-    assert index["lint"]["broken_links"] and index["lint"]["broken_links"][0]["raw_text"] == "悬空页"
-
-    by_alias = client.call("docs.search", project_id=project_id, q="根页别名")
-    assert any(item["id"] == root["id"] for item in by_alias["items"])
-    by_multi = client.call("docs.search", project_id=project_id, q="根页 摘要")
-    assert any(item["id"] == root["id"] for item in by_multi["items"])  # 多词 AND,别名+summary 参与
-    in_body = client.call("docs.search", project_id=project_id, q="根正文")
-    assert in_body["items"] and in_body["items"][0]["snippet"]  # 正文命中返回片段
+    search = client.call("search.project", **scope, query="根正文", domains=["wiki"])
+    assert search["domains"]["wiki"]["items"][0]["id"] == root["id"]
+    assert "根正文" in search["domains"]["wiki"]["items"][0]["snippet"]
+    trashed = client.call("wiki.delete", **scope, id=root["id"], confirmed_count=2)
+    assert trashed["deleted"]
+    assert "not_found:" in client.call("wiki.ancestors", **scope, id=child["id"])["error"]
 
 
 def test_cursor_pagination_over_mcp(mcp_server: dict):
@@ -410,7 +398,7 @@ def test_cursor_pagination_over_mcp(mcp_server: dict):
     assert "invalid_request" in err["error"]
 
 
-def test_search_query_paginates_over_mcp(mcp_server: dict):
+def test_search_project_paginates_over_mcp(mcp_server: dict):
     client = RawMcpClient(mcp_server["url"], mcp_server["token"])
     client.initialize()
     query = "MCP 搜索分页专用"
@@ -418,16 +406,16 @@ def test_search_query_paginates_over_mcp(mcp_server: dict):
         client.call("requirements.create", project_id=mcp_server["project_id"], title=f"{query} {i}")["id"]
         for i in range(4)
     }
-    filters = {"query": query, "domains": ["requirement"]}
-    first = client.call("search.query", **filters, limit=2)
-    second = client.call("search.query", **filters, cursor=first["next_cursor"])
+    filters = {"project_id": mcp_server["project_id"], "query": query, "domains": ["requirement"], "limit": 2}
+    first = client.call("search.project", **filters)["domains"]["requirement"]
+    second = client.call("search.project", **filters, cursor=first["next_cursor"])["domains"]["requirement"]
     first_ids = {item["id"] for item in first["items"]}
     second_ids = {item["id"] for item in second["items"]}
     assert len(first_ids) == len(second_ids) == 2
     assert not first_ids & second_ids
     assert first_ids | second_ids == ids
     assert second["next_cursor"] is None
-    different_query = client.call("search.query", query="不同查询", cursor=first["next_cursor"])
+    different_query = client.call("search.project", **{**filters, "query": "不同查询"}, cursor=first["next_cursor"])
     assert "invalid_request:" in different_query["error"]
 
 
@@ -439,14 +427,14 @@ def test_search_query_paginates_over_mcp(mcp_server: dict):
         ("requirements.list", "project_id", {}),
         ("tasks.assign", "assignee_id", {"id": "TASK-1"}),
         ("comment.list", "target_id", {"target_type": "project"}),
-        ("attachment.download", "attachment_id", {}),
+        ("files.get", "file_id", {}),
     ],
 )
 def test_invalid_uuid_reports_field_over_mcp(mcp_server: dict, tool: str, field: str, other_args: dict):
     client = RawMcpClient(mcp_server["url"], mcp_server["token"])
     client.initialize()
     args = {**other_args, field: "not-a-uuid"}
-    if tool == "tasks.assign":
+    if tool in {"tasks.assign", "files.get"}:
         args["project_id"] = mcp_server["project_id"]
     response = client.call(tool, **args)
     assert f"invalid_request: {field}" in response["error"]

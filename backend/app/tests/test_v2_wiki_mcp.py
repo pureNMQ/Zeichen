@@ -24,7 +24,7 @@ def test_wiki_mcp_edits_a_small_range_and_reads_immutable_versions(mcp_server):
     project_id = mcp_server["project_id"]
     tools = client._post("tools/list", {})["tools"]
     schemas = {tool["name"]: tool for tool in tools}
-    assert "docs.wiki.get" in schemas and "wiki.get" in schemas
+    assert "wiki.get" in schemas and "wiki.ancestors" in schemas
     assert schemas["wiki.read"]["annotations"]["readOnlyHint"] is True
     assert schemas["wiki.delete"]["annotations"]["destructiveHint"] is True
     assert set(schemas["wiki.read"]["inputSchema"]["properties"]["mode"]["enum"]) == {"range", "outline", "full"}
