@@ -16,7 +16,7 @@ from ..config import get_settings
 from ..db import get_db
 from ..errors import conflict, invalid_request, not_found
 from ..models import User
-from ..v2 import files
+from ..v2 import file_usage, files
 from ..v2.file_models import ProjectFile
 from ..v2.file_storage import StagedFile, file_path, stage_file, supports_preview
 from .deps import current_user
@@ -114,6 +114,34 @@ async def upload_file(
 @router.get(_LIBRARY + "/{file_id}")
 def read_metadata(project_id: UUID, file_id: UUID, actor: Annotated[User, Depends(current_user)], db: Annotated[Session, Depends(get_db)]) -> dict:
     return files.file_summary(files.get_file(db, actor.id, project_id, file_id), detail=True)
+
+
+@router.get(_LIBRARY + "/{file_id}/usage")
+def read_usage(
+    project_id: UUID, file_id: UUID, actor: Annotated[User, Depends(current_user)], db: Annotated[Session, Depends(get_db)],
+    include_history: bool = False, cursor: str | None = None, limit: int = 20,
+) -> file_usage.UsagePage:
+    return file_usage.list_usage(db, actor.id, project_id, file_id, include_history=include_history, cursor=cursor, limit=limit)
+
+
+@router.put(_LIBRARY + "/{file_id}/usage")
+def link_file(
+    project_id: UUID, file_id: UUID, target_kind: file_usage.TargetKind, target_id: str,
+    actor: Annotated[User, Depends(current_user)], db: Annotated[Session, Depends(get_db)],
+) -> file_usage.AssociationReceipt:
+    result = file_usage.set_association(db, actor.id, project_id, file_id, kind=target_kind, target_id=target_id, linked=True)
+    db.commit()
+    return result
+
+
+@router.delete(_LIBRARY + "/{file_id}/usage")
+def unlink_file(
+    project_id: UUID, file_id: UUID, target_kind: file_usage.TargetKind, target_id: str,
+    actor: Annotated[User, Depends(current_user)], db: Annotated[Session, Depends(get_db)],
+) -> file_usage.AssociationReceipt:
+    result = file_usage.set_association(db, actor.id, project_id, file_id, kind=target_kind, target_id=target_id, linked=False)
+    db.commit()
+    return result
 
 
 @router.patch(_LIBRARY + "/{file_id}")
