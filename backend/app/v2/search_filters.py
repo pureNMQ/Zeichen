@@ -14,6 +14,7 @@ from ..models import Requirement, Task
 from ..models.requirement import REQUIREMENT_STATUS_VALUES
 from .file_models import FileAssociation, ProjectFile
 from .resource_refs import ResourceKind, ResourceRef, parse_uuid
+from .timeline_models import TimelineEntry, TimelineFileReference
 from .wiki_models import Wiki, WikiReference, visible_wiki_tree
 
 
@@ -52,24 +53,44 @@ def _by_field(model, field, project_id: UUID, target_id: str, active):
     return select(field).where(model.project_id == project_id, field == target_id, active).exists()
 
 
+def _current_timeline_use(target: ResourceRef, entry_id: UUID):
+    reference = TimelineFileReference
+    entry = TimelineEntry
+    visible = _by_field(Requirement, Requirement.code, target.project_id, target.identifier,
+                        Requirement.deleted_at.is_(None))
+    attached = select(reference.file_id).select_from(reference).join(entry, and_(
+        entry.id == reference.entry_id, entry.latest_version == reference.version,
+    )).where(
+        entry.id == entry_id, entry.project_id == target.project_id, entry.requirement_code == target.identifier,
+        reference.file_id == ProjectFile.id,
+    ).correlate(ProjectFile).exists()
+    return and_(ProjectFile.project_id == target.project_id, visible, attached)
+
+
 def file_used_at_predicate(href: str, project_ids: tuple[UUID, ...]):
-    """Match live explicit associations or the current visible Wiki snapshot."""
+    """Match live explicit associations, Wiki snapshots, or timeline attachments."""
+    message = "使用位置须为站内项目、需求、任务、Wiki 或时间轴链接"
     try:
         parts = urlsplit(href)
     except ValueError as exc:
-        raise invalid_request("使用位置须为站内项目资源链接") from exc
-    if parts.scheme or parts.netloc or parts.query or parts.fragment or href != parts.path:
-        raise invalid_request("使用位置须为站内项目、需求、任务或 Wiki 链接")
-    if parts.path.startswith("/projects/") and parts.path.count("/") == 2:
+        raise invalid_request(message) from exc
+    if parts.scheme or parts.netloc or parts.query or href != parts.path + (f"#{parts.fragment}" if parts.fragment else ""):
+        raise invalid_request(message)
+    target = None
+    if parts.path.startswith("/projects/") and parts.path.count("/") == 2 and not parts.fragment:
         project_id = parse_uuid(parts.path.split("/")[-1], "file_used_at.project_id")
         kind, target_id = "project", str(project_id)
     else:
-        target = ResourceRef.from_markdown_href(href)
+        target = ResourceRef.from_markdown_href(parts.path)
         if target is None or target.kind not in {ResourceKind.REQUIREMENT, ResourceKind.TASK, ResourceKind.WIKI}:
-            raise invalid_request("使用位置须为站内项目、需求、任务或 Wiki 链接")
+            raise invalid_request(message)
         project_id, kind, target_id = target.project_id, target.kind.value, target.identifier
     if project_id not in project_ids:
         raise invalid_request("使用位置必须属于已选择的检索项目")
+    if parts.fragment:
+        if target is None or target.kind != ResourceKind.REQUIREMENT or not parts.fragment.startswith("timeline-"):
+            raise invalid_request(message)
+        return _current_timeline_use(target, parse_uuid(parts.fragment.removeprefix("timeline-"), "file_used_at.entry_id"))
 
     explicit_use = select(FileAssociation.file_id).where(
         FileAssociation.project_id == project_id, FileAssociation.file_id == ProjectFile.id,

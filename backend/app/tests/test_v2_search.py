@@ -219,3 +219,30 @@ def test_search_filters_current_domain_metadata_time_and_file_usage(client, db, 
     assert search("file", file_used_at=wiki_href) == []
     invalid = client.get(endpoint, params={"domain": "file", "from_at": now.isoformat(), "to_at": now.isoformat()})
     assert invalid.status_code == 400 and invalid.json()["code"] == "invalid_request"
+
+
+def test_file_search_at_timeline_location_matches_current_reference_only(client, db, world):
+    project = world["project"].id
+    actor = world["admin"]
+    db.add(Requirement(project_id=project, code="REQ-1", title="File references", status="done"))
+    file_id = uuid4()
+    db.add(ProjectFile(project_id=project, id=file_id, name="diagram.png", media_type="image/png",
+                       size=4, sha256="a" * 64, created_by=actor.id))
+    db.flush()
+    scope = ResourceRef(project, ResourceKind.REQUIREMENT, "REQ-1")
+    file_href = ResourceRef(project, ResourceKind.FILE, str(file_id)).path
+    note = append_entry(db, actor, scope, request_id=uuid4(), body=f"![diagram]({file_href})")
+    entry_id = UUID(note["entry_id"])
+    db.commit()
+    login(client, "admin", "admin-pass-1")
+    endpoint = f"/api/v2/projects/{project}/search"
+    params = {"domain": "file", "file_used_at": f"{scope.path}#timeline-{entry_id}"}
+    matched = client.get(endpoint, params=params)
+    assert matched.status_code == 200, matched.text
+    assert [item["id"] for item in matched.json()["domains"]["file"]["items"]] == [str(file_id)]
+
+    revise_entry(db, actor, scope, entry_id, request_id=uuid4(), expected_version=1, body="Attachment removed")
+    db.commit()
+    removed = client.get(endpoint, params=params)
+    assert removed.status_code == 200, removed.text
+    assert removed.json()["domains"]["file"]["items"] == []
