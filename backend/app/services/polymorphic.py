@@ -299,6 +299,10 @@ def _target_label(
     target = db.get(model, (project_id, target_id))
     if target is None or target.deleted_at is not None:
         return None, None
+    if isinstance(target, Task):
+        parent = db.get(Requirement, (project_id, target.requirement_id))
+        if parent is None or parent.deleted_at is not None:
+            return None, None
     return target.title, getattr(target, "doc_type", None)
 
 

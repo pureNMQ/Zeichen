@@ -14,6 +14,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     String,
     UniqueConstraint,
+    select,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -53,6 +54,7 @@ class Requirement(TimestampMixin, SoftDeleteMixin, CreatedByMixin, Base):
     title: Mapped[str] = mapped_column(String(256), nullable=False)
     description: Mapped[str | None] = mapped_column(String(512), nullable=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    deleted_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("user.id", ondelete="SET NULL"))
 
     tasks: Mapped[list["Task"]] = relationship(
         back_populates="requirement",
@@ -85,6 +87,7 @@ class Task(TimestampMixin, SoftDeleteMixin, CreatedByMixin, Base):
     title: Mapped[str] = mapped_column(String(256), nullable=False)
     description: Mapped[str | None] = mapped_column(String(512), nullable=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="backlog")
+    deleted_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("user.id", ondelete="SET NULL"))
     assignee_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("user.id", ondelete="SET NULL"), nullable=True, index=True
     )
@@ -97,6 +100,14 @@ class Task(TimestampMixin, SoftDeleteMixin, CreatedByMixin, Base):
         primaryjoin="and_(Requirement.project_id == Task.project_id, Requirement.code == Task.requirement_id)",
         viewonly=True,
     )
+
+    @classmethod
+    def has_active_requirement(cls):
+        return select(Requirement.code).where(
+            Requirement.project_id == cls.project_id,
+            Requirement.code == cls.requirement_id,
+            Requirement.deleted_at.is_(None),
+        ).correlate(cls).exists()
 
 
 class TaskBlocker(TimestampMixin, CreatedByMixin, Base):

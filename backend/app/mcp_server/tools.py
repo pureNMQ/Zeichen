@@ -25,6 +25,8 @@ from ..services import requirements as req_svc
 from ..services import tasks as task_svc
 from ..services import search as search_svc
 from ..services import attachments as attachment_svc
+from ..services import work_trash as work_trash_svc
+from ..services.work_trash import WorkKind
 from ..v2 import notifications as notification_svc
 from ..v2.resource_refs import parse_uuid as parse_v2_uuid
 from . import auth
@@ -748,6 +750,32 @@ def _register_all(mcp) -> None:
         """恢复项目及随项目暂时隐藏的活动内容；独立删除项保持删除。"""
         db, actor = dbc()
         return project_svc.restore_project(db, actor, _parse_uuid(id, "id"))
+
+    @mcp.tool(name="trash.work_list")
+    @sessioned
+    def trash_work_list(
+        project_id: str, kind: WorkKind, keyword: str = "", cursor: str | None = None, limit: int = 20,
+    ) -> dict:
+        """发现当前项目中明确删除的需求或任务。"""
+        db, actor = dbc()
+        return work_trash_svc.list_deleted_work(
+            db, actor, parse_v2_uuid(project_id, "project_id"), kind,
+            keyword=keyword, cursor=cursor, limit=limit,
+        )
+
+    @mcp.tool(name="trash.work_get")
+    @sessioned
+    def trash_work_get(project_id: str, kind: WorkKind, id: str) -> dict:
+        """查看已删除工作项及受父项删除影响的任务计数。"""
+        db, actor = dbc()
+        return work_trash_svc.deleted_work_details(db, actor, parse_v2_uuid(project_id, "project_id"), kind, id)
+
+    @mcp.tool(name="trash.work_restore")
+    @sessioned
+    def trash_work_restore(project_id: str, kind: WorkKind, id: str) -> dict:
+        """恢复项目内工作项；父需求未恢复时返回冲突。"""
+        db, actor = dbc()
+        return work_trash_svc.restore_work(db, actor, parse_v2_uuid(project_id, "project_id"), kind, id)
 
     @mcp.tool(name="agent.whoami")
     @sessioned

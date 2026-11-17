@@ -232,9 +232,7 @@ def delete_requirement(
     if task_count > 0 and confirm_task_count != task_count:
         raise conflict(f"需求下有 {task_count} 个任务,请确认任务数后删除")
     requirement.deleted_at = datetime.now(timezone.utc)
-    from .attachments import soft_delete_for_target
-
-    soft_delete_for_target(db, requirement.project_id, "requirement", requirement.code)
+    requirement.deleted_by = actor.id
     record_activity(
         db, requirement.project_id, actor.id, "requirement", requirement.code, "delete", "删除需求"
     )
@@ -244,17 +242,11 @@ def delete_requirement(
 def restore_requirement(
     db: Session, actor: User, requirement_id: str, project_id: uuid.UUID | None = None
 ) -> Requirement:
-    require_valid_code("requirement", requirement_id)
-    stmt = select(Requirement).where(Requirement.code == requirement_id)
-    if project_id is not None:
-        get_accessible_project(db, actor.id, project_id, min_level="viewer")
-        stmt = stmt.where(Requirement.project_id == project_id)
-    rows = db.scalars(stmt).all()
-    requirement = next((r for r in rows if r.deleted_at is not None), None)
-    if requirement is None:
-        raise not_found("已删除的需求不存在")
-    require_project_role(db, actor.id, requirement.project_id, min_level="editor")
+    from .work_trash import find_deleted
+
+    requirement = find_deleted(db, actor, "requirement", requirement_id, project_id)
     requirement.deleted_at = None
+    requirement.deleted_by = None
     record_activity(
         db, requirement.project_id, actor.id, "requirement", requirement.code, "restore", "恢复需求"
     )

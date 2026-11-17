@@ -281,6 +281,7 @@ def search_tasks(db: Session, project_ids: list[uuid.UUID], query: str) -> list[
         select(Task).where(
             Task.project_id.in_(project_ids),
             Task.deleted_at.is_(None),
+            Task.has_active_requirement(),
             or_(
                 Task.title.ilike(f"%{needle}%"),
                 Task.description.ilike(f"%{needle}%"),

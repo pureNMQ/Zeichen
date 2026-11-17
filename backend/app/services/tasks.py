@@ -187,7 +187,7 @@ def list_tasks(
     from .pagination import decode_cursor
 
     offset = decode_cursor(filters, cursor)
-    stmt = select(Task).where(Task.project_id == project_id, Task.deleted_at.is_(None))
+    stmt = select(Task).where(Task.project_id == project_id, Task.deleted_at.is_(None), Task.has_active_requirement())
     if requirement_id:
         from .short_codes import require_valid_code
 
@@ -367,9 +367,7 @@ def delete_task(
     task = _get_editable(db, actor, task_id, project_id)
     _require_owner(db, actor, task)
     task.deleted_at = _now()
-    from .attachments import soft_delete_for_target
-
-    soft_delete_for_target(db, task.project_id, "task", task.code)
+    task.deleted_by = actor.id
     record_activity(db, task.project_id, actor.id, "task", task.code, "delete", "删除任务")
     db.commit()
 
@@ -377,19 +375,14 @@ def delete_task(
 def restore_task(
     db: Session, actor: User, task_id: str, project_id: uuid.UUID | None = None
 ) -> Task:
-    from .short_codes import require_valid_code
+    from .work_trash import find_deleted
 
-    require_valid_code("task", task_id)
-    stmt = select(Task).where(Task.code == task_id)
-    if project_id is not None:
-        get_accessible_project(db, actor.id, project_id, min_level="viewer")
-        stmt = stmt.where(Task.project_id == project_id)
-    rows = db.scalars(stmt).all()
-    task = next((t for t in rows if t.deleted_at is not None), None)
-    if task is None:
-        raise not_found("已删除的任务不存在")
-    require_project_role(db, actor.id, task.project_id, min_level="editor")
+    task = find_deleted(db, actor, "task", task_id, project_id)
+    requirement = db.get(Requirement, (task.project_id, task.requirement_id))
+    if requirement is None or requirement.deleted_at is not None:
+        raise conflict("所属需求尚未恢复，请先恢复需求")
     task.deleted_at = None
+    task.deleted_by = None
     record_activity(db, task.project_id, actor.id, "task", task.code, "restore", "恢复任务")
     db.commit()
     return task

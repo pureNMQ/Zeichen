@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Pencil, Plus, Trash2 } from 'lucide-react'
 import { api, ApiError, type ProjectMemberRow, type ProjectRole } from '@/lib/api'
 import { MemberAccountLabel } from '@/components/user-avatar'
+import { WorkTrash } from '@/components/work-trash'
 import { identityName } from '@/lib/user-identity'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -367,6 +368,7 @@ export function ProjectLayout() {
     <div className="space-y-4">
       <div className="flex items-center gap-3">
         <h1 className="text-xl font-semibold">{project.name}</h1>
+        {project.my_role !== 'viewer' && <WorkTrash key={projectId} projectId={projectId} />}
         {isOwner && (
           <Button variant="ghost" size="sm" onClick={() => setRenameOpen(true)}>
             <Pencil className="h-3.5 w-3.5" />

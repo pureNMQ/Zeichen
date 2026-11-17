@@ -3,7 +3,8 @@ import { render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
-vi.mock('@/lib/api', () => {
+vi.mock('@/lib/api', async (importOriginal) => {
+  const { withProject } = await importOriginal<typeof import('@/lib/api')>()
   class ApiError extends Error {
     status: number
     constructor(status: number, message: string) {
@@ -13,6 +14,7 @@ vi.mock('@/lib/api', () => {
   }
   return {
     ApiError,
+    withProject,
     api: {
       get: vi.fn(),
       post: vi.fn(),

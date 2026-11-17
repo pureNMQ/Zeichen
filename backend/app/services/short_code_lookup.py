@@ -32,16 +32,13 @@ def resolve_by_code(db: Session, user: User, entity_type: str, code: str, projec
     require_valid_code(entity_type, code)
     model = _TARGET_MODELS[entity_type]
     from sqlalchemy import select
+    base = select(model).where(model.code == code, model.deleted_at.is_(None))
+    if model is Task:
+        base = base.where(Task.has_active_requirement())
 
     if project_id is not None:
         project = get_accessible_project(db, user.id, project_id, min_level="viewer")
-        entity = db.scalar(
-            select(model).where(
-                model.code == code,
-                model.project_id == project_id,
-                model.deleted_at.is_(None),
-            )
-        )
+        entity = db.scalar(base.where(model.project_id == project_id))
         if entity is None:
             raise not_found("目标不存在")
         return entity, project
@@ -49,11 +46,7 @@ def resolve_by_code(db: Session, user: User, entity_type: str, code: str, projec
     if not projects:
         raise not_found("目标不存在")
     rows = db.scalars(
-        select(model).where(
-            model.code == code,
-            model.project_id.in_([p.id for p in projects]),
-            model.deleted_at.is_(None),
-        )
+        base.where(model.project_id.in_([p.id for p in projects]))
     ).all()
     if not rows:
         raise not_found("目标不存在")

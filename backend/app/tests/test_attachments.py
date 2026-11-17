@@ -119,7 +119,7 @@ class TestAttachmentService:
         other_page = svc.list_attachments(db, world["admin"], "requirement", rid, None, 20, other.id)
         assert [item["file_name"] for item in other_page["items"]] == ["unrelated.txt"]
 
-    def test_delete_follows_parent(self, db: Session, world: dict, isolated_storage):
+    def test_delete_parent_does_not_delete_attached_file(self, db: Session, world: dict, isolated_storage):
         r = make_requirement(db, world)
         rid = r["id"]
         svc.upload(db, world["agent"], world["project"].id, "requirement", rid, "doc.pdf", b"%PDF")
@@ -127,7 +127,7 @@ class TestAttachmentService:
 
         req_svc.delete_requirement(db, world["admin"], rid, confirm_task_count=0)
         rows = db.query(Attachment).all()
-        assert all(a.deleted_at is not None for a in rows)
+        assert all(a.deleted_at is None for a in rows)
 
     def test_download_soft_deleted_not_found(self, db: Session, world: dict, isolated_storage):
         r = make_requirement(db, world)
