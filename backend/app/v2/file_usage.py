@@ -4,7 +4,7 @@ from enum import StrEnum
 from uuid import UUID
 
 from pydantic import BaseModel
-from sqlalchemy import and_, case, delete, literal, select, tuple_, union
+from sqlalchemy import String, and_, case, cast, delete, literal, select, tuple_, union
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
@@ -16,6 +16,7 @@ from .file_models import FileAssociation, ProjectFile
 from .files import get_file, require_file_access
 from .page_cursor import decode_position, encode_position, scope_key
 from .resource_refs import ResourceKind, ResourceRef, parse_uuid
+from .timeline_models import TimelineEntry, TimelineFileReference
 from .wiki import visible_wiki_codes
 from .wiki_models import Wiki, WikiReference, WikiVersion
 
@@ -51,6 +52,7 @@ class AssociationReceipt(BaseModel):
 _ASSOC = FileAssociation
 _MODELS = {TargetKind.REQUIREMENT: Requirement, TargetKind.TASK: Task, TargetKind.WIKI: Wiki}
 _USAGE_LABELS = {TargetKind.PROJECT: "project", TargetKind.REQUIREMENT: "requirement", TargetKind.TASK: "task", TargetKind.WIKI: "wiki"}
+_TIMELINE = "timeline"
 
 
 def _task_has_active_parent():
@@ -71,14 +73,16 @@ def _active_target(kind: TargetKind, project_id: UUID, allowed_wikis=None):
 def _association_uses(project_id: UUID, file_id: UUID, allowed_wikis):
     predicates = (_ASSOC.project_id == project_id, _ASSOC.file_id == file_id)
     yield select(literal(TargetKind.PROJECT.value).label("kind"), _ASSOC.target_id,
-                 Project.name.label("label"), literal(0).label("version"), literal(True).label("current")).select_from(_ASSOC).join(
+                 Project.name.label("label"), literal(0).label("version"), literal(True).label("current"),
+                 literal(None, String()).label("requirement_code")).select_from(_ASSOC).join(
         Project, Project.id == _ASSOC.project_id,
     ).where(*predicates, _ASSOC.target_kind == TargetKind.PROJECT.value, _ASSOC.target_id == str(project_id), Project.deleted_at.is_(None))
 
     for kind, model in _MODELS.items():
         version = Wiki.version_no if kind == TargetKind.WIKI else literal(0)
         yield select(literal(kind.value).label("kind"), _ASSOC.target_id, model.title.label("label"),
-                     version.label("version"), literal(True).label("current")).select_from(_ASSOC).join(
+                     version.label("version"), literal(True).label("current"),
+                     literal(None, String()).label("requirement_code")).select_from(_ASSOC).join(
             model, and_(model.project_id == _ASSOC.project_id, model.code == _ASSOC.target_id),
         ).where(*predicates, _ASSOC.target_kind == kind.value, _active_target(kind, project_id, allowed_wikis))
 
@@ -88,7 +92,7 @@ def _wiki_uses(project_id: UUID, file_id: UUID, allowed_wikis, include_history: 
     statement = select(
         literal(TargetKind.WIKI.value).label("kind"), WikiReference.wiki_code.label("target_id"),
         case((current, Wiki.title), else_=WikiVersion.title).label("label"),
-        WikiReference.version_no.label("version"), current.label("current"),
+        WikiReference.version_no.label("version"), current.label("current"), literal(None, String()).label("requirement_code"),
     ).select_from(WikiReference).join(Wiki, and_(
         Wiki.project_id == WikiReference.project_id, Wiki.code == WikiReference.wiki_code,
     )).join(WikiVersion, and_(
@@ -97,6 +101,21 @@ def _wiki_uses(project_id: UUID, file_id: UUID, allowed_wikis, include_history: 
     )).where(
         WikiReference.project_id == project_id, WikiReference.target_kind == ResourceKind.FILE.value,
         WikiReference.target_id == str(file_id), WikiReference.wiki_code.in_(allowed_wikis),
+    )
+    return statement if include_history else statement.where(current)
+
+
+def _timeline_uses(project_id: UUID, file_id: UUID, include_history: bool):
+    ref = TimelineFileReference
+    current = TimelineEntry.latest_version == ref.version
+    statement = select(
+        literal(_TIMELINE).label("kind"), cast(ref.entry_id, String()).label("target_id"),
+        Requirement.title.label("label"), ref.version.label("version"), current.label("current"),
+        TimelineEntry.requirement_code,
+    ).select_from(ref).join(TimelineEntry, TimelineEntry.id == ref.entry_id).join(Requirement, and_(
+        Requirement.project_id == TimelineEntry.project_id, Requirement.code == TimelineEntry.requirement_code,
+    )).where(
+        TimelineEntry.project_id == project_id, ref.file_id == file_id, Requirement.deleted_at.is_(None),
     )
     return statement if include_history else statement.where(current)
 
@@ -120,7 +139,8 @@ def list_usage(
     position = decode_position(scope, cursor)
     allowed_wikis = visible_wiki_codes(project_id)
     uses = union(*_association_uses(project_id, file_id, allowed_wikis),
-                 _wiki_uses(project_id, file_id, allowed_wikis, include_history)).subquery()
+                 _wiki_uses(project_id, file_id, allowed_wikis, include_history),
+                 _timeline_uses(project_id, file_id, include_history)).subquery()
     order = (uses.c.kind, uses.c.target_id, -uses.c.version)
     statement = select(uses)
     if position is not None:
@@ -128,14 +148,26 @@ def list_usage(
                 or type(position[2]) is not int or not -2_147_483_647 <= position[2] <= 0):
             raise invalid_request("文件使用位置游标无效")
         try:
-            kind = TargetKind(position[0])
-            _href(project_id, kind, position[1])
+            if position[0] == _TIMELINE:
+                entry = UUID(position[1])
+                if position[1] not in (str(entry), entry.hex) or position[2] == 0:
+                    raise ValueError("invalid timeline position")
+            else:
+                _href(project_id, TargetKind(position[0]), position[1])
         except (ValueError, AppError) as exc:
             raise invalid_request("文件使用位置游标无效") from exc
         statement = statement.where(tuple_(*order) > tuple_(*position))
     rows = list(db.execute(statement.order_by(*order).limit(limit + 1)))
     items = []
     for row in rows[:limit]:
+        if row.kind == _TIMELINE:
+            path = _href(project_id, TargetKind.REQUIREMENT, row.requirement_code)
+            label = f"{row.label} · 时间轴"
+            if not row.current:
+                path = f"{path}?timelineVersion={row.version}"
+                label = f"{label} · v{row.version}"
+            items.append(UsageItem(href=f"{path}#timeline-{UUID(row.target_id)}", label=label, kind=_TIMELINE, current=row.current))
+            continue
         kind = TargetKind(row.kind)
         href, label = _href(project_id, kind, row.target_id), row.label
         if kind == TargetKind.WIKI and not row.current:

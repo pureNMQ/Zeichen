@@ -1,4 +1,5 @@
 from hashlib import sha256
+from uuid import uuid4
 
 from sqlalchemy import func, select
 
@@ -8,7 +9,7 @@ from app.v2.import_legacy_timeline import import_timeline
 from app.v2.import_legacy_wiki import import_wiki
 from app.v2 import import_legacy_files
 from app.v2.file_models import FileAssociation, ProjectFile
-from app.v2.timeline_models import TimelineEntry, TimelineRevision
+from app.v2.timeline_models import TimelineEntry, TimelineFileReference, TimelineRevision
 from app.v2.wiki_models import Wiki, WikiReference, WikiVersion
 
 
@@ -45,11 +46,13 @@ def test_import_history_preserves_source_and_does_not_guess_reparented_task(db, 
     pid = world["project"].id
     actor = world["admin"].id
     timestamp = world["project"].created_at
+    file_id = uuid4()
+    body = f"retained text [file](/projects/{pid}/files/{file_id})"
     db.add(Requirement(project_id=pid, code="REQ-1", title="Requirement"))
     db.flush()
     db.add(Task(project_id=pid, code="TASK-1", requirement_id="REQ-1", title="Moved Task"))
     comment = Comment(project_id=pid, target_type="requirement", target_id="REQ-1",
-                      author_id=actor, body="retained text", deleted_at=timestamp)
+                      author_id=actor, body=body, deleted_at=timestamp)
     moved = Activity(project_id=pid, target_type="task", target_id="TASK-1", action="update", summary="关联需求")
     original = Activity(project_id=pid, target_type="requirement", target_id="REQ-1",
                         actor_id=actor, action="status", summary="old event", created_at=timestamp)
@@ -61,11 +64,13 @@ def test_import_history_preserves_source_and_does_not_guess_reparented_task(db, 
     assert [(item.source_id, item.reason) for item in exceptions] == [(str(moved.id), "task_requirement_at_event_unknown")]
     entry = db.get(TimelineEntry, comment.id)
     assert entry.actor_id == actor and entry.occurred_at == comment.created_at
-    assert db.get(TimelineRevision, (comment.id, 1)).body == "retained text"
+    assert db.get(TimelineRevision, (comment.id, 1)).body == body
+    assert db.get(TimelineFileReference, (comment.id, 1, file_id)) is not None
     assert db.get(TimelineRevision, (comment.id, 2)).kind == "withdraw"
     assert db.get(TimelineEntry, original.id).event_data["summary"] == "old event"
     assert import_timeline(db)[0]["already_imported"] == 2
     assert db.scalar(select(func.count()).select_from(TimelineEntry)) == 2
+    assert db.scalar(select(func.count()).select_from(TimelineFileReference)) == 1
 
 
 def test_import_wiki_preserves_independent_versions_links_and_frontmatter_samples(db, world):

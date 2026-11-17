@@ -123,3 +123,11 @@ def list_timeline_revisions(
         db, user, _scope(project_id, requirement_id), parse_uuid(entry_id, "entry_id"),
         cursor=cursor, limit=limit,
     )
+
+
+@router.get("/{entry_id}/revisions/{version}")
+def get_timeline_revision(
+    project_id: str, requirement_id: str, entry_id: str, version: int,
+    user: User = Depends(current_user), db: Session = Depends(get_db),
+) -> dict:
+    return service.get_revision(db, user, _scope(project_id, requirement_id), parse_uuid(entry_id, "entry_id"), version)

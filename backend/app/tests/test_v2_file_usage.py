@@ -9,7 +9,9 @@ from app.models import Project, Requirement, Task
 from app.security import hash_password
 from app.tests.conftest import login
 from app.tests.test_mcp_e2e import RawMcpClient, mcp_server  # noqa: F401
+from app.v2 import timeline
 from app.v2.file_models import FileAssociation, ProjectFile
+from app.v2.resource_refs import ResourceKind, ResourceRef
 from app.v2.wiki import WikiContent, WikiPatch, create_wiki, delete_wiki, update_wiki
 
 
@@ -98,3 +100,54 @@ def test_mcp_can_link_list_and_unlink_same_project_file_without_touching_bytes(m
     unlinked = client.call("files.unlink", **association)
     assert not unlinked["linked"] and unlinked["changed"]
     assert client.call("files.usages", **scope) == {"items": [], "next_cursor": None}
+
+
+def test_timeline_uses_survive_revision_and_withdrawal_with_scoped_history(client, db, world):
+    actor, project_id = world["admin"], world["project"].id
+    other = Project(team_id=world["team"].id, name="Other project")
+    db.add(other)
+    db.flush()
+    own = Requirement(project_id=project_id, code="REQ-1", title="Manual", status="backlog")
+    remote = Requirement(project_id=other.id, code="REQ-1", title="Remote requirement", status="backlog")
+    file_id = uuid4()
+    db.add_all([own, remote, ProjectFile(project_id=project_id, id=file_id, name="manual.png",
+                                       media_type="image/png", size=1, sha256="0" * 64)])
+    db.flush()
+    scope = ResourceRef(project_id, ResourceKind.REQUIREMENT, own.code)
+    ref = ResourceRef(project_id, ResourceKind.FILE, str(file_id)).path
+    remote_ref = ResourceRef(other.id, ResourceKind.FILE, str(file_id)).path
+    first = f"[link]({ref})\n\n![preview]({ref})"
+    entry = UUID(timeline.append_entry(db, actor, scope, request_id=uuid4(), body=first)["entry_id"])
+    timeline.append_entry(db, actor, scope, request_id=uuid4(),
+                          body=f"`[link]({ref})`\n\n```md\n[link]({ref})\n```\n\n[remote]({remote_ref})")
+    timeline.append_entry(db, actor, ResourceRef(other.id, ResourceKind.REQUIREMENT, remote.code),
+                          request_id=uuid4(), body=f"[remote]({remote_ref})")
+    timeline.revise_entry(db, actor, scope, entry, request_id=uuid4(), expected_version=1, body=f"![revised]({ref})")
+    db.commit()
+
+    login(client, "admin", "admin-pass-1")
+    endpoint = f"/api/v2/projects/{project_id}/files/{file_id}/usage"
+    anchor = f"#timeline-{entry}"
+    current = {"kind": "timeline", "current": True, "label": "Manual · 时间轴", "href": scope.path + anchor}
+    historical = {"kind": "timeline", "current": False, "label": "Manual · 时间轴 · v1",
+                  "href": f"{scope.path}?timelineVersion=1{anchor}"}
+    assert client.get(endpoint).json() == {"items": [current], "next_cursor": None}
+    page = client.get(endpoint, params={"include_history": True, "limit": 1}).json()
+    assert page["items"] == [current]
+    assert client.get(endpoint, params={"include_history": True, "limit": 1, "cursor": page["next_cursor"]}).json() == {
+        "items": [historical], "next_cursor": None,
+    }
+
+    timeline.withdraw_entry(db, actor, scope, entry, request_id=uuid4(), expected_version=2, reason="Withdrawn")
+    db.commit()
+    assert client.get(endpoint).json() == {"items": [], "next_cursor": None}
+    after = client.get(endpoint, params={"include_history": True}).json()["items"]
+    assert [item["current"] for item in after] == [False, False]
+    assert after[1] == historical
+    revision = f"/api{scope.path}/timeline/{entry}/revisions/1"
+    assert client.get(revision).json()["body"] == first
+    assert client.get(revision.replace(str(project_id), str(other.id))).status_code == 404
+    own.deleted_at = datetime.now(UTC)
+    db.commit()
+    assert client.get(endpoint, params={"include_history": True}).json()["items"] == []
+    assert client.get(revision).status_code == 404

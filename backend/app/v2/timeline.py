@@ -19,6 +19,7 @@ from .page_cursor import decode_time_position
 from .page_cursor import encode_position as _encode
 from .page_cursor import scope_key
 from .resource_refs import ResourceKind, ResourceRef
+from .timeline_file_refs import append_revision
 from .timeline_models import TimelineEntry, TimelineRevision
 
 
@@ -115,8 +116,7 @@ def append_entry(
         )
         db.add(entry)
         db.flush()
-        db.add(_new_revision(entry, actor, 1, "create", body))
-        db.flush()
+        append_revision(db, _new_revision(entry, actor, 1, "create", body))
         emit_markdown_notifications(
             db, actor.id, source=scope, source_version=1, body=body, timeline_entry_id=entry.id,
             reply_author_id=replied_to.actor_id if replied_to else None,
@@ -180,8 +180,7 @@ def _mutate_revision(
         ).scalar_one_or_none()
         if changed is None:
             raise conflict("时间轴版本已更新，请重新读取后再操作")
-        db.add(_new_revision(entry, actor, version, kind, body, reason))
-        db.flush()
+        append_revision(db, _new_revision(entry, actor, version, kind, body, reason))
         if body is not None:
             emit_markdown_notifications(
                 db, actor.id, source=scope, source_version=version, body=body,
@@ -370,6 +369,24 @@ def get_context(db: Session, actor: User, scope: ResourceRef, entry_id: UUID,
     ]}
 
 
+def _revision_data(row: TimelineRevision) -> dict[str, Any]:
+    return {
+        "version": row.version, "kind": row.kind, "body": row.body, "reason": row.reason,
+        "actor_id": str(row.actor_id) if row.actor_id else None,
+        "created_at": _utc(row.created_at).isoformat(),
+    }
+
+
+def get_revision(db: Session, actor: User, scope: ResourceRef, entry_id: UUID, version: int) -> dict[str, Any]:
+    _authorize(db, actor, scope, "viewer")
+    if not 1 <= version <= MAX_VERSION:
+        raise invalid_request("无效的时间轴修订版本")
+    row = db.scalar(select(_R).where(*_revisions(scope), _R.entry_id == entry_id, _R.version == version))
+    if row is None:
+        raise not_found("时间轴修订不存在")
+    return _revision_data(row)
+
+
 def list_revisions(
     db: Session, actor: User, scope: ResourceRef, entry_id: UUID, *,
     cursor: str | None = None, limit: int = 20,
@@ -387,10 +404,6 @@ def list_revisions(
     rows = db.scalars(statement.order_by(_R.version.desc()).limit(limit + 1)).all()
     items = rows[:limit]
     return {
-        "items": [{
-            "version": row.version, "kind": row.kind, "body": row.body, "reason": row.reason,
-            "actor_id": str(row.actor_id) if row.actor_id else None,
-            "created_at": _utc(row.created_at).isoformat(),
-        } for row in items],
+        "items": [_revision_data(row) for row in items],
         "next_cursor": _encode(cursor_scope, [items[-1].version]) if len(rows) > limit else None,
     }

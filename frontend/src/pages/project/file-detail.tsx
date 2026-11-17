@@ -11,7 +11,7 @@ import { useCurrentProject } from '@/lib/current-project'
 import { projectFileApiPath, projectFileContentUrl, type ProjectFileSummary } from '@/lib/project-files'
 import { projectResourceHref } from '@/lib/project-links'
 
-type Usage = { href: string; label: string; kind: 'project' | 'requirement' | 'task' | 'wiki'; current: boolean }
+type Usage = { href: string; label: string; kind: 'project' | 'requirement' | 'task' | 'wiki' | 'timeline'; current: boolean }
 type FileAction = 'rename' | 'delete'
 
 function useFileUsage(projectId: string, fileId: string, history: boolean) {

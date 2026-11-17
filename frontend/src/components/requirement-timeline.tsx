@@ -49,6 +49,23 @@ const dateFormat = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeS
 
 type Revision = { version: number; kind: string; body: string | null; reason: string | null; created_at: string }
 
+function TimelineRevisionPreview({ endpoint, version }: { endpoint: string; version: string }) {
+  const result = useQuery({
+    queryKey: ['timeline-revision', endpoint, version],
+    queryFn: ({ signal }) => api.get<Revision>(`${endpoint}/revisions/${version}`, signal),
+    retry: false,
+  })
+  return <div className="space-y-2 rounded-md border p-2">
+    <p className="text-sm font-medium">历史记录 · 第 {version} 版</p>
+    <ErrorNotification message={result.error?.message} />
+    {result.isLoading && <p role="status">正在读取历史…</p>}
+    {result.data?.reason && <p className="text-sm text-muted-foreground">{result.data.reason}</p>}
+    {result.data && (result.data.body === null ? <p className="text-sm">此版本撤回了正文。</p>
+      : <VditorMarkdownViewer markdown={result.data.body} />)}
+    {result.isError && <Button size="sm" variant="outline" onClick={() => void result.refetch()}>重试历史版本</Button>}
+  </div>
+}
+
 function TimelineHistory({ endpoint }: { endpoint: string }) {
   const result = useInfiniteQuery({
     queryKey: ['timeline-revisions', endpoint],
@@ -167,13 +184,14 @@ function TimelineActor({ projectId, actorId, fallback, isAgent }: {
 }
 
 function TimelineRecord({
-  entry, projectId, url, queryKey, focused, linkToEntry, onReply, canModerate,
+  entry, projectId, url, queryKey, focused, historicalVersion, linkToEntry, onReply, canModerate,
 }: {
   entry: TimelineEntry
   projectId: string
   url: string
   queryKey: readonly string[]
   focused: boolean
+  historicalVersion: string | null
   linkToEntry: (entryId: string) => string
   onReply?: (entry: TimelineEntry) => void
   canModerate: boolean
@@ -185,7 +203,7 @@ function TimelineRecord({
   const endpoint = `${url}/${encodeURIComponent(entry.id)}`
   const actorIsAuthor = !!user && user.id === entry.actor_id
   const canManage = entry.kind === 'manual' && !entry.withdrawn && !!onReply && (actorIsAuthor || canModerate)
-  const showBody = !entry.withdrawn && entry.kind === 'manual' && (expanded || focused)
+  const showBody = !entry.withdrawn && entry.kind === 'manual' && (expanded || (focused && !historicalVersion))
   const detail = useQuery({
     queryKey: [...queryKey, 'detail', entry.id],
     queryFn: ({ signal }) => api.get<EntryDetail>(endpoint, signal),
@@ -219,7 +237,8 @@ function TimelineRecord({
       >
         回复：{replyLabel(entry.reply_to)}
       </Link>}
-      {entry.withdrawn || currentDetail?.withdrawn ? <p className="text-sm text-muted-foreground">此记录已撤回</p>
+      {historicalVersion && entry.kind === 'manual' ? <TimelineRevisionPreview endpoint={endpoint} version={historicalVersion} />
+        : entry.withdrawn || currentDetail?.withdrawn ? <p className="text-sm text-muted-foreground">此记录已撤回</p>
         : entry.kind === 'system' ? <p className="text-sm">
           {typeof entry.event_data?.summary === 'string' ? entry.event_data.summary : eventLabel(entry.event_type)}
           {status && ` · ${status}`}
@@ -273,6 +292,9 @@ export function RequirementTimeline({ projectId, requirementId, canWrite, canMod
   const [searchParams, setSearchParams] = useSearchParams()
   const { hash } = useLocation()
   const anchor = searchParams.get('entry') ?? (hash.startsWith('#timeline-') ? hash.slice(10) : null)
+  const versionParam = searchParams.get('timelineVersion')
+  const historicalVersion = versionParam && /^[1-9]\d{0,9}$/.test(versionParam) && Number(versionParam) <= 2_147_483_647
+    ? versionParam : null
   const queryKey = ['requirement-timeline', projectId, requirementId] as const
   const url = `${projectResourceHref(projectId, 'requirements', requirementId)}/timeline`
   const lookup = useProjectCompletion(projectId)
@@ -311,6 +333,7 @@ export function RequirementTimeline({ projectId, requirementId, canWrite, canMod
 
   function paramsForEntry(entryId: string | null) {
     const params = new URLSearchParams(searchParams)
+    params.delete('timelineVersion')
     if (entryId) params.set('entry', entryId)
     else params.delete('entry')
     return params
@@ -341,6 +364,7 @@ export function RequirementTimeline({ projectId, requirementId, canWrite, canMod
       setReply(null)
       setSearchParams((current) => {
         const params = new URLSearchParams(current)
+        params.delete('timelineVersion')
         params.set('entry', receipt.entry_id)
         return params
       }, { replace: true })
@@ -392,6 +416,7 @@ export function RequirementTimeline({ projectId, requirementId, canWrite, canMod
           queryKey={queryKey}
           canModerate={canModerate}
           focused={entry.id === anchor}
+          historicalVersion={entry.id === anchor ? historicalVersion : null}
           linkToEntry={(entryId) => `?${paramsForEntry(entryId)}`}
           onReply={canWrite && !saving && !uploading ? selectReply : undefined}
         />)}

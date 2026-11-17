@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..models import Activity, Comment, Requirement, Task
+from .timeline_file_refs import append_revision
 from .timeline_models import TimelineEntry, TimelineRevision
 
 
@@ -54,7 +55,7 @@ def import_timeline(db: Session) -> tuple[dict[str, int], list[ImportException]]
         )
         if not write(entry, comment):
             continue
-        db.add(TimelineRevision(
+        append_revision(db, TimelineRevision(
             project_id=comment.project_id, requirement_code=comment.target_id, entry_id=comment.id,
             version=1, kind="create", body=comment.body, actor_id=comment.author_id,
             created_at=comment.created_at,

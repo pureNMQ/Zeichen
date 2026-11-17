@@ -85,6 +85,9 @@ function respond(path: string, options?: RequestInit) {
   if (bare === `${timeline}/${older}`) {
     return Response.json({ ...timelineEntry(older, '', projectId), body: '较早记录的完整正文' })
   }
+  if (bare === `${timeline}/${older}/revisions/1`) {
+    return Response.json({ version: 1, kind: 'create', body: '引用文件时的原始正文', reason: null, created_at: timestamp })
+  }
   if (bare === `${timeline}/${appended}/context`) {
     return Response.json({ anchor_id: appended, items: [timelineEntry(appended, '发布后的记录', projectId)] })
   }
@@ -111,7 +114,11 @@ function respond(path: string, options?: RequestInit) {
   }
   if (bare === `/api/v2/projects/${a}/files/${attachment}/usage`) {
     const history = url.searchParams.get('include_history') === 'true'
-      ? [{ href: `/projects/${a}/wiki/DOC-1?version=2`, label: '设计手册 · v2', kind: 'wiki', current: false }]
+      ? [
+        { href: `/projects/${a}/wiki/DOC-1?version=2`, label: '设计手册 · v2', kind: 'wiki', current: false },
+        { href: `/projects/${a}/requirements/REQ-1?timelineVersion=1#timeline-${older}`,
+          label: '需求时间轴 · v1', kind: 'timeline', current: false },
+      ]
       : []
     return Response.json({
       items: [{ href: `/projects/${a}/wiki/DOC-1`, label: '设计手册', kind: 'wiki', current: true }, ...history,
@@ -543,6 +550,17 @@ describe('canonical project routes', () => {
     expect(await dialog.findByText('第 2 版正文')).toBeVisible()
     await user.click(dialog.getByRole('button', { name: '关闭' }))
     expect(await screen.findByRole('heading', { name: '同码 Wiki A' })).toBeVisible()
+  })
+
+  it('opens the exact historical timeline revision from file usage and returns to recent entries', async () => {
+    const user = open(`/projects/${a}/files/${attachment}`)
+    await user.click(await screen.findByRole('button', { name: '包含历史版本' }))
+    await user.click(await screen.findByRole('link', { name: '需求时间轴 · v1' }))
+    expect(await screen.findByText('引用文件时的原始正文')).toBeVisible()
+    expect(screen.queryByText('较早记录的完整正文')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '返回最新记录' }))
+    expect(await screen.findByText('近期回复')).toBeVisible()
+    expect(screen.queryByText('引用文件时的原始正文')).not.toBeInTheDocument()
   })
 
   it('shows cross-reference impact before deleting the scoped file', async () => {

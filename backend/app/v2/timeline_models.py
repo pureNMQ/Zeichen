@@ -70,3 +70,19 @@ class TimelineRevision(Base):
     reason: Mapped[str | None] = mapped_column(String(512))
     actor_id: Mapped[UUID | None] = mapped_column(ForeignKey("user.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class TimelineFileReference(Base):
+    __tablename__ = "v2_timeline_file_reference"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["entry_id", "version"], ["v2_timeline_revision.entry_id", "v2_timeline_revision.version"],
+            ondelete="CASCADE",
+        ),
+        Index("ix_v2_timeline_file_reference_file", "file_id", "entry_id", "version"),
+    )
+
+    entry_id: Mapped[UUID] = mapped_column(primary_key=True)
+    version: Mapped[int] = mapped_column(primary_key=True)
+    # Missing or deleted files must not erase the link recorded in a revision.
+    file_id: Mapped[UUID] = mapped_column(primary_key=True)
