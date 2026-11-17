@@ -12,6 +12,7 @@ import { ProjectsPage } from '@/pages/projects'
 import { ProjectLayout } from '@/pages/project/layout'
 import { CanonicalPersonRoute, CanonicalProjectRoute, CanonicalTaskRoute } from '@/pages/project/canonical-routes'
 import { ProjectFileDetailPage } from '@/pages/project/file-detail'
+import { ProjectWikiPage } from '@/pages/project/wiki'
 import { RequirementsPage } from '@/pages/requirements'
 import { RequirementDetailPage } from '@/pages/requirement-detail'
 import { SetPasswordPage } from '@/pages/set-password'
@@ -100,8 +101,8 @@ export function App() {
           <Route path="requirements" element={<RequirementsPage />} />
           <Route path="requirements/:id" element={<RequirementDetailPage />} />
           <Route path="tasks/:id" element={<CanonicalTaskRoute />} />
-          <Route path="wiki" element={<DocumentWorkbenchPage module="wiki" />} />
-          <Route path="wiki/:id" element={<DocumentWorkbenchPage module="wiki" />} />
+          <Route path="wiki" element={<ProjectWikiPage />} />
+          <Route path="wiki/:id" element={<ProjectWikiPage />} />
           <Route path="people/:id" element={<CanonicalPersonRoute />} />
           <Route path="files/:id" element={<ProjectFileDetailPage />} />
         </Route>

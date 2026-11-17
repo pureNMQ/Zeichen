@@ -3,9 +3,10 @@ from datetime import datetime, timezone
 import pytest
 
 from app.errors import AppError
-from app.models import Document, Project
+from app.models import Project
 from app.services.requirements import create_requirement
 from app.v2.project_completion import LIMIT, completion_candidates, get_person
+from app.v2.wiki_models import Wiki
 from app.tests.conftest import login
 
 
@@ -40,15 +41,20 @@ def test_reference_candidates_limit_and_skip_same_short_codes_in_other_projects(
     rid = create_requirement(db, world["admin"], project.id, "活动需求").code
     assert create_requirement(db, world["admin"], other.id, "其他项目需求").code == rid
     db.add_all([
-        Document(project_id=project.id, code=f"DOC-{i}", title=f"发布手册 {i:02}", doc_type="wiki")
+        Wiki(project_id=project.id, code=f"DOC-{i}", title=f"发布手册 {i:02}", body="", version_no=1)
         for i in range(1, LIMIT + 3)
     ])
-    db.add(Document(project_id=other.id, code="DOC-1", title="不应被找到", doc_type="wiki"))
+    db.add(Wiki(project_id=other.id, code="DOC-1", title="不应被找到", body="", version_no=1))
+    db.add(Wiki(project_id=project.id, code="DOC-444", title="隐藏父节点", body="", version_no=1,
+                deleted_at=datetime.now(timezone.utc)))
+    db.flush()
+    db.add(Wiki(project_id=project.id, code="DOC-445", title="隐藏子节点", body="", version_no=1, parent_id="DOC-444"))
     db.commit()
 
     items = completion_candidates(db, world["member"], project.id, "reference", "DOC-")
     assert len(items) == LIMIT
     assert all(row["href"] == f"/projects/{project.id}/wiki/{row['id']}" for row in items)
+    assert completion_candidates(db, world["member"], project.id, "reference", "隐藏") == []
     matches = completion_candidates(db, world["member"], project.id, "reference", rid)
     assert [row["label"] for row in matches] == ["活动需求"]
     with pytest.raises(AppError) as error:

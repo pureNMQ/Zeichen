@@ -100,9 +100,26 @@ function respond(path: string, options?: RequestInit) {
   }
   if (bare === '/api/documents/wiki/DOC-1') {
     return Response.json({
-      id: 'DOC-1', project_id: projectId, title: `同码 Wiki ${name}`,
-      content: `正文 ${name}`, metadata: {}, created_at: timestamp, updated_at: timestamp,
+      id: 'DOC-1', project_id: projectId, title: `旧版 Wiki ${name}`,
+      content: `旧版正文 ${name}`, metadata: {}, created_at: timestamp, updated_at: timestamp,
     })
+  }
+  const v2Wiki = `/api/v2/projects/${projectId}/wiki`
+  const v2Document = {
+    id: 'DOC-1', project_id: projectId, title: `同码 Wiki ${name}`,
+    parent_id: null, version: 4, body: `正文 ${name}`, summary: '迁移摘要', category: '研究', tags: ['测量，质检'],
+  }
+  if (bare === `${v2Wiki}/DOC-1`) {
+    if (options?.method === 'PATCH') return Response.json({ message: '当前 Wiki 版本已变化' }, { status: 409 })
+    return Response.json(v2Document)
+  }
+  if (bare === `${v2Wiki}/TERM-8`) {
+    return Response.json({ ...v2Document, id: 'TERM-8', title: '迁移词条' })
+  }
+  if (bare === `${v2Wiki}/DOC-404`) return Response.json({ message: 'Wiki 不存在' }, { status: 404 })
+  if (bare === v2Wiki) {
+    if (options?.method === 'POST') return Response.json({ id: 'DOC-1', project_id: projectId, version: 1 }, { status: 201 })
+    return Response.json({ items: [v2Document], next_cursor: null })
   }
   return Response.json({ items: [] })
 }
@@ -150,6 +167,7 @@ function open(path: string) {
         <MemoryRouter initialEntries={[path]}>
           <Link to={`/projects/${a}/requirements/REQ-1`}>打开 A 同码需求</Link>
           <Link to={`/projects/${a}/wiki/DOC-1`}>打开 A 同码 Wiki</Link>
+          <Link to="/documents/wiki/DOC-1">旧版 Wiki</Link>
           <App />
         </MemoryRouter>
       </NotificationProvider>
@@ -188,7 +206,8 @@ describe('canonical project routes', () => {
     const user = open(`/projects/${b}/wiki/DOC-1`)
     expect(await screen.findByRole('heading', { name: '同码 Wiki B' })).toBeVisible()
     expect(screen.getByText('正文 B')).toBeVisible()
-    expect(fetchMock).toHaveBeenCalledWith(`/api/documents/wiki/DOC-1/references?project_id=${b}`, expect.anything())
+    expect(fetchMock).toHaveBeenCalledWith(`/api/v2/projects/${b}/wiki/DOC-1`, expect.anything())
+    expect(fetchMock.mock.calls.some(([path]) => path.startsWith('/api/documents/wiki/DOC-1'))).toBe(false)
     await user.click(screen.getByRole('link', { name: '打开 A 同码 Wiki' }))
     expect(await screen.findByRole('heading', { name: '同码 Wiki A' })).toBeVisible()
     expect(screen.getByText('正文 A')).toBeVisible()
@@ -225,6 +244,48 @@ describe('canonical project routes', () => {
     )
     await user.keyboard('{Enter}')
     expect(editor).toHaveValue(`正文 A [@橘猫](</projects/${a}/people/${author}>) ![橘猫.png](</projects/${a}/files/${attachment}>) `)
+  })
+
+  it('opens migrated TERM references and retains the old Wiki route during transition', async () => {
+    const user = open(`/projects/${a}/wiki/TERM-8`)
+    expect(await screen.findByRole('heading', { name: '迁移词条' })).toBeVisible()
+    await user.click(screen.getByRole('link', { name: '旧版 Wiki' }))
+    expect(await screen.findByRole('heading', { name: '旧版 Wiki A' })).toBeVisible()
+    expect(screen.getByText('旧版正文 A')).toBeVisible()
+  })
+
+  it('sends a versioned, field-only Wiki patch and keeps the draft on conflict', async () => {
+    const user = open(`/projects/${a}/wiki/DOC-1?mode=edit`)
+    const summary = await screen.findByRole('textbox', { name: '摘要' })
+    await user.clear(summary)
+    await user.type(summary, '新摘要')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('当前 Wiki 版本已变化。草稿已保留。')
+    expect(summary).toHaveValue('新摘要')
+    const patch = fetchMock.mock.calls.find(([url, opts]) => url === `/api/v2/projects/${a}/wiki/DOC-1` && opts?.method === 'PATCH')
+    expect(JSON.parse(String(patch?.[1]?.body))).toEqual({ expected_version: 4, patch: { summary: '新摘要' } })
+  })
+
+  it('creates a Wiki from the scoped v2 list', async () => {
+    const user = open(`/projects/${a}/wiki`)
+    expect(await screen.findByRole('link', { name: /同码 Wiki A/ })).toHaveAttribute('href', `/projects/${a}/wiki/DOC-1`)
+    await user.click(screen.getByRole('link', { name: '新建 Wiki' }))
+    await user.type(screen.getByRole('textbox', { name: '标题' }), '新手册')
+    await user.type(screen.getByRole('textbox', { name: '标签' }), '维护，内部')
+    await user.type(screen.getByRole('textbox', { name: 'Markdown 正文' }), '新建正文')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    expect(await screen.findByRole('heading', { name: '同码 Wiki A' })).toBeVisible()
+    const post = fetchMock.mock.calls.find(([url, opts]) => url === `/api/v2/projects/${a}/wiki` && opts?.method === 'POST')
+    expect(JSON.parse(String(post?.[1]?.body))).toEqual({
+      title: '新手册', body: '新建正文', summary: null, category: null, tags: ['维护', '内部'],
+      parent_id: null, request_id: expect.any(String),
+    })
+  })
+
+  it('does not revive a missing canonical document from the old Wiki service', async () => {
+    open(`/projects/${a}/wiki/DOC-404`)
+    expect(await screen.findByRole('alert')).toHaveTextContent('Wiki 不存在')
+    expect(fetchMock.mock.calls.some(([path]) => path.startsWith('/api/documents/wiki/'))).toBe(false)
   })
 
   it('opens the person chosen by a canonical mention', async () => {

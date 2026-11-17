@@ -6,10 +6,12 @@ from sqlalchemy import and_, literal, or_, select, union_all
 from sqlalchemy.orm import Session
 
 from ..errors import not_found
-from ..models import Document, Project, ProjectMember, Requirement, User, WorkspaceMember
+from ..models import Project, ProjectMember, Requirement, User, WorkspaceMember
 from ..services.permissions import get_accessible_project
 from ..services.user_profiles import display_name
 from .resource_refs import ResourceKind, ResourceRef
+from .wiki import visible_wiki_codes
+from .wiki_models import Wiki
 
 LIMIT = 20
 
@@ -74,7 +76,8 @@ def _references(db: Session, project_id: uuid.UUID, query: str) -> list[dict]:
             ))
         return stmt
 
-    combined = union_all(candidates(Requirement, "requirement"), candidates(Document, "wiki")).subquery()
+    wiki_candidates = candidates(Wiki, "wiki").where(Wiki.code.in_(visible_wiki_codes(project_id)))
+    combined = union_all(candidates(Requirement, "requirement"), wiki_candidates).subquery()
     rows = db.execute(select(combined).order_by(combined.c.title, combined.c.kind, combined.c.code).limit(LIMIT))
     return [
         {
