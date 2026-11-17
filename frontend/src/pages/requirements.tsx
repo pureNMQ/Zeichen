@@ -65,8 +65,9 @@ function RequirementCard({
   onReject?: (r: RequirementRow) => void
 }) {
   const { routeProjectId } = useCurrentProject()
-  const href = routeProjectId
-    ? projectResourceHref(routeProjectId, 'requirements', r.id)
+  const projectId = routeProjectId ?? r.project_id
+  const href = projectId
+    ? projectResourceHref(projectId, 'requirements', r.id)
     : `/requirements/${r.id}`
   return (
     <Card>

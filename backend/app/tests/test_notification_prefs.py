@@ -69,14 +69,14 @@ class TestWatch:
         svc.watch_entity(db, world["member"], "requirement", rid)
         assert svc.is_watching(db, world["member"], "requirement", rid)
 
-    def test_watch_overrides_narrowing(self, db: Session, world: dict):
+    def test_watch_does_not_generate_notifications_for_status_changes(self, db: Session, world: dict):
         svc.update_preferences(db, world["admin"], {"requirement": False}, {"status": False})
         r = make_requirement(db, world, "被关注需求")
         assert admin_notifications(db, world) == []
         svc.watch_entity(db, world["admin"], "requirement", r["id"])
         req_svc.set_requirement_status(db, world["agent"], r["id"], "in_progress")
         notes = admin_notifications(db, world, r["id"])
-        assert any(n.action == "status" for n in notes)
+        assert notes == []
 
 
 class TestWatchApiRoutes:

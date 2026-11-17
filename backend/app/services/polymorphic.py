@@ -80,7 +80,7 @@ def record_activity(
     action: str,
     summary: str | None = None,
 ) -> Activity:
-    """业务变更审计:所有变更即时记 activity(§3.3 / §6.2 写入管线第一层),并生成站内通知。
+    """记录旧版审计，并把支持的需求和任务事实写入新版时间轴。
 
     target_id 列为字符串:实体目标存短码,project/repository 目标存 UUID 字符串(ADR 0002)。
     """
@@ -94,9 +94,20 @@ def record_activity(
         created_at=_now(),
     )
     db.add(activity)
-    from .notifications import notify_activity
+    if target_type in {"requirement", "task"} and action in {
+        "create", "update", "delete", "restore", "assign", "unassign", "reference", "blocker",
+    }:
+        from ..v2.resource_refs import ResourceKind, ResourceRef
+        from ..v2.timeline import record_system_event
 
-    notify_activity(db, activity)
+        source_task = str(target_id) if target_type == "task" else None
+        task = db.get(Task, (project_id, source_task)) if source_task is not None else None
+        requirement_id = str(target_id) if target_type == "requirement" else task.requirement_id if task else None
+        if requirement_id is not None:
+            record_system_event(
+                db, actor_id, ResourceRef(project_id, ResourceKind.REQUIREMENT, requirement_id),
+                event_type=f"{target_type}.{action}", event_data={"summary": summary}, source_task=source_task,
+            )
     return activity
 
 

@@ -124,7 +124,10 @@ function TimelineRecord({
         回复：{replyLabel(entry.reply_to)}
       </Link>}
       {entry.withdrawn || currentDetail?.withdrawn ? <p className="text-sm text-muted-foreground">此记录已撤回</p>
-        : entry.kind === 'system' ? <p className="text-sm">{eventLabel(entry.event_type)}{status && ` · ${status}`}</p>
+        : entry.kind === 'system' ? <p className="text-sm">
+          {typeof entry.event_data?.summary === 'string' ? entry.event_data.summary : eventLabel(entry.event_type)}
+          {status && ` · ${status}`}
+        </p>
           : showBody && body !== undefined && body !== null ? <VditorMarkdownViewer markdown={body} />
             : <p className="whitespace-pre-wrap break-words text-sm">{entry.body_preview}</p>}
       <ErrorNotification message={detail.isError && showBody ? '无法读取记录正文，请重试。' : null} />
