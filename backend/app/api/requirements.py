@@ -57,7 +57,7 @@ def get_requirement_in_project(
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    requirement = service.get_requirement_in_project(db, project_id, requirement_id)
+    requirement = service.get_requirement(db, user, requirement_id, project_id=project_id)
     return service._requirement_dict(db, requirement)
 
 

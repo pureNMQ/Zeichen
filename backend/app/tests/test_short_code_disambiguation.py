@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.errors import AppError
+from app.security import hash_password
 from app.services import documents as document_svc
 from app.services import requirements as req_svc
 from app.services import short_code_lookup
@@ -92,6 +93,18 @@ def logged_in(client: TestClient, collision: dict) -> dict:
 
 
 class TestRestDisambiguation:
+    def test_canonical_requirement_detail_requires_project_access(self, client: TestClient, db: Session, collision: dict):
+        collision["member"].password_hash = hash_password("bob-pass-1")
+        db.commit()
+        login(client, "bob", "bob-pass-1")
+        code = collision["req"]
+        own = client.get(f"/api/projects/{collision['p1'].id}/requirements/{code}")
+        hidden = client.get(f"/api/projects/{collision['p2'].id}/requirements/{code}")
+        missing = client.get(f"/api/projects/{collision['p2'].id}/requirements/REQ-999")
+        assert own.status_code == 200
+        assert hidden.status_code == missing.status_code == 404
+        assert hidden.json() == missing.json()
+
     def test_task_status_without_project_rejected(self, client: TestClient, logged_in: dict):
         resp = client.post(f"/api/tasks/{logged_in['task']}/status", json={"status": "in_progress"})
         assert resp.status_code == 400
