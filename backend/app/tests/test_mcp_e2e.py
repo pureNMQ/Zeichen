@@ -400,6 +400,7 @@ def test_structured_reference_tracks_canonical_wiki_over_mcp(mcp_server: dict):
     source_refs = client.call("ref.list", **scope, target_type="requirement", target_id=requirement["id"])
     assert source_refs["items"][0]["to_title"] == "已删除"
     assert "Renamed Wiki" not in json.dumps(source_refs)
+    assert client.call("requirements.delete", **scope, id=requirement["id"])["deleted"]
 
 
 def test_cursor_pagination_over_mcp(mcp_server: dict):
