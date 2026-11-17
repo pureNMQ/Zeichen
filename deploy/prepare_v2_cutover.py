@@ -257,6 +257,7 @@ class Preparation:
         checksums = {key: fingerprint(path) for key, path in source.items()}
         self.record.update({
             "target_attachment_volume": target_volume, "legacy_import_volume": legacy_volume,
+            "volume_owner_token": token,
             "candidate_commit": candidate["commit"], "backend_image": candidate["backend_image"],
             "frontend_image": candidate["frontend_image"], "alembic_target": candidate["database_target"],
             "postgres_container_id": container["Id"], "snapshot_root": str(args.snapshot),
