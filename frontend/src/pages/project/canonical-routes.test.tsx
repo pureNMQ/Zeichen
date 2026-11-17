@@ -112,6 +112,12 @@ function respond(path: string, options?: RequestInit) {
     }
     return Response.json(fileCandidate(a))
   }
+  if (bare === `/api/v2/projects/${a}/files/${attachment}/trash`) {
+    return Response.json({
+      ...fileCandidate(a), preview_href: null, download_href: null,
+      deleted_at: timestamp, deleted_by: '77777777-7777-4777-8777-777777777777',
+    })
+  }
   if (bare === `/api/v2/projects/${a}/files/${attachment}/usage`) {
     const history = url.searchParams.get('include_history') === 'true'
       ? [
@@ -531,10 +537,17 @@ describe('canonical project routes', () => {
     expect(screen.getByRole('status')).toHaveTextContent('已上传 橘猫.png')
   })
 
-  it('restores a file through its scoped project library', async () => {
+  it('views deleted file metadata and restores it through its scoped project library', async () => {
     const user = open(`/projects/${a}/files?state=deleted`)
     expect(await screen.findByRole('heading', { name: '文件回收站' })).toBeVisible()
-    await user.click(await screen.findByRole('button', { name: '恢复 橘猫.png' }))
+    const details = await screen.findByRole('button', { name: '查看 橘猫.png 详情' })
+    await user.click(details)
+    expect(details).toHaveAttribute('aria-expanded', 'true')
+    expect(await screen.findByText('77777777-7777-4777-8777-777777777777')).toBeVisible()
+    expect(screen.getByText('删除时间').nextElementSibling?.querySelector('time')).toHaveAttribute('datetime', timestamp)
+    expect(screen.queryByRole('link', { name: '下载 橘猫.png' })).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledWith(`/api/v2/projects/${a}/files/${attachment}/trash`, expect.anything())
+    await user.click(screen.getByRole('button', { name: '恢复 橘猫.png' }))
     expect(await screen.findByText('没有可恢复的文件')).toBeVisible()
     expect(fetchMock).toHaveBeenCalledWith(`/api/v2/projects/${a}/files/${attachment}/restore`,
       expect.objectContaining({ method: 'POST' }))

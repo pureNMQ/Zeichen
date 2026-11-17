@@ -12,6 +12,10 @@ import { projectResourceHref } from '@/lib/project-links'
 
 type UploadAttempt = { file: File; id: string }
 type FileLimits = { max_file_bytes: number; project_quota_bytes: number }
+type DeletedFile = ProjectFileSummary & {
+  deleted_at: string
+  deleted_by: string | null
+}
 
 const bytes = new Intl.NumberFormat('zh-CN')
 
@@ -83,10 +87,42 @@ function ProjectFileUpload({ projectId, path }: { projectId: string; path: strin
   )
 }
 
+function DeletedFileDetails({ projectId, fileId }: { projectId: string; fileId: string }) {
+  const detail = useQuery({
+    queryKey: ['project-file-trash', projectId, fileId],
+    queryFn: async ({ signal }) => {
+      const file = await api.get<DeletedFile>(`${projectFileApiPath(projectId, fileId)}/trash`, signal)
+      if (file.project_id !== projectId || file.id !== fileId || !file.deleted_at) {
+        throw new Error('无法读取此文件的回收站详情。')
+      }
+      return file
+    },
+    retry: false,
+  })
+  return (
+    <div id={`deleted-file-${fileId}`} className="basis-full border-t pt-2">
+      <ErrorNotification message={detail.error?.message} />
+      {detail.isLoading && <p role="status" className="text-sm text-muted-foreground">加载文件详情…</p>}
+      {detail.isError && (
+        <Button type="button" size="sm" variant="outline" onClick={() => void detail.refetch()}>重试加载详情</Button>
+      )}
+      {detail.data && <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm">
+        <dt className="text-muted-foreground">文件 ID</dt>
+        <dd className="break-all">{detail.data.id}</dd>
+        <dt className="text-muted-foreground">删除时间</dt>
+        <dd><time dateTime={detail.data.deleted_at}>{new Date(detail.data.deleted_at).toLocaleString()}</time></dd>
+        <dt className="text-muted-foreground">删除者</dt>
+        <dd className="break-all">{detail.data.deleted_by ?? '未记录'}</dd>
+      </dl>}
+    </div>
+  )
+}
+
 function FilesList({ projectId, canWrite, deleted }: { projectId: string; canWrite: boolean; deleted: boolean }) {
   const [input, setInput] = useState('')
   const [query, setQuery] = useState('')
   const [imagesOnly, setImagesOnly] = useState(false)
+  const [selection, setSelection] = useState<{ projectId: string; fileId: string } | null>(null)
   const [restoring, setRestoring] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const { notify } = useNotification()
@@ -108,6 +144,7 @@ function FilesList({ projectId, canWrite, deleted }: { projectId: string; canWri
   })
   const files = list.data?.pages.flatMap((page) => page.items)
     .filter((file) => file.project_id === projectId && file.href === projectResourceHref(projectId, 'files', file.id)) ?? []
+  const selectedId = deleted && selection?.projectId === projectId ? selection.fileId : null
 
   async function restore(file: ProjectFileSummary) {
     if (!canWrite || !deleted || restoring) return
@@ -115,6 +152,8 @@ function FilesList({ projectId, canWrite, deleted }: { projectId: string; canWri
     setActionError(null)
     try {
       await api.post(`${projectFileApiPath(projectId, file.id)}/restore`)
+      setSelection((current) => current?.projectId === projectId && current.fileId === file.id ? null : current)
+      qc.removeQueries({ queryKey: ['project-file-trash', projectId, file.id] })
       void qc.invalidateQueries({ queryKey: ['project-files', projectId] })
       void qc.invalidateQueries({ queryKey: ['project-file', projectId, file.id] })
       notify('文件已恢复。', 'success')
@@ -157,10 +196,19 @@ function FilesList({ projectId, canWrite, deleted }: { projectId: string; canWri
                 : <Link to={file.href} className="break-all font-medium hover:underline">{file.name}</Link>}
               <p className="text-xs text-muted-foreground">{file.media_type} · {bytes.format(file.size)} 字节</p>
             </div>
-            {deleted ? <Button type="button" size="sm" variant="outline" disabled={restoring !== null}
-              aria-label={`恢复 ${file.name}`} onClick={() => void restore(file)}>{restoring === file.id ? '恢复中…' : '恢复'}</Button>
+            {deleted ? <div className="flex gap-2">
+              <Button type="button" size="sm" variant="outline"
+                aria-label={`查看 ${file.name} 详情`} aria-expanded={selectedId === file.id}
+                aria-controls={selectedId === file.id ? `deleted-file-${file.id}` : undefined}
+                onClick={() => setSelection(selectedId === file.id ? null : { projectId, fileId: file.id })}>
+                {selectedId === file.id ? '收起详情' : '查看详情'}
+              </Button>
+              <Button type="button" size="sm" variant="outline" disabled={restoring !== null}
+                aria-label={`恢复 ${file.name}`} onClick={() => void restore(file)}>{restoring === file.id ? '恢复中…' : '恢复'}</Button>
+            </div>
               : <a href={projectFileContentUrl(projectId, file.id)} download className="shrink-0 text-sm text-primary hover:underline"
                 aria-label={`下载 ${file.name}`}>下载</a>}
+            {selectedId === file.id && <DeletedFileDetails projectId={projectId} fileId={file.id} />}
           </li>
         ))}
       </ul>}
