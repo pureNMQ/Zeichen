@@ -374,6 +374,34 @@ def test_wiki_hierarchy_over_mcp(mcp_server: dict):
     assert "not_found:" in client.call("wiki.ancestors", **scope, id=child["id"])["error"]
 
 
+def test_structured_reference_tracks_canonical_wiki_over_mcp(mcp_server: dict):
+    client = RawMcpClient(mcp_server["url"], mcp_server["token"])
+    client.initialize()
+    scope = {"project_id": mcp_server["project_id"]}
+    requirement = client.call("requirements.create", **scope, title="Structured reference source")
+    created = client.call("wiki.create", **scope, request_id=str(uuid4()), content={"title": "Canonical Wiki"})
+    target = {**scope, "id": created["id"]}
+
+    reference = client.call(
+        "ref.create", **scope, from_type="requirement", from_id=requirement["id"],
+        to_type="document", to_id=created["id"], type="documents",
+    )
+    assert reference["to_id"] == created["id"]
+    bound = {**scope, "target_type": "document", "target_id": created["id"]}
+    linked = client.call("ref.list", **bound)
+    assert linked["items"][0]["to_title"] == "Canonical Wiki"
+    assert linked["items"][0]["to_module"] == "wiki"
+
+    saved = client.call("wiki.update", **target, expected_version=created["version"], patch={"title": "Renamed Wiki"})
+    assert saved["version"] == 2
+    assert client.call("ref.list", **bound)["items"][0]["to_title"] == "Renamed Wiki"
+    assert client.call("wiki.delete", **target, confirmed_count=1)["deleted"]
+    assert "not_found:" in client.call("ref.list", **bound)["error"]
+    source_refs = client.call("ref.list", **scope, target_type="requirement", target_id=requirement["id"])
+    assert source_refs["items"][0]["to_title"] == "已删除"
+    assert "Renamed Wiki" not in json.dumps(source_refs)
+
+
 def test_cursor_pagination_over_mcp(mcp_server: dict):
     client = RawMcpClient(mcp_server["url"], mcp_server["token"])
     client.initialize()

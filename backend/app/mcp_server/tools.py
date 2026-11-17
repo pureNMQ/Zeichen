@@ -457,9 +457,12 @@ def _register_all(mcp) -> None:
         实体目标(短码寻址)必传 project_id;project 目标(UUID 寻址)可省。"""
         db, actor = dbc()
         cursor, limit = _paged({"type": target_type, "id": target_id}, cursor, limit)
+        scope = _target_scope(project_id, (target_type,))
+        if target_type == "document":
+            poly_svc.resolve_reference_target(db, actor, target_type, target_id, scope)
         return poly_svc.list_comments(
             db, actor, target_type, target_id, cursor, limit,
-            project_id=_target_scope(project_id, (target_type,)),
+            project_id=scope,
         )
 
     # ---------- ref.* ----------

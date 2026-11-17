@@ -14,7 +14,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from ..errors import conflict, invalid_request, not_found, permission_denied
-from ..models import Activity, Comment, Document, Project, Reference, Repository, Requirement, Task, User
+from ..models import Activity, Comment, Project, Reference, Repository, Requirement, Task, User
 from .labels import TARGET_TYPE_CN
 from .pagination import decode_cursor, page_result
 from .permissions import get_accessible_project, get_project_role, is_admin, require_project_role
@@ -26,7 +26,6 @@ REFERENCE_TYPES = ("derives", "documents", "implements", "mentions")
 _TARGET_MODELS = {
     "requirement": Requirement,
     "task": Task,
-    "document": Document,
     "repository": Repository,
 }
 
@@ -239,6 +238,24 @@ def list_activity(
     return page_result(items, offset, limit, filters)
 
 
+def resolve_reference_target(
+    db: Session, actor: User, target_type: str, target_id: str, project_id: uuid.UUID | None,
+) -> Project:
+    if target_type != "document":
+        return resolve_target(db, target_type, target_id, user=actor, project_id=project_id)
+
+    from ..v2.resource_refs import ResourceKind, ResourceRef
+
+    if project_id is None:
+        raise invalid_request("Wiki 引用必须指定 project_id")
+    project = get_accessible_project(db, actor.id, project_id, min_level="viewer")
+    ResourceRef(project_id, ResourceKind.WIKI, target_id)
+    title, _ = _target_label(db, project_id, target_type, target_id)
+    if title is None:
+        raise not_found("Wiki 不存在")
+    return project
+
+
 def create_reference(
     db: Session,
     actor: User,
@@ -253,8 +270,8 @@ def create_reference(
         raise invalid_request(f"不支持的引用类型: {ref_type}")
     if from_type == to_type and from_id == to_id:
         raise invalid_request("不能引用自身")
-    from_project = resolve_target(db, from_type, from_id, user=actor, project_id=project_id)
-    to_project = resolve_target(db, to_type, to_id, user=actor, project_id=project_id)
+    from_project = resolve_reference_target(db, actor, from_type, from_id, project_id)
+    to_project = resolve_reference_target(db, actor, to_type, to_id, project_id)
     if from_project.id != to_project.id:
         raise invalid_request("引用双方必须属于同一项目")
     require_project_role(db, actor.id, from_project.id, min_level="editor")
@@ -295,6 +312,14 @@ def _target_label(
     if target_type == "project":
         target = db.get(Project, project_id) if target_id == str(project_id) else None
         return (target.name, None) if target and target.deleted_at is None else (None, None)
+    if target_type == "document":
+        from ..v2.wiki import visible_wiki_codes
+        from ..v2.wiki_models import Wiki
+
+        title = db.scalar(select(Wiki.title).where(
+            Wiki.project_id == project_id, Wiki.code == target_id, Wiki.code.in_(visible_wiki_codes(project_id)),
+        ))
+        return (title, "wiki") if title is not None else (None, None)
     if target_type == "repository":
         try:
             repository_id = uuid.UUID(str(target_id))
@@ -341,7 +366,7 @@ def list_references(
     project_id: uuid.UUID | None = None,
 ) -> dict:
     """双向:from 或 to 命中目标均返回(引用面板)。"""
-    project = resolve_target(db, target_type, target_id, user=user, project_id=project_id)
+    project = resolve_reference_target(db, user, target_type, target_id, project_id)
     get_accessible_project(db, user.id, project.id, min_level="viewer")
     filters = _filters(project.id, target_type, target_id)
     offset = decode_cursor(filters, cursor)

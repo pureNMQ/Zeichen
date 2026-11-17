@@ -6,9 +6,8 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.errors import AppError
-from app.models import DocLink, Document, DocumentVersion
+from app.models import DocLink, Document, DocumentVersion, Reference
 from app.services import documents as svc
-from app.services import polymorphic as poly_svc
 
 
 def db_scalar_doc(db, code):
@@ -485,7 +484,9 @@ class TestVersionsAndReferences:
     def test_document_references_bidirectional(self, db: Session, world: dict):
         wiki = make_wiki(db, world, "参考文档")["node"]
         other_doc = make_wiki(db, world, "另一篇")["node"]
-        poly_svc.create_reference(db, world["admin"], "document", wiki.code, "document", other_doc.code, "mentions")
+        db.add(Reference(project_id=wiki.project_id, from_type="document", from_id=wiki.code,
+                         to_type="document", to_id=other_doc.code, type="mentions", created_by=world["admin"].id))
+        db.commit()
         refs = svc.document_references(db, world["member"], wiki.code, "wiki")
         assert refs["count"] == 1
         assert refs["items"][0]["to_id"] == other_doc.code
