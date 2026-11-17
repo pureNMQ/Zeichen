@@ -89,7 +89,7 @@ python3 "$tools/cutover_v2.py" --root "$root" --state "$state" open
 生产健康检查通过后，使用候选内的 Compose 和 systemd 单元启用 v2 定时维护。旧 Worker 已在停写时停止。切换工具会提供此前通过一次性验证的 `maintenance.env`，以相同镜像、数据库、网络和文件卷作为定时任务输入。
 
 ```bash
-sudo install -m 0600 "$work/maintenance.env" "$root/.release/v2-maintenance.env"
+install -m 0600 "$work/maintenance.env" "$root/.release/v2-maintenance.env"
 sudo install -m 0644 "$tools/docker-compose.maintenance.yml" "$root/deploy/docker-compose.maintenance.yml"
 sudo install -m 0644 "$tools/systemd/zeichen-v2-maintenance.service" /etc/systemd/system/
 sudo install -m 0644 "$tools/systemd/zeichen-v2-maintenance.timer" /etc/systemd/system/
@@ -99,3 +99,9 @@ sudo systemctl enable --now zeichen-v2-maintenance.timer
 ```
 
 开放前可执行 `python3 "$tools/cutover_v2.py" --root "$root" --state "$state" rollback`。它通过没被改写的旧库、原卷和旧镜像恢复 v1。进入 `opening` 即视为可能已有 v2 写入，自动回退会拒绝。此时如有故障，先保持停写并保全 v2 库和文件卷，再决定修复或如何处理增量。首次 v2 切换使用本节流程。旧 `-AllowMigration` 原位迁移流程不用于 v2。
+
+## v2 日常发布
+
+首次切换成功后，在本机 `develop` 提交变更，执行 `./deploy.ps1` 发布同一个 Alembic 版本的后续候选。发布器读取首次切换的验收配置及上一版记录，沿用 v2 数据库和附件卷。远端完成隔离测试和构建后，短暂停止 API/MCP 写入，备份 v2 库和文件，更新 API、MCP 和前端。健康验证通过后更新维护定时器使用的镜像。共享入口、PostgreSQL 和旧 Worker 保持原有状态。
+
+应用更新失败时，发布器会尝试在同一个 v2 库和卷上恢复上一版应用。发布中断需要先核查 `.release/v2-current.json` 与该次发布的 `result.json`。包含数据库版本变更的候选使用独立的迁移发布步骤。
