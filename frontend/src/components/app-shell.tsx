@@ -5,6 +5,7 @@ import { api, ApiError } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { useCurrentProject } from '@/lib/current-project'
 import { useDocumentNavigation } from '@/lib/document-navigation'
+import { projectResourceHref } from '@/lib/project-links'
 import { useTheme } from '@/lib/theme'
 import { Button } from '@/components/ui/button'
 import { UserAvatar } from '@/components/user-avatar'
@@ -49,10 +50,6 @@ const WORKSPACE_NAV = [
   { to: '/manual', label: '使用手册' },
 ]
 
-const DOCUMENT_NAV = [
-  { to: '/documents/wiki', label: 'Wiki' },
-]
-
 function GuardedNavLink({ to, children }: { to: string; children: ReactNode }) {
   const { requestNavigation } = useDocumentNavigation()
 
@@ -93,7 +90,10 @@ function NavGroup({ title, items, isAdmin }: { title: string; items: { to: strin
 
 function DocumentNav() {
   const location = useLocation()
+  const { projectId } = useCurrentProject()
   const documentsActive = location.pathname.startsWith('/documents')
+    || /^\/projects\/[^/]+\/wiki(?:\/|$)/u.test(location.pathname)
+  const wikiHref = projectId ? projectResourceHref(projectId, 'wiki') : '/documents/wiki'
   const [open, setOpen] = useState(documentsActive)
 
   useEffect(() => {
@@ -113,9 +113,7 @@ function DocumentNav() {
       </button>
       {open && (
         <div className="space-y-1 pl-3">
-          {DOCUMENT_NAV.map((item) => (
-            <GuardedNavLink key={item.to} to={item.to}>{item.label}</GuardedNavLink>
-          ))}
+          <GuardedNavLink to={wikiHref}>Wiki</GuardedNavLink>
         </div>
       )}
     </div>

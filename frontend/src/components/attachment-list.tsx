@@ -13,7 +13,9 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-export function AttachmentList({ targetType, targetId, projectId }: { targetType: string; targetId: string; projectId?: string }) {
+export function AttachmentList({ targetType, targetId, projectId, readOnly = false }: {
+  targetType: string; targetId: string; projectId?: string; readOnly?: boolean
+}) {
   const queryClient = useQueryClient()
   const role = useProjectRole()
   const { notify } = useNotification()
@@ -31,7 +33,7 @@ export function AttachmentList({ targetType, targetId, projectId }: { targetType
         .then((r) => r.items),
   })
 
-  const canEdit = role === 'editor' || role === 'owner'
+  const canEdit = !readOnly && (role === 'editor' || role === 'owner')
 
   async function onFileChange(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]

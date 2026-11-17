@@ -97,7 +97,8 @@ describe('AppShell 侧边栏', () => {
     await user.click(documentToggle)
 
     expect(documentToggle).toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getByRole('link', { name: 'Wiki' })).toHaveAttribute('href', '/documents/wiki')
+    expect(await screen.findByText('demo')).toBeVisible()
+    expect(screen.getByRole('link', { name: 'Wiki' })).toHaveAttribute('href', '/projects/p1/wiki')
     expect(screen.queryByRole('link', { name: '词条' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: '代码 API 参考' })).not.toBeInTheDocument()
   })

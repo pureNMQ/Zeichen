@@ -108,8 +108,8 @@ export function App() {
         </Route>
         <Route path="requirements" element={<RequirementsPage />} />
         <Route path="requirements/:id" element={<RequirementDetailPage />} />
-        <Route path="documents/wiki" element={<DocumentWorkbenchPage module="wiki" />} />
-        <Route path="documents/wiki/:id" element={<DocumentWorkbenchPage module="wiki" />} />
+        <Route path="documents/wiki" element={<DocumentWorkbenchPage module="wiki" readOnly />} />
+        <Route path="documents/wiki/:id" element={<DocumentWorkbenchPage module="wiki" readOnly />} />
         {/* REQ-59:glossary 并入 wiki,旧词条 URL 重定向保持不断链 */}
         <Route path="documents/glossary" element={<Navigate to="/documents/wiki" replace />} />
         <Route path="documents/glossary/directory/:id" element={<Navigate to="/documents/wiki" replace />} />

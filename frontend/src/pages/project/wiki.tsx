@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import { MarkdownComposer } from '@/components/markdown-composer'
@@ -10,49 +10,28 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ErrorNotification } from '@/components/ui/notification'
 import { Textarea } from '@/components/ui/textarea'
-import { ApiError, api, type Page } from '@/lib/api'
+import { ApiError, api } from '@/lib/api'
 import { useCurrentProject } from '@/lib/current-project'
 import { useDocumentNavigation } from '@/lib/document-navigation'
 import { useProjectCompletion } from '@/lib/project-completion'
 import { projectResourceHref } from '@/lib/project-links'
-
-type WikiSummary = {
-  id: string
-  project_id: string
-  parent_id: string | null
-  version: number
-  title: string
-  summary: string | null
-  category: string | null
-  tags: string[]
-}
-
-type WikiDocument = WikiSummary & { body: string }
-type WikiReceipt = Pick<WikiSummary, 'id' | 'project_id' | 'version'>
-type WikiScope = { projectId: string; url: string; canWrite: boolean }
+import { orderWikiTree, useWikiList, type WikiDocument, type WikiReceipt, type WikiScope, type WikiSummary } from '@/lib/project-wiki'
+import { WikiLifecycle, WikiTrash, type WikiAction } from '@/pages/project/wiki-lifecycle'
 
 function WikiIndex({ projectId, url, canWrite }: WikiScope) {
   const [input, setInput] = useState('')
   const [query, setQuery] = useState('')
-  const index = useInfiniteQuery({
-    queryKey: ['wiki-v2', projectId, 'list', query],
-    queryFn: ({ pageParam, signal }) => {
-      const params = new URLSearchParams({ q: query, limit: '20' })
-      if (pageParam) params.set('cursor', pageParam)
-      return api.get<Page<WikiSummary>>(`${url}?${params}`, signal)
-    },
-    initialPageParam: null as string | null,
-    getNextPageParam: (page) => page.next_cursor,
-    retry: false,
-  })
-  const documents = index.data?.pages.flatMap((page) => page.items)
-    .filter(({ project_id }) => project_id === projectId) ?? []
+  const index = useWikiList<WikiSummary>(projectId, url, query)
+  const documents = orderWikiTree(index.documents)
 
   return (
     <section className="mx-auto max-w-4xl space-y-5">
       <header className="flex items-start justify-between gap-2">
         <h1 className="text-xl font-semibold">Wiki</h1>
-        {canWrite && <Button asChild size="sm"><Link to="?mode=new">新建 Wiki</Link></Button>}
+        {canWrite && <div className="flex flex-wrap gap-2">
+          <Button asChild size="sm" variant="outline"><Link to="?mode=trash">回收站</Link></Button>
+          <Button asChild size="sm"><Link to="?mode=new">新建 Wiki</Link></Button>
+        </div>}
       </header>
       <form className="flex max-w-md items-center gap-2" onSubmit={(event) => { event.preventDefault(); setQuery(input.trim()) }}>
         <Input autoComplete="off" aria-label="搜索 Wiki" placeholder="搜索标题" maxLength={256} value={input}
@@ -68,13 +47,15 @@ function WikiIndex({ projectId, url, canWrite }: WikiScope) {
         <Button type="button" size="sm" variant="outline" onClick={() => void index.refetch()}>重试加载</Button>
       )}
       {documents.length > 0 && <ul className="divide-y rounded-lg border">
-        {documents.map((wiki) => (
-          <li key={wiki.id} className="space-y-1 p-3">
+        {documents.map(({ document: wiki, depth }) => (
+          <li key={wiki.id} className="space-y-1 p-3" style={{ paddingInlineStart: `${0.75 + Math.min(depth, 4) * 1.25}rem` }}>
             <Link to={projectResourceHref(projectId, 'wiki', wiki.id)} className="font-medium hover:underline">
               <span className="me-2 rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">{wiki.id}</span>
               {wiki.title}
             </Link>
             {wiki.summary && <p className="line-clamp-2 text-sm text-muted-foreground">{wiki.summary}</p>}
+            {wiki.parent_id && !depth && <Link to={projectResourceHref(projectId, 'wiki', wiki.parent_id)}
+              className="block text-xs text-muted-foreground hover:underline">上级 {wiki.parent_id}</Link>}
           </li>
         ))}
       </ul>}
@@ -227,6 +208,7 @@ function WikiEditor({ projectId, url, document, parentId }: WikiScope & {
 }
 
 function WikiReader({ projectId, url, canWrite, id, editing }: WikiScope & { id: string; editing: boolean }) {
+  const [action, setAction] = useState<WikiAction | null>(null)
   const detail = useQuery({
     queryKey: ['wiki-v2', projectId, 'detail', id],
     queryFn: ({ signal }) => api.get<WikiDocument>(`${url}/${encodeURIComponent(id)}`, signal),
@@ -251,7 +233,17 @@ function WikiReader({ projectId, url, canWrite, id, editing }: WikiScope & { id:
       <header className="space-y-2">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <h1 className="min-w-0 break-words text-2xl font-semibold">{document.title}</h1>
-          {canWrite && <Button asChild size="sm" variant="outline"><Link to="?mode=edit">编辑</Link></Button>}
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" onClick={() => setAction('history')}>版本历史</Button>
+            {canWrite && <>
+              <Button asChild size="sm" variant="outline">
+                <Link to={`${base}?mode=new&container_id=${encodeURIComponent(document.id)}`}>新建子 Wiki</Link>
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setAction('move')}>移动</Button>
+              <Button size="sm" variant="outline" onClick={() => setAction('delete')}>删除</Button>
+              <Button asChild size="sm"><Link to="?mode=edit">编辑</Link></Button>
+            </>}
+          </div>
         </div>
         <div className="flex flex-wrap gap-2 text-sm text-muted-foreground">
           <span>{document.id} · 版本 {document.version}</span>
@@ -263,6 +255,8 @@ function WikiReader({ projectId, url, canWrite, id, editing }: WikiScope & { id:
         {document.summary && <p className="whitespace-pre-wrap text-sm text-muted-foreground">{document.summary}</p>}
       </header>
       <VditorMarkdownViewer markdown={document.body} />
+      {action && <WikiLifecycle action={action} projectId={projectId} url={url} canWrite={canWrite}
+        document={document} onClose={() => setAction(null)} />}
     </article>
   )
 }
@@ -279,6 +273,9 @@ export function ProjectWikiPage() {
     canWrite: role === 'owner' || role === 'editor',
   }
   if (id) return <WikiReader key={id} {...scope} id={id} editing={mode === 'edit'} />
+  if (mode === 'trash') return scope.canWrite
+    ? <WikiTrash {...scope} selected={params.get('code')} />
+    : <ErrorNotification message="没有权限访问 Wiki 回收站" />
   if (mode === 'new' && scope.canWrite) return <WikiEditor {...scope} parentId={params.get('container_id')} />
   return <WikiIndex {...scope} />
 }

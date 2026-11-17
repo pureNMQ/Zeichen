@@ -39,6 +39,9 @@ function timelineEntry(id: string, preview: string, projectId: string = a) {
 }
 
 let appendAttempts = 0
+let wikiParent: string | null = null
+let deleteAttempts = 0
+let wikiDeleted = false
 
 function respond(path: string, options?: RequestInit) {
   const url = new URL(path, 'https://app.test')
@@ -107,11 +110,41 @@ function respond(path: string, options?: RequestInit) {
   const v2Wiki = `/api/v2/projects/${projectId}/wiki`
   const v2Document = {
     id: 'DOC-1', project_id: projectId, title: `同码 Wiki ${name}`,
-    parent_id: null, version: 4, body: `正文 ${name}`, summary: '迁移摘要', category: '研究', tags: ['测量，质检'],
+    parent_id: wikiParent, version: 4, body: `正文 ${name}`, summary: '迁移摘要', category: '研究', tags: ['测量，质检'],
   }
+  const v2Detail = `${v2Wiki}/DOC-1`
+  const v2Trash = `${v2Wiki}/trash`
+  const deletedDocument = { ...v2Document, deleted_at: timestamp }
   if (bare === `${v2Wiki}/DOC-1`) {
     if (options?.method === 'PATCH') return Response.json({ message: '当前 Wiki 版本已变化' }, { status: 409 })
+    if (options?.method === 'DELETE') {
+      deleteAttempts += 1
+      if (deleteAttempts === 1) return Response.json({ message: 'Wiki 删除范围已变化，请重新确认' }, { status: 409 })
+      wikiDeleted = true
+      return Response.json({ id: v2Document.id, project_id: projectId, version: 4, deleted: true })
+    }
+    if (wikiDeleted) return Response.json({ message: 'Wiki 不存在' }, { status: 404 })
     return Response.json(v2Document)
+  }
+  if (bare === `${v2Detail}/delete-impact`) {
+    return Response.json({ ...v2Document, affected_count: deleteAttempts ? 3 : 2, sample: ['DOC-1', 'DOC-3'] })
+  }
+  if (bare === `${v2Detail}/location`) {
+    wikiParent = JSON.parse(String(options?.body)).parent_id
+    return Response.json({ id: v2Document.id, project_id: projectId, version: 5 })
+  }
+  if (bare === `${v2Detail}/versions`) {
+    return url.searchParams.has('before')
+      ? Response.json({ items: [{ version: 2, title: '旧标题', created_at: timestamp }], next_before: null })
+      : Response.json({ items: [{ version: 4, title: '新标题', created_at: timestamp }], next_before: 4 })
+  }
+  if (bare === `${v2Detail}/versions/2`) return Response.json({ ...v2Document, version: 2, body: '第 2 版正文' })
+  if (bare === `${v2Detail}/versions/2/restore`) return Response.json({ id: v2Document.id, project_id: projectId, version: 5 })
+  if (bare === v2Trash) return Response.json({ items: wikiDeleted ? [deletedDocument] : [], next_cursor: null })
+  if (bare === `${v2Trash}/DOC-1`) return Response.json(deletedDocument)
+  if (bare === `${v2Trash}/DOC-1/restore`) {
+    wikiDeleted = false
+    return Response.json({ id: v2Document.id, project_id: projectId, version: 4 })
   }
   if (bare === `${v2Wiki}/TERM-8`) {
     return Response.json({ ...v2Document, id: 'TERM-8', title: '迁移词条' })
@@ -119,7 +152,11 @@ function respond(path: string, options?: RequestInit) {
   if (bare === `${v2Wiki}/DOC-404`) return Response.json({ message: 'Wiki 不存在' }, { status: 404 })
   if (bare === v2Wiki) {
     if (options?.method === 'POST') return Response.json({ id: 'DOC-1', project_id: projectId, version: 1 }, { status: 201 })
-    return Response.json({ items: [v2Document], next_cursor: null })
+    return Response.json({ items: [
+      ...(wikiDeleted ? [] : [v2Document]),
+      { ...v2Document, id: 'DOC-2', parent_id: null, title: '新上级 Wiki' },
+      ...(wikiDeleted ? [] : [{ ...v2Document, id: 'DOC-3', parent_id: 'DOC-1', title: '自身子 Wiki' }]),
+    ], next_cursor: null })
   }
   return Response.json({ items: [] })
 }
@@ -150,6 +187,9 @@ beforeEach(() => {
   localStorage.setItem('zeichen.currentProjectId', a)
   fetchMock.mockClear()
   appendAttempts = 0
+  wikiParent = null
+  deleteAttempts = 0
+  wikiDeleted = false
   vi.stubGlobal('fetch', fetchMock)
 })
 
@@ -167,6 +207,7 @@ function open(path: string) {
         <MemoryRouter initialEntries={[path]}>
           <Link to={`/projects/${a}/requirements/REQ-1`}>打开 A 同码需求</Link>
           <Link to={`/projects/${a}/wiki/DOC-1`}>打开 A 同码 Wiki</Link>
+          <Link to={`/projects/${b}/wiki?mode=trash`}>打开 B 回收站</Link>
           <Link to="/documents/wiki/DOC-1">旧版 Wiki</Link>
           <App />
         </MemoryRouter>
@@ -252,6 +293,7 @@ describe('canonical project routes', () => {
     await user.click(screen.getByRole('link', { name: '旧版 Wiki' }))
     expect(await screen.findByRole('heading', { name: '旧版 Wiki A' })).toBeVisible()
     expect(screen.getByText('旧版正文 A')).toBeVisible()
+    expect(screen.queryByRole('button', { name: '编辑' })).not.toBeInTheDocument()
   })
 
   it('sends a versioned, field-only Wiki patch and keeps the draft on conflict', async () => {
@@ -286,6 +328,72 @@ describe('canonical project routes', () => {
     open(`/projects/${a}/wiki/DOC-404`)
     expect(await screen.findByRole('alert')).toHaveTextContent('Wiki 不存在')
     expect(fetchMock.mock.calls.some(([path]) => path.startsWith('/api/documents/wiki/'))).toBe(false)
+  })
+
+  it('loads bounded Wiki revision history and restores the selected snapshot', async () => {
+    const user = open(`/projects/${a}/wiki/DOC-1`)
+    await user.click(await screen.findByRole('button', { name: '版本历史' }))
+    const dialog = within(await screen.findByRole('dialog'))
+    expect(await dialog.findByText('版本 4 · 新标题')).toBeVisible()
+    await user.click(dialog.getByRole('button', { name: '加载旧版本' }))
+    await user.click(await dialog.findByRole('button', { name: '版本 2 · 旧标题' }))
+    expect(await dialog.findByText('第 2 版正文')).toBeVisible()
+    await user.click(dialog.getByRole('button', { name: '恢复到版本 2' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    const versionApi = `/api/v2/projects/${a}/wiki/DOC-1/versions`
+    expect(fetchMock).toHaveBeenCalledWith(`${versionApi}?limit=20&before=4`, expect.anything())
+    expect(fetchMock).toHaveBeenCalledWith(`${versionApi}/2/restore`,
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ expected_version: 4 }) }))
+  })
+
+  it('moves Wiki to a selected parent without offering a visible descendant', async () => {
+    const user = open(`/projects/${a}/wiki/DOC-1`)
+    await user.click(await screen.findByRole('button', { name: '移动' }))
+    const dialog = within(await screen.findByRole('dialog'))
+    await user.click(await dialog.findByRole('button', { name: 'DOC-2 · 新上级 Wiki' }))
+    expect(dialog.queryByRole('button', { name: /自身子 Wiki/ })).not.toBeInTheDocument()
+    await user.click(dialog.getByRole('button', { name: '确认移动' }))
+    expect(await screen.findByRole('link', { name: '上级 DOC-2' })).toBeVisible()
+    expect(fetchMock).toHaveBeenCalledWith(`/api/v2/projects/${a}/wiki/DOC-1/location`,
+      expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ expected_version: 4, parent_id: 'DOC-2' }) }))
+  })
+
+  it('rechecks changed delete impact and restores the deleted Wiki through trash detail', async () => {
+    const user = open(`/projects/${a}/wiki/DOC-1`)
+    await user.click(await screen.findByRole('button', { name: '删除' }))
+    const dialog = within(await screen.findByRole('dialog'))
+    expect(await dialog.findByText(/会影响 2 篇 Wiki/)).toBeVisible()
+    await user.click(dialog.getByRole('button', { name: '确认删除' }))
+    expect(await dialog.findByRole('alert')).toHaveTextContent('Wiki 删除范围已变化')
+    expect(dialog.getByRole('button', { name: '确认删除' })).toBeDisabled()
+    await user.click(dialog.getByRole('button', { name: '重新检查影响' }))
+    expect(await dialog.findByText(/会影响 3 篇 Wiki/)).toBeVisible()
+    await user.click(dialog.getByRole('button', { name: '确认删除' }))
+    await user.click(await screen.findByRole('link', { name: '回收站' }))
+    await user.click(await screen.findByRole('link', { name: 'DOC-1 · 同码 Wiki A' }))
+    expect(await screen.findByText('正文 A')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: '恢复 Wiki' }))
+    expect(await screen.findByRole('heading', { name: '同码 Wiki A' })).toBeVisible()
+    const apiPath = `/api/v2/projects/${a}/wiki`
+    expect(fetchMock).toHaveBeenCalledWith(`${apiPath}/DOC-1?confirmed_count=2`, expect.objectContaining({ method: 'DELETE' }))
+    expect(fetchMock).toHaveBeenCalledWith(`${apiPath}/DOC-1?confirmed_count=3`, expect.objectContaining({ method: 'DELETE' }))
+    expect(fetchMock).toHaveBeenCalledWith(`${apiPath}/trash/DOC-1/restore`, expect.objectContaining({ method: 'POST' }))
+  })
+
+  it('lets viewers read version history while keeping Wiki write actions and trash unavailable', async () => {
+    const user = open(`/projects/${b}/wiki/DOC-1`)
+    await user.click(await screen.findByRole('button', { name: '版本历史' }))
+    const dialog = within(await screen.findByRole('dialog'))
+    await user.click(await dialog.findByRole('button', { name: '加载旧版本' }))
+    await user.click(await dialog.findByRole('button', { name: '版本 2 · 旧标题' }))
+    expect(await dialog.findByText('第 2 版正文')).toBeVisible()
+    expect(dialog.queryByRole('button', { name: /恢复到版本/ })).not.toBeInTheDocument()
+    await user.click(dialog.getByRole('button', { name: '关闭' }))
+    expect(screen.queryByRole('button', { name: '移动' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '删除' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('link', { name: '打开 B 回收站' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('没有权限访问 Wiki 回收站')
+    expect(fetchMock.mock.calls.some(([path]) => path.includes('/wiki/trash'))).toBe(false)
   })
 
   it('opens the person chosen by a canonical mention', async () => {

@@ -196,10 +196,10 @@ function CreateFromBrokenLinkDialog({ initialTitle, source, open, onOpenChange, 
   return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent><DialogHeader><DialogTitle>创建断链页面</DialogTitle><DialogDescription>以断链原文为标题新建 Wiki 页,并让源页面的链接接上。</DialogDescription></DialogHeader><form onSubmit={submit} className="space-y-4"><div className="space-y-1.5"><Label htmlFor="broken-link-title">标题</Label><Input id="broken-link-title" autoComplete="off" value={title} onChange={(event) => setTitle(event.target.value)} required maxLength={256} /></div>{error && <p className="text-sm text-destructive">{error}</p>}<DialogFooter><Button type="button" variant="outline" onClick={() => onOpenChange(false)}>取消</Button><Button type="submit" disabled={submitting}>{submitting ? '创建中…' : '创建页面'}</Button></DialogFooter></form></DialogContent></Dialog>
 }
 
-function ModuleTreeSidebar({ selected, onNavigate }: { selected: { id: string; kind: 'document' } | null; onNavigate: (url: string) => void }) {
+function ModuleTreeSidebar({ selected, onNavigate, readOnly }: { selected: { id: string; kind: 'document' } | null; onNavigate: (url: string) => void; readOnly: boolean }) {
   const { projectId, currentProject, routeProjectId } = useCurrentProject()
   const role = useProjectRole()
-  const canEdit = role === 'owner' || role === 'editor'
+  const canEdit = !readOnly && (role === 'owner' || role === 'editor')
   const qc = useQueryClient()
   const [titleFilter, setTitleFilter] = useState('')
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -246,7 +246,7 @@ function ModuleTreeSidebar({ selected, onNavigate }: { selected: { id: string; k
 }
 
 // REQ-59 ⑤:INDEX 视图(index-first 阅读;后端投影,零维护)
-function WikiIndexView({ onNavigate, onCreate }: { onNavigate: (url: string) => void; onCreate: () => void }) {
+function WikiIndexView({ onNavigate, onCreate }: { onNavigate: (url: string) => void; onCreate?: () => void }) {
   const { projectId, currentProject, routeProjectId } = useCurrentProject()
   const { data: index, isLoading, error } = useQuery({ queryKey: ['wiki-index', projectId], queryFn: () => api.get<WikiIndex>(`/projects/${projectId}/documents/index`) })
   if (!projectId || !currentProject) return null
@@ -261,7 +261,7 @@ function WikiIndexView({ onNavigate, onCreate }: { onNavigate: (url: string) => 
         <h1 className="mt-2 text-3xl font-semibold tracking-tight">{currentProject.name} 知识 INDEX</h1>
         <p className="mt-2 text-sm text-muted-foreground">{index?.total ?? 0} 页 · 按形态分节 · 永不失真(从页面 frontmatter 投影,无需维护)</p>
       </div>
-      <Button onClick={onCreate}><Plus className="mr-2 h-4 w-4" />新建 Wiki</Button>
+      {onCreate && <Button onClick={onCreate}><Plus className="mr-2 h-4 w-4" />新建 Wiki</Button>}
     </div>
     {lint && (lint.missing_kind.length > 0 || lint.broken_links.length > 0) && <section className="mt-6 rounded-xl border border-dashed p-5" aria-label="维护信号" data-testid="index-lint">
       <h2 className="text-sm font-medium text-muted-foreground">维护信号(lint)</h2>
@@ -323,12 +323,12 @@ function LinkBadge({ broken }: { broken: boolean }) {
   return broken ? <span className="rounded bg-destructive/10 px-1.5 py-0.5 text-[10px] text-destructive">断链</span> : null
 }
 
-function DocumentDetail({ document, onEdit, onNavigate }: { document: DocumentRow; onEdit: () => void; onNavigate: (url: string) => void }) {
+function DocumentDetail({ document, onEdit, onNavigate, readOnly }: { document: DocumentRow; onEdit: () => void; onNavigate: (url: string) => void; readOnly: boolean }) {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const role = useProjectRole()
   const { projectId, routeProjectId } = useCurrentProject()
-  const canEdit = role === 'owner' || role === 'editor'
+  const canEdit = !readOnly && (role === 'owner' || role === 'editor')
   const [versionsOpen, setVersionsOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [rollbackTarget, setRollbackTarget] = useState<number | null>(null)
@@ -347,7 +347,7 @@ function DocumentDetail({ document, onEdit, onNavigate }: { document: DocumentRo
   function handleContentClick(event: MouseEvent<HTMLDivElement>) {
     const target = event.target as HTMLElement
     const broken = target.closest('a.wiki-link-broken') as HTMLAnchorElement | null
-    if (broken) { event.preventDefault(); setBrokenCreate(broken.dataset.wikiCreate ?? ''); return }
+    if (broken) { event.preventDefault(); if (canEdit) setBrokenCreate(broken.dataset.wikiCreate ?? ''); return }
     const live = target.closest('a.wiki-link') as HTMLAnchorElement | null
     if (live?.dataset.wikiCode) { event.preventDefault(); onNavigate(documentUrl(live.dataset.wikiCode, routeProjectId)) }
   }
@@ -360,21 +360,21 @@ function DocumentDetail({ document, onEdit, onNavigate }: { document: DocumentRo
   <section className="mt-8" onClick={handleContentClick}><VditorMarkdownViewer markdown={document.content ?? ''} wikiLinks={links} /></section>
   {links && (links.outgoing.length > 0 || links.incoming.length > 0) && <section className="mt-8 grid gap-4 sm:grid-cols-2" aria-label="双链与反链">
     <div className="rounded-xl border p-5"><h2 className="flex items-center gap-2 font-medium"><Link2 className="h-4 w-4" />链接({links.outgoing.length})</h2><ul className="mt-3 space-y-2 text-sm">{links.outgoing.length ? links.outgoing.map((link, index) => <li key={`${link.raw_text}-${index}`} className="flex flex-wrap items-center gap-2">{link.broken || !link.to_code
-      ? <button type="button" className="text-destructive hover:underline" title="断链:点击创建该页面" onClick={() => setBrokenCreate(link.raw_text)}>{link.display ?? link.raw_text}{link.section ? ` #${link.section}` : ''}</button>
+      ? <button type="button" className="text-destructive hover:underline" title="断链:点击创建该页面" disabled={!canEdit} onClick={() => setBrokenCreate(link.raw_text)}>{link.display ?? link.raw_text}{link.section ? ` #${link.section}` : ''}</button>
       : <a href={documentUrl(link.to_code, routeProjectId)} className="text-primary hover:underline" onClick={(event) => { event.preventDefault(); onNavigate(documentUrl(link.to_code!, routeProjectId)) }}>{link.display ?? link.to_title ?? link.raw_text}{link.section ? ` #${link.section}` : ''}</a>}
       <LinkBadge broken={link.broken || !link.to_code} /></li>) : <li className="text-muted-foreground">暂无出链</li>}</ul></div>
     <div className="rounded-xl border p-5"><h2 className="flex items-center gap-2 font-medium"><Link2 className="h-4 w-4" />反链({links.incoming.length})</h2><ul className="mt-3 space-y-2 text-sm">{links.incoming.length ? links.incoming.map((link, index) => <li key={`${link.from_code}-${index}`}><a href={documentUrl(link.from_code, routeProjectId)} className="text-primary hover:underline" onClick={(event) => { event.preventDefault(); onNavigate(documentUrl(link.from_code, routeProjectId)) }}>{link.from_title}</a><span className="text-muted-foreground"> → 此处(经「{link.raw_text}」)</span></li>) : <li className="text-muted-foreground">暂无反链</li>}</ul></div>
   </section>}
-  <section className="mt-8 rounded-xl border p-5"><h2 className="font-medium">引用</h2><div className="mt-3 space-y-2 text-sm">{references?.items.length ? references.items.map((reference) => { const outgoing = reference.from_id === document.id; const type = outgoing ? reference.to_type : reference.from_type; const id = outgoing ? reference.to_id : reference.from_id; const title = outgoing ? reference.to_title : reference.from_title; const href = referenceHref(type, id, routeProjectId); return <p key={reference.id}>{outgoing ? '引用至' : '被引用于'} {href ? <a href={href} className="text-primary hover:underline">{title ?? id}</a> : type === 'task' ? <TaskRefLink taskId={id}>{title ?? id}</TaskRefLink> : (title ?? id)}</p> }) : <p className="text-muted-foreground">暂无引用</p>}</div></section><section className="mt-8"><AttachmentList targetType="document" targetId={document.id} projectId={routeProjectId} /></section></div><ErrorNotification message={error} />
+  <section className="mt-8 rounded-xl border p-5"><h2 className="font-medium">引用</h2><div className="mt-3 space-y-2 text-sm">{references?.items.length ? references.items.map((reference) => { const outgoing = reference.from_id === document.id; const type = outgoing ? reference.to_type : reference.from_type; const id = outgoing ? reference.to_id : reference.from_id; const title = outgoing ? reference.to_title : reference.from_title; const href = referenceHref(type, id, routeProjectId); return <p key={reference.id}>{outgoing ? '引用至' : '被引用于'} {href ? <a href={href} className="text-primary hover:underline">{title ?? id}</a> : type === 'task' ? <TaskRefLink taskId={id}>{title ?? id}</TaskRefLink> : (title ?? id)}</p> }) : <p className="text-muted-foreground">暂无引用</p>}</div></section><section className="mt-8"><AttachmentList targetType="document" targetId={document.id} projectId={routeProjectId} readOnly={readOnly} /></section></div><ErrorNotification message={error} />
   <CreateFromBrokenLinkDialog initialTitle={brokenCreate ?? ''} source={document} open={brokenCreate !== null} onOpenChange={(open) => { if (!open) setBrokenCreate(null) }} onCreated={async (createdId) => { await qc.invalidateQueries({ queryKey: ['document-node'] }); await qc.invalidateQueries({ queryKey: ['wiki-index', projectId] }); navigate(`${documentUrl(createdId, routeProjectId)}?mode=edit`) }} />
   <Dialog open={versionsOpen} onOpenChange={setVersionsOpen}><DialogContent><DialogHeader><DialogTitle>版本历史</DialogTitle><DialogDescription>回滚会恢复该版本内容并创建新版本。</DialogDescription></DialogHeader><div className="max-h-96 space-y-2 overflow-y-auto">{versions?.items.map((version) => <div key={version.id} className="flex items-center justify-between rounded border p-3 text-sm"><span>版本 {version.version_no} · {version.title}{version.author ? ` · ${authorDisplayName(version.author)}` : ''}</span>{canEdit && <Button size="sm" variant="outline" onClick={() => setRollbackTarget(version.version_no)}><RotateCcw className="mr-1.5 h-3.5 w-3.5" />回滚</Button>}</div>)}</div></DialogContent></Dialog><Dialog open={rollbackTarget !== null} onOpenChange={(open) => !open && setRollbackTarget(null)}><DialogContent><DialogHeader><DialogTitle>确认回滚</DialogTitle><DialogDescription>标题和正文会恢复为所选版本。</DialogDescription></DialogHeader><DialogFooter><Button variant="outline" onClick={() => setRollbackTarget(null)}>取消</Button><Button onClick={() => rollbackTarget !== null && void rollback(rollbackTarget)}>确认回滚</Button></DialogFooter></DialogContent></Dialog><Dialog open={deleteOpen} onOpenChange={setDeleteOpen}><DialogContent><DialogHeader><DialogTitle>删除文档</DialogTitle><DialogDescription>此操作会将文档移入已删除状态。</DialogDescription></DialogHeader><DialogFooter><Button variant="outline" onClick={() => setDeleteOpen(false)}>取消</Button><Button variant="destructive" onClick={() => void remove()}>确认删除</Button></DialogFooter></DialogContent></Dialog></main>
 }
 
-export function DocumentWorkbenchPage({ module }: { module: DocumentType }) {
-  return module === 'wiki' ? <WikiWorkbenchPage /> : null
+export function DocumentWorkbenchPage({ module, readOnly = false }: { module: DocumentType; readOnly?: boolean }) {
+  return module === 'wiki' ? <WikiWorkbenchPage readOnly={readOnly} /> : null
 }
 
-function WikiWorkbenchPage() {
+function WikiWorkbenchPage({ readOnly }: { readOnly: boolean }) {
   const params = useParams<{ id?: string }>()
   const location = useLocation()
   const navigate = useNavigate()
@@ -397,7 +397,7 @@ function WikiWorkbenchPage() {
     },
     enabled: selected?.kind === 'document',
   })
-  const canEdit = role === 'owner' || role === 'editor'
+  const canEdit = !readOnly && (role === 'owner' || role === 'editor')
   function requestNavigation(url: string) { if (dirty) setPendingUrl(url); else navigate(url) }
   async function saveAndNavigate() { if (pendingUrl && await saveRef.current()) { const target = pendingUrl; setPendingUrl(null); navigate(target) } }
   useEffect(() => { registerBlocker((target) => { if (!dirty) return false; setPendingUrl(target); return true }); return () => registerBlocker(null) }, [dirty, registerBlocker])
@@ -405,5 +405,5 @@ function WikiWorkbenchPage() {
   if (!currentProject) return <NoProject />
   if (documentError) return <ErrorNotification message={(documentError as Error).message} />
   const editing = mode === 'new' || mode === 'edit'
-  return <div className="-m-6 flex h-[calc(100dvh-3rem)] min-h-0 bg-background"><ModuleTreeSidebar selected={selected} onNavigate={requestNavigation} />{documentLoading ? <p className="p-8 text-sm text-muted-foreground">加载中…</p> : mode === 'new' && canEdit ? <DocumentEditor key={`new-wiki-${containerId ?? 'root'}`} containerId={containerId} onDirtyChange={setDirty} onRegisterSave={(save) => { saveRef.current = save }} onSaved={(saved) => navigate(documentUrl(saved.id, routeProjectId))} onCancel={() => requestNavigation(moduleBase(routeProjectId))} /> : document && editing && canEdit ? <DocumentEditor key={document.id} document={document} containerId={document.parent_id} onDirtyChange={setDirty} onRegisterSave={(save) => { saveRef.current = save }} onSaved={(saved) => navigate(documentUrl(saved.id, routeProjectId))} onCancel={() => requestNavigation(documentUrl(document.id, routeProjectId))} /> : document ? <DocumentDetail document={document} onEdit={() => navigate(`${documentUrl(document.id, routeProjectId)}?mode=edit`)} onNavigate={requestNavigation} /> : <WikiIndexView onNavigate={requestNavigation} onCreate={() => requestNavigation(`${moduleBase(routeProjectId)}?mode=new`)} />}<Dialog open={pendingUrl !== null} onOpenChange={(open) => !open && setPendingUrl(null)}><DialogContent><DialogHeader><DialogTitle>未保存的更改</DialogTitle><DialogDescription>切换前请选择如何处理当前文档。</DialogDescription></DialogHeader><DialogFooter className="sm:justify-between"><Button variant="ghost" onClick={() => setPendingUrl(null)}>留在当前文档</Button><div className="flex gap-2"><Button variant="outline" onClick={() => { const target = pendingUrl; setDirty(false); setPendingUrl(null); if (target) navigate(target) }}>放弃更改并切换</Button><Button onClick={() => void saveAndNavigate()}>保存并切换</Button></div></DialogFooter></DialogContent></Dialog></div>
+  return <div className="-m-6 flex h-[calc(100dvh-3rem)] min-h-0 bg-background"><ModuleTreeSidebar selected={selected} onNavigate={requestNavigation} readOnly={readOnly} />{documentLoading ? <p className="p-8 text-sm text-muted-foreground">加载中…</p> : mode === 'new' && canEdit ? <DocumentEditor key={`new-wiki-${containerId ?? 'root'}`} containerId={containerId} onDirtyChange={setDirty} onRegisterSave={(save) => { saveRef.current = save }} onSaved={(saved) => navigate(documentUrl(saved.id, routeProjectId))} onCancel={() => requestNavigation(moduleBase(routeProjectId))} /> : document && editing && canEdit ? <DocumentEditor key={document.id} document={document} containerId={document.parent_id} onDirtyChange={setDirty} onRegisterSave={(save) => { saveRef.current = save }} onSaved={(saved) => navigate(documentUrl(saved.id, routeProjectId))} onCancel={() => requestNavigation(documentUrl(document.id, routeProjectId))} /> : document ? <DocumentDetail document={document} readOnly={readOnly} onEdit={() => navigate(`${documentUrl(document.id, routeProjectId)}?mode=edit`)} onNavigate={requestNavigation} /> : <WikiIndexView onNavigate={requestNavigation} onCreate={!readOnly ? () => requestNavigation(`${moduleBase(routeProjectId)}?mode=new`) : undefined} />}<Dialog open={pendingUrl !== null} onOpenChange={(open) => !open && setPendingUrl(null)}><DialogContent><DialogHeader><DialogTitle>未保存的更改</DialogTitle><DialogDescription>切换前请选择如何处理当前文档。</DialogDescription></DialogHeader><DialogFooter className="sm:justify-between"><Button variant="ghost" onClick={() => setPendingUrl(null)}>留在当前文档</Button><div className="flex gap-2"><Button variant="outline" onClick={() => { const target = pendingUrl; setDirty(false); setPendingUrl(null); if (target) navigate(target) }}>放弃更改并切换</Button><Button onClick={() => void saveAndNavigate()}>保存并切换</Button></div></DialogFooter></DialogContent></Dialog></div>
 }
