@@ -5,7 +5,7 @@ from mcp.types import ToolAnnotations
 from pydantic import StrictInt
 
 from ..errors import unauthorized
-from ..v2 import file_usage
+from ..v2 import file_usage, files
 from ..v2.files import issue_read_grant, issue_upload_grant
 from ..v2.resource_refs import parse_uuid
 from .tools import dbc, sessioned
@@ -19,6 +19,66 @@ def _api_key_id():
 
 
 def register_file_tools(mcp) -> None:
+    @mcp.tool(name="files.list", annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
+    @sessioned
+    def list_library(project_id: str, query: str = "", cursor: str | None = None,
+                     limit: StrictInt = 20, media_type: str | None = None) -> dict:
+        """发现项目内有效文件及稳定引用地址。用 authorize_read 获取临时字节通道。"""
+        db, actor = dbc()
+        return files.list_files(db, actor.id, parse_uuid(project_id, "project_id"), query=query,
+                                cursor=cursor, limit=limit, media_type=media_type)
+
+    @mcp.tool(name="files.get", annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
+    @sessioned
+    def get_metadata(project_id: str, file_id: str) -> dict:
+        """查看有效文件的元数据，不返回二进制内容。"""
+        db, actor = dbc()
+        row = files.get_file(db, actor.id, parse_uuid(project_id, "project_id"), parse_uuid(file_id, "file_id"))
+        return files.file_summary(row, detail=True)
+
+    @mcp.tool(name="files.delete", annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False,
+    ))
+    @sessioned
+    def delete_file(project_id: str, file_id: str) -> dict:
+        """将文件放入回收站，保留原始字节和引用并停用已有下载授权。可先查看 files.usages。"""
+        db, actor = dbc()
+        files.delete_file(db, actor.id, parse_uuid(project_id, "project_id"), parse_uuid(file_id, "file_id"))
+        db.commit()
+        return {"id": file_id, "project_id": project_id, "deleted": True}
+
+    @mcp.tool(name="files.trash_list", annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False,
+    ))
+    @sessioned
+    def trash_list(project_id: str, query: str = "", cursor: str | None = None, limit: StrictInt = 20) -> dict:
+        """分页查找本项目已删除文件。需要项目编辑权限，不返回文件内容或访问凭据。"""
+        db, actor = dbc()
+        return files.list_files(db, actor.id, parse_uuid(project_id, "project_id"), query=query,
+                                cursor=cursor, limit=limit, state=files.FileState.DELETED)
+
+    @mcp.tool(name="files.trash_get", annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False,
+    ))
+    @sessioned
+    def trash_get(project_id: str, file_id: str) -> dict:
+        """查看一条文件回收站记录的详情。不签发下载授权。"""
+        db, actor = dbc()
+        row = files.get_deleted_file(db, actor.id, parse_uuid(project_id, "project_id"), parse_uuid(file_id, "file_id"))
+        return files.file_summary(row, detail=True)
+
+    @mcp.tool(name="files.restore", annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False,
+    ))
+    @sessioned
+    def restore(project_id: str, file_id: str) -> dict:
+        """恢复已删除文件的原始标识与引用。缺少原始字节时报告冲突。"""
+        db, actor = dbc()
+        row = files.restore_file(db, actor.id, parse_uuid(project_id, "project_id"), parse_uuid(file_id, "file_id"))
+        result = files.file_summary(row)
+        db.commit()
+        return result
+
     @mcp.tool(name="files.usages", annotations=ToolAnnotations(
         readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False,
     ))

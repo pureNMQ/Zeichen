@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { ChevronDown, LogOut, KeyRound, Search, UserRound, Sun, Moon } from 'lucide-react'
+import { ChevronDown, LogOut, KeyRound, Menu, Search, UserRound, Sun, Moon } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { useCurrentProject } from '@/lib/current-project'
@@ -21,6 +21,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from '@/components/ui/dialog'
 import {
   DropdownMenu,
@@ -130,7 +131,7 @@ function ProjectSwitcher() {
       ) : projects.length === 0 ? (
         <p className="px-1 text-sm text-muted-foreground">暂无可见项目</p>
       ) : (
-        <Select value={currentProject?.id} onValueChange={selectProject}>
+        <Select value={currentProject?.id ?? ''} onValueChange={selectProject}>
           <SelectTrigger className="w-full">
             <SelectValue placeholder="选择项目" />
           </SelectTrigger>
@@ -288,17 +289,18 @@ export function AppShell() {
   const { user, logout, refresh } = useAuth()
   const { projectId } = useCurrentProject()
   const navigate = useNavigate()
+  const location = useLocation()
   const [pwdOpen, setPwdOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
+  const [mobileLocation, setMobileLocation] = useState<string | null>(null)
 
   const isAdmin = user?.workspace_role === 'admin'
   const workspaceNav = projectId
     ? [...WORKSPACE_NAV, { to: projectResourceHref(projectId, 'files'), label: '文件' }]
     : WORKSPACE_NAV
 
-  return (
-    <div className="flex h-screen min-h-0 overflow-hidden">
-      <aside className="flex h-screen min-h-0 w-52 shrink-0 flex-col border-r bg-muted/30">
+  const navigation = (
+    <>
         <div className="px-4 py-4 text-base font-semibold">贼船 Zeichen</div>
         <GlobalSearchBox />
         <nav className="flex-1 space-y-1 overflow-y-auto px-2">
@@ -324,11 +326,11 @@ export function AppShell() {
                 </span>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => setProfileOpen(true)}>
+              <DropdownMenuItem onClick={() => { setMobileLocation(null); setProfileOpen(true) }}>
                 <UserRound className="mr-2 h-4 w-4" />
                 个人资料
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setPwdOpen(true)}>
+              <DropdownMenuItem onClick={() => { setMobileLocation(null); setPwdOpen(true) }}>
                 <KeyRound className="mr-2 h-4 w-4" />
                 修改密码
               </DropdownMenuItem>
@@ -346,10 +348,32 @@ export function AppShell() {
           <ThemeToggleButton />
           <NotificationBell />
         </div>
+    </>
+  )
+
+  return (
+    <div className="flex h-dvh min-h-0 overflow-hidden">
+      <aside className="hidden min-h-0 w-52 shrink-0 flex-col border-r bg-muted/30 sm:flex">
+        {navigation}
       </aside>
-      <main className="min-h-0 flex-1 overflow-auto p-6">
-        <Outlet />
-      </main>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="flex shrink-0 items-center gap-2 border-b px-3 py-2 sm:hidden">
+          <Dialog open={mobileLocation === location.key} onOpenChange={(open) => setMobileLocation(open ? location.key : null)}>
+            <DialogTrigger asChild>
+              <Button variant="ghost" size="icon-sm" aria-label="打开导航"><Menu /></Button>
+            </DialogTrigger>
+            <DialogContent className="flex h-[calc(100dvh-2rem)] max-w-xs flex-col gap-0 p-0">
+              <DialogTitle className="sr-only">工作区导航</DialogTitle>
+              <DialogDescription className="sr-only">查找项目和工作区页面</DialogDescription>
+              {mobileLocation === location.key && navigation}
+            </DialogContent>
+          </Dialog>
+          <span className="text-sm font-semibold">贼船 Zeichen</span>
+        </header>
+        <main className="min-h-0 min-w-0 flex-1 overflow-auto p-3 sm:p-6">
+          <Outlet />
+        </main>
+      </div>
       <ChangePasswordDialog open={pwdOpen} onOpenChange={setPwdOpen} />
       {user && (
         <UserProfileDialog

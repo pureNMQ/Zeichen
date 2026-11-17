@@ -86,6 +86,11 @@ def get_file(db: Session, actor_id: UUID, project_id: UUID, file_id: UUID) -> Pr
     return _file(db, project_id, file_id, FileState.ACTIVE)
 
 
+def get_deleted_file(db: Session, actor_id: UUID, project_id: UUID, file_id: UUID) -> ProjectFile:
+    require_file_access(db, actor_id, project_id, edit=True)
+    return _file(db, project_id, file_id, FileState.DELETED)
+
+
 def _file_name(name: str) -> str:
     name = name.strip()
     if not 1 <= len(name) <= 255 or name in {".", ".."} or any(
@@ -141,6 +146,7 @@ def file_summary(row: ProjectFile, *, detail: bool = False) -> dict:
     if detail:
         result.update(sha256=row.sha256, created_at=row.created_at.isoformat(),
                       created_by=str(row.created_by) if row.created_by else None,
+                      deleted_by=str(row.deleted_by) if row.deleted_by else None,
                       deleted_at=row.deleted_at.isoformat() if row.deleted_at else None)
     return result
 
@@ -187,7 +193,7 @@ def list_files(
         )
     rows = db.scalars(statement.order_by(ProjectFile.created_at.desc(), ProjectFile.id.desc()).limit(limit + 1)).all()
     return {
-        "items": [file_summary(row) for row in rows[:limit]],
+        "items": [file_summary(row, detail=state == FileState.DELETED) for row in rows[:limit]],
         "next_cursor": encode_cursor(filters, rows[limit - 1].id.int) if len(rows) > limit else None,
     }
 

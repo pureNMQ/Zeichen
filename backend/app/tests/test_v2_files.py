@@ -70,6 +70,9 @@ def test_web_upload_uses_immutable_bytes_and_keyset_library_paging(client, db, w
     assert client.get(first["download_href"]).status_code == 404
     assert file_path(project_id, UUID(first["id"])).read_bytes() == PNG
     assert client.get(base, params={"state": "deleted"}).json()["items"][0]["id"] == first["id"]
+    deleted = client.get(f"{file_url}/trash").json()
+    assert deleted["deleted_by"] == str(world["admin"].id)
+    assert deleted["download_href"] is None
     assert client.post(f"{file_url}/restore").json()["id"] == first["id"]
     assert client.get(first["download_href"]).content == PNG
 
@@ -163,6 +166,7 @@ def test_mcp_file_grants_transfer_bytes_outside_tool_arguments(mcp_server, stora
     client = RawMcpClient(mcp_server["url"], mcp_server["token"])
     client.initialize()
     project_id = mcp_server["project_id"]
+    monkeypatch.setattr(get_settings(), "attachment_storage_dir", mcp_server["storage"])
     db_path = mcp_server["log_file"].parent / "e2e.db"
     engine = create_engine(f"sqlite:///{db_path.as_posix()}", connect_args={"check_same_thread": False})
 
@@ -189,5 +193,17 @@ def test_mcp_file_grants_transfer_bytes_outside_tool_arguments(mcp_server, stora
             assert "expires_at" in grant and "?grant=" in grant["access_url"]
             assert "content" not in grant and mcp_server["token"] not in grant["access_url"]
             assert no_cookie.get(_local_url(grant["access_url"])).content == PNG
+            assert any(item["id"] == row["id"] for item in client.call("files.list", project_id=project_id)["items"])
+            address = {"project_id": project_id, "file_id": row["id"]}
+            assert client.call("files.get", **address)["sha256"] == hashlib.sha256(PNG).hexdigest()
+            assert client.call("files.delete", **address)["deleted"] is True
+            assert no_cookie.get(_local_url(grant["access_url"])).status_code == 404
+            trashed = client.call("files.trash_list", project_id=project_id, query="image")["items"]
+            assert [item["id"] for item in trashed] == [row["id"]]
+            assert client.call("files.trash_get", **address)["deleted_by"] == mcp_server["agent_id"]
+            assert client.call("files.restore", **address)["id"] == row["id"]
+            assert no_cookie.get(_local_url(grant["access_url"])).status_code == 404
+            reissued = client.call("files.authorize_read", **address)
+            assert no_cookie.get(_local_url(reissued["access_url"])).content == PNG
     finally:
         engine.dispose()

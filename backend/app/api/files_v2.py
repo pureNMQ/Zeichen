@@ -116,6 +116,14 @@ def read_metadata(project_id: UUID, file_id: UUID, actor: Annotated[User, Depend
     return files.file_summary(files.get_file(db, actor.id, project_id, file_id), detail=True)
 
 
+@router.get(_LIBRARY + "/{file_id}/trash")
+def read_deleted_metadata(
+    project_id: UUID, file_id: UUID, actor: Annotated[User, Depends(current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> dict:
+    return files.file_summary(files.get_deleted_file(db, actor.id, project_id, file_id), detail=True)
+
+
 @router.get(_LIBRARY + "/{file_id}/usage")
 def read_usage(
     project_id: UUID, file_id: UUID, actor: Annotated[User, Depends(current_user)], db: Annotated[Session, Depends(get_db)],

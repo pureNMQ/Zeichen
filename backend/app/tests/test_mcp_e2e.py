@@ -156,6 +156,7 @@ def mcp_server(tmp_path_factory, request):
     env = dict(os.environ)
     env["DATABASE_URL"] = db_url
     env["SESSION_SECRET"] = "test-session-secret-0123456789abcdef"
+    env["ATTACHMENT_STORAGE_DIR"] = str(db_file.parent / "attachments")
     env.update(getattr(request, "param", {}))
     log_file = db_file.parent / "server.log"
     with log_file.open("w") as log_fh:
@@ -191,7 +192,7 @@ def mcp_server(tmp_path_factory, request):
             time.sleep(0.2)
     assert ready, "MCP server 未就绪"
     try:
-        yield {**ids, "url": url, "log_file": log_file}
+        yield {**ids, "url": url, "log_file": log_file, "storage": env["ATTACHMENT_STORAGE_DIR"]}
     finally:
         proc.terminate()
         try:
