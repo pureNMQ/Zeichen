@@ -145,6 +145,26 @@ def test_wiki_and_timeline_edits_only_notify_new_mentions(db, world, scope):
     ]
 
 
+def test_notification_for_child_of_deleted_wiki_is_hidden_until_restore(db, world, scope):
+    author, reader = world["admin"], world["member"]
+    project_id = scope.project_id
+    parent = wiki.create_wiki(db, author.id, project_id, request_id=uuid4(), content=wiki.WikiContent(title="Parent"))
+    wiki.create_wiki(db, author.id, project_id, request_id=uuid4(), parent_id=parent["id"],
+                     content=wiki.WikiContent(title="Child", body=mention(scope, reader)))
+    db.commit()
+    [notice] = inbox(db, reader)
+    wiki.delete_wiki(db, author.id, project_id, parent["id"], confirmed_count=2)
+    db.commit()
+
+    assert inbox(db, reader) == []
+    with pytest.raises(AppError, match="不可见"):
+        notifications.mark_read(db, reader, UUID(notice["id"]))
+    db.rollback()
+    wiki.restore_wiki(db, author.id, project_id, parent["id"])
+    db.commit()
+    assert inbox(db, reader) == [notice]
+
+
 def test_rollback_clears_notifications_and_web_open_acknowledges(client, db, world, scope):
     author = world["agent"]
     recipient = world["admin"]

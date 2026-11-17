@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from sqlalchemy import JSON, CheckConstraint, ForeignKey, ForeignKeyConstraint, Index, String, Text, UniqueConstraint
+from sqlalchemy import JSON, CheckConstraint, ForeignKey, ForeignKeyConstraint, Index, String, Text, UniqueConstraint, and_, select
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..models.base import Base, CreatedAtMixin, CreatedByMixin, IdMixin, SoftDeleteMixin, TimestampMixin
@@ -64,3 +64,13 @@ class WikiReference(Base):
     version_no: Mapped[int] = mapped_column(primary_key=True)
     target_kind: Mapped[str] = mapped_column(String(16), primary_key=True)
     target_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+
+
+def visible_wiki_tree(project_id: UUID | None = None):
+    roots = select(Wiki.project_id, Wiki.code).where(Wiki.parent_id.is_(None), Wiki.deleted_at.is_(None))
+    if project_id is not None:
+        roots = roots.where(Wiki.project_id == project_id)
+    tree = roots.cte(recursive=True)
+    return tree.union_all(select(Wiki.project_id, Wiki.code).join(tree, and_(
+        Wiki.project_id == tree.c.project_id, Wiki.parent_id == tree.c.code,
+    )).where(Wiki.deleted_at.is_(None)))

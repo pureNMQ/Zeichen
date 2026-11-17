@@ -18,7 +18,7 @@ from .commands import execute_once
 from .notifications import emit_markdown_notifications
 from .markdown_refs import extract_markdown_refs
 from .resource_refs import ResourceKind, ResourceRef
-from .wiki_models import Wiki, WikiReference, WikiVersion
+from .wiki_models import Wiki, WikiReference, WikiVersion, visible_wiki_tree
 
 WikiTitle = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=256)]
 WikiTag = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
@@ -45,13 +45,7 @@ class WikiPatch(BaseModel):
 
 
 def visible_wiki_codes(project_id: UUID):
-    visible = select(Wiki.code).where(
-        Wiki.project_id == project_id, Wiki.parent_id.is_(None), Wiki.deleted_at.is_(None),
-    ).cte(recursive=True)
-    return select(visible.union_all(
-        select(Wiki.code).join(visible, Wiki.parent_id == visible.c.code)
-        .where(Wiki.project_id == project_id, Wiki.deleted_at.is_(None)),
-    ).c.code)
+    return select(visible_wiki_tree(project_id).c.code)
 
 
 def _active_wiki(db: Session, project_id: UUID, code: str) -> Wiki:

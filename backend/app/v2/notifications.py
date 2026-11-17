@@ -18,7 +18,7 @@ from .notification_models import Notification
 from .page_cursor import as_utc, decode_time_position, encode_position, scope_key
 from .resource_refs import ResourceKind, ResourceRef
 from .timeline_models import TimelineEntry
-from .wiki_models import Wiki
+from .wiki_models import visible_wiki_tree
 
 
 @dataclass
@@ -111,9 +111,9 @@ def _visibility(db: Session, actor: User):
         TimelineEntry.requirement_code == Notification.source_code,
         TimelineEntry.id == Notification.entry_id, Requirement.deleted_at.is_(None),
     ).exists()
-    wiki_visible = select(Wiki.code).where(
-        Wiki.project_id == Notification.project_id, Wiki.code == Notification.source_code,
-        Wiki.deleted_at.is_(None),
+    tree = visible_wiki_tree()
+    wiki_visible = select(tree.c.code).where(
+        tree.c.project_id == Notification.project_id, tree.c.code == Notification.source_code,
     ).exists()
     active_project = select(Project.id).where(Project.deleted_at.is_(None))
     if not is_admin(db, owner_id):
