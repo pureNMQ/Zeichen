@@ -4,15 +4,17 @@ import re
 from collections import Counter, defaultdict
 from html import escape
 from uuid import UUID
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from markdown_it import MarkdownIt
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from ..config import get_settings
 from ..models import DocLink, Document, DocumentVersion
 from ..services.documents import merge_metadata, split_frontmatter
 from .resource_refs import ResourceKind, ResourceRef
+from .file_models import ProjectFile
 from .wiki import store_version_references
 from .wiki_models import Wiki, WikiVersion
 
@@ -20,6 +22,9 @@ _MARKDOWN = MarkdownIt("commonmark").enable("table")
 _WIKI_LINK = re.compile(r"(?<![\\!])\[\[([^\[\]\n|]+)(?:\|([^\[\]\n]+))?\]\](?![\[(])")
 _INLINE_CODE = re.compile(r"(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)", re.DOTALL)
 _SHORT_CODE = re.compile(r"(?:DOC|TERM)-[1-9]\d*", re.IGNORECASE)
+_ATTACHMENT_URL = re.compile(
+    r"(?<=\])\(<?((?:https?://[^/\s<>]+)?/api/attachments/([0-9a-f-]{36})/download)>?\)"
+)
 _ATTRIBUTES = {"summary", "doc_kind", "tags", "aliases"}
 
 
@@ -43,7 +48,7 @@ def _content(raw: str | None, stored: dict | None) -> tuple[dict, dict, set[str]
     return outcome, effective, unknown
 
 
-def _convert_links(body: str, project_id: UUID, resolve, report) -> str:
+def _convert_links(body: str, project_id: UUID, resolve, report, files: set[str]) -> str:
     lines = body.splitlines(keepends=True)
     ends = [0]
     for line in lines:
@@ -55,8 +60,11 @@ def _convert_links(body: str, project_id: UUID, resolve, report) -> str:
     ]
     protected.extend(match.span() for match in _INLINE_CODE.finditer(body))
 
+    def protected_link(match: re.Match) -> bool:
+        return any(start <= match.start() < stop for start, stop in protected)
+
     def replace(match: re.Match) -> str:
-        if any(start <= match.start() < stop for start, stop in protected):
+        if protected_link(match):
             return match.group()
         target, _, section = match[1].partition("#")
         label = (match[2] or target).strip()
@@ -70,7 +78,26 @@ def _convert_links(body: str, project_id: UUID, resolve, report) -> str:
         label = re.sub(r"([\\\[\]_*~`])", r"\\\1", escape(label))
         return f"[{label}](<{path}>)"
 
-    return _WIKI_LINK.sub(replace, body)
+    base = urlsplit(get_settings().web_base_url)
+
+    def replace_attachment(match: re.Match) -> str:
+        if protected_link(match):
+            return match.group()
+        parsed = urlsplit(match[1])
+        if parsed.netloc and (parsed.scheme, parsed.netloc) != (base.scheme, base.netloc):
+            return match.group()
+        if match[2] not in files:
+            report("unresolved_attachment_link", match[2])
+            return match.group()
+        path = ResourceRef(project_id, ResourceKind.FILE, match[2]).path
+        return f"(<{path}>)"
+
+    # Apply a single combined scan so the code-block offsets refer to original bytes.
+    replacements = [(match.start(), match.end(), replace(match)) for match in _WIKI_LINK.finditer(body)]
+    replacements.extend((match.start(), match.end(), replace_attachment(match)) for match in _ATTACHMENT_URL.finditer(body))
+    for start, stop, content in sorted(replacements, reverse=True):
+        body = body[:start] + content + body[stop:]
+    return body
 
 
 def import_wiki(db: Session) -> tuple[dict[str, int], list[dict]]:
@@ -81,6 +108,7 @@ def import_wiki(db: Session) -> tuple[dict[str, int], list[dict]]:
     for project_id in projects:
         documents = db.scalars(select(Document).where(Document.project_id == project_id).order_by(Document.code)).all()
         codes = {doc.code for doc in documents}
+        files = {str(value) for value in db.scalars(select(ProjectFile.id).where(ProjectFile.project_id == project_id))}
         by_title: dict[str, set[str]] = defaultdict(set)
         by_alias: dict[str, set[str]] = defaultdict(set)
         for doc in documents:
@@ -124,7 +152,7 @@ def import_wiki(db: Session) -> tuple[dict[str, int], list[dict]]:
             fields, effective, unknown = _content(doc.content, doc.doc_metadata)
             for field in sorted(unknown):
                 note("legacy_attribute_retained_in_source", field)
-            fields["body"] = _convert_links(fields["body"], project_id, lambda *args: resolve(*args, current=True), note)
+            fields["body"] = _convert_links(fields["body"], project_id, lambda *args: resolve(*args, current=True), note, files)
             versions = db.scalars(select(DocumentVersion).where(
                 DocumentVersion.project_id == project_id, DocumentVersion.document_id == doc.code,
             ).order_by(DocumentVersion.version_no)).all()
@@ -151,7 +179,7 @@ def import_wiki(db: Session) -> tuple[dict[str, int], list[dict]]:
                 else:
                     snapshot_fields["body"] = _convert_links(
                         snapshot_fields["body"], project_id, lambda *args: resolve(*args, current=False),
-                        lambda reason, value: note(reason, value, version.version_no),
+                        lambda reason, value: note(reason, value, version.version_no), files,
                     )
                 snapshot = WikiVersion(id=version.id, project_id=project_id, wiki_code=doc.code,
                                        title=version.title, version_no=version.version_no,

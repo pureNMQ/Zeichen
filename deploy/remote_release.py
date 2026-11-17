@@ -196,6 +196,8 @@ class Release:
         if self.candidate:
             self.save("verified")
             return
+        if self.target_revision.startswith("v2"):
+            raise RuntimeError("Zeichen v2 requires the separate database and file-volume cutover flow")
         if self.target_revision != self.old_revision and not self.args.allow_migration:
             raise RuntimeError(f"Migration {self.old_revision} -> {self.target_revision} requires -AllowMigration")
         self.files = [self.source / "docker-compose.yml", self.source / "deploy/docker-compose.prod.yml"]

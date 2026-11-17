@@ -34,6 +34,11 @@ def test_legacy_files_keep_bytes_original_uuid_and_independent_usage(tmp_path, d
     assert db.get(FileAssociation, (pid, attachment.id, "requirements", "REQ-1")) is not None
     assert source.read_bytes() == target.read_bytes() == payload
     assert import_legacy_files.import_files(db, legacy)[0] == {"already_imported": 1}
+    db.add(Document(project_id=pid, code="DOC-1", title="Manual", doc_type="wiki",
+                    content=f"[Open](/api/attachments/{attachment.id}/download)"))
+    db.flush()
+    assert import_wiki(db)[0]["documents_imported"] == 1
+    assert db.get(Wiki, (pid, "DOC-1")).body == f"[Open](</projects/{pid}/files/{attachment.id}>)"
 
 
 def test_import_history_preserves_source_and_does_not_guess_reparented_task(db, world):
