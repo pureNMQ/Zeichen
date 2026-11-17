@@ -5,6 +5,8 @@ Push the committed develop branch, test/build on the server, then deploy.
 .DESCRIPTION
 -CheckOnly tests a committed candidate on the server without pushing or deploying.
 Use -Revision to select its full SHA, or omit it to use the current HEAD.
+After the v2 cutover is active, publishing updates services on the active v2
+database and file volume. Routine v2 releases require the same database schema.
 .EXAMPLE
 ./deploy.ps1
 .EXAMPLE
