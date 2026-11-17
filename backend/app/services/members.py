@@ -131,6 +131,7 @@ def remove_member(db: Session, actor: User, user_id: uuid.UUID) -> None:
     db.query(ProjectMember).filter(ProjectMember.user_id == user_id).delete()
     db.query(PasswordSetupToken).filter(PasswordSetupToken.user_id == user_id).delete()
     user.deleted_at = datetime.now(timezone.utc)
+    user.session_epoch += 1
     # ADR 0004:主人被移除时,其附属 Agent 随之停用并吊销全部 key(同事务)
     now = user.deleted_at
     owned_agents = db.scalars(
@@ -142,3 +143,25 @@ def remove_member(db: Session, actor: User, user_id: uuid.UUID) -> None:
             {ApiKey.revoked_at: now}
         )
     db.commit()
+
+
+def list_inactive_members(db: Session) -> list[User]:
+    return list(db.scalars(select(User).where(
+        User.is_agent.is_(False), User.deleted_at.is_not(None),
+    ).order_by(User.deleted_at.desc(), User.id)))
+
+
+def reactivate_member(db: Session, actor: User, user_id: uuid.UUID) -> tuple[User, str | None]:
+    user = db.scalar(select(User).where(User.id == user_id, User.is_agent.is_(False)).with_for_update())
+    if user is None or user.deleted_at is None:
+        raise not_found("已停用的成员不存在")
+    team = get_team(db)
+    # There may be incomplete legacy membership cleanup. Never grant back old permissions.
+    db.query(WorkspaceMember).filter(WorkspaceMember.user_id == user.id).delete()
+    db.query(ProjectMember).filter(ProjectMember.user_id == user.id).delete()
+    db.add(WorkspaceMember(team_id=team.id, user_id=user.id, role="member", created_by=actor.id))
+    user.deleted_at = None
+    user.session_epoch += 1
+    setup = _issue_password_setup_token(db, user) if not user.password_hash else None
+    db.commit()
+    return user, setup

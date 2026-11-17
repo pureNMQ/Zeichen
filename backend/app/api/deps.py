@@ -14,7 +14,7 @@ from ..services.permissions import require_workspace_admin
 
 def _user_from_payload(db: Session, payload: dict) -> User:
     user = db.get(User, uuid.UUID(payload["sub"]))
-    if user is None or user.deleted_at is not None:
+    if user is None or user.is_agent or user.deleted_at is not None or payload.get("epoch", 0) != user.session_epoch:
         raise HTTPException(status_code=401, detail="会话无效或已过期")
     return user
 

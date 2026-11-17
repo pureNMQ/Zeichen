@@ -37,13 +37,14 @@ def verify_password(password: str, stored: str) -> bool:
         return False
 
 
-def create_token(user_id: str, typ: str, ttl_seconds: int | None = None) -> str:
+def create_token(user_id: str, typ: str, ttl_seconds: int | None = None, *, session_epoch: int = 0) -> str:
     settings = get_settings()
     ttl = ttl_seconds or settings.session_ttl_seconds
     now = datetime.now(timezone.utc)
     payload = {
         "sub": str(user_id),
         "typ": typ,
+        "epoch": session_epoch,
         "iat": now,
         "exp": now + timedelta(seconds=ttl),
     }

@@ -79,6 +79,24 @@ def regenerate_password_setup_link(
     return {"password_setup_url": _password_setup_url(token)}
 
 
+@router.get("/inactive")
+def list_inactive_members(
+    admin: User = Depends(current_admin), db: Session = Depends(get_db),
+) -> list[dict]:
+    return [
+        {**_payload(user), "deactivated_at": user.deleted_at.isoformat()}
+        for user in members_service.list_inactive_members(db)
+    ]
+
+
+@router.post("/inactive/{user_id}/reactivate")
+def reactivate_member(
+    user_id: uuid.UUID, admin: User = Depends(current_admin), db: Session = Depends(get_db),
+) -> dict:
+    user, token = members_service.reactivate_member(db, admin, user_id)
+    return {**_payload(user), "role": "member", "password_setup_url": _password_setup_url(token) if token else None}
+
+
 @router.patch("/{user_id}")
 def update_member(
     user_id: uuid.UUID,

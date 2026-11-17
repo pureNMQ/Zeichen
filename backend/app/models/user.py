@@ -37,6 +37,7 @@ class User(IdMixin, TimestampMixin, SoftDeleteMixin, CreatedByMixin, Base):
     # lifecycle source of truth; keeping the id here makes replacement atomic.
     avatar: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    session_epoch: Mapped[int] = mapped_column(default=0, server_default="0")
     is_agent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # ADR 0004:附属 Agent 的主人;人类成员恒为 NULL。判权时动态解析主人角色。
     owner_id: Mapped[uuid.UUID | None] = mapped_column(

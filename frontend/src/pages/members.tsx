@@ -482,7 +482,7 @@ function EmergencyRevokeButton({ memberId, agentName }: { memberId: string; agen
 
   return (
     <div className="flex items-center gap-1">
-      {error && <span className="text-xs text-destructive">{error}</span>}
+      <ErrorNotification message={error} />
       <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-destructive" onClick={() => void revoke()}>
         <ShieldAlert className="h-3.5 w-3.5" />
         紧急吊销
@@ -509,15 +509,36 @@ export function MembersPage() {
   const [profileFor, setProfileFor] = useState<MemberRow | null>(null)
   const [agentCreateOpen, setAgentCreateOpen] = useState(false)
   const [agentManageOpen, setAgentManageOpen] = useState(false)
+  const [showInactive, setShowInactive] = useState(false)
+  const [reactivating, setReactivating] = useState<string | null>(null)
+  const inactive = useQuery({
+    queryKey: ['members', 'inactive'],
+    queryFn: () => api.get<Pick<MemberRow, 'id' | 'username' | 'display_name'>[]>('/members/inactive'),
+    enabled: isAdmin && showInactive,
+  })
 
   async function remove(id: string, username: string) {
-    if (!window.confirm(`移除成员 ${username}?其项目权限将一并清除`)) return
+    if (!window.confirm(`停用成员 ${username}？其项目权限会清除，附属 Agent 及其 Key 将停用。`)) return
     setRemoveError(null)
     try {
       await api.delete(`/members/${id}`)
       await qc.invalidateQueries({ queryKey: ['members'] })
     } catch (err) {
-      setRemoveError(err instanceof ApiError ? err.message : '移除失败')
+      setRemoveError(err instanceof ApiError ? err.message : '停用失败')
+    }
+  }
+
+  async function reactivate(id: string) {
+    setRemoveError(null)
+    setReactivating(id)
+    try {
+      const member = await api.post<{ password_setup_url: string | null }>(`/members/inactive/${id}/reactivate`)
+      setSetupUrl(member.password_setup_url)
+      await qc.invalidateQueries({ queryKey: ['members'] })
+    } catch (err) {
+      setRemoveError(err instanceof ApiError ? err.message : '重新启用失败')
+    } finally {
+      setReactivating(null)
     }
   }
 
@@ -551,6 +572,7 @@ export function MembersPage() {
       {isLoading && <p className="text-sm text-muted-foreground">加载中…</p>}
       <ErrorNotification message={error ? (error as Error).message : null} />
       <ErrorNotification message={removeError} />
+      <ErrorNotification message={inactive.error?.message} />
       {!isLoading && members?.length === 0 && (
         <Card>
           <CardContent className="flex flex-col items-center gap-2 py-12 text-muted-foreground">
@@ -625,8 +647,8 @@ export function MembersPage() {
                           size="icon-sm"
                           onClick={() => void remove(m.id, m.username)}
                           disabled={isLocked}
-                          title={isLocked ? lockedMessage : `移除 ${m.username}`}
-                          aria-label={`移除 ${m.username}`}
+                          title={isLocked ? lockedMessage : `停用 ${m.username}`}
+                          aria-label={`停用 ${m.username}`}
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
@@ -642,6 +664,24 @@ export function MembersPage() {
 
       {isAdmin && (
         <>
+          <Button variant="outline" aria-expanded={showInactive} onClick={() => setShowInactive(!showInactive)}>
+            {showInactive ? '收起已停用成员' : '查看已停用成员'}
+          </Button>
+          {showInactive && (
+            <section className="space-y-2" aria-label="已停用成员">
+              <p className="text-sm text-muted-foreground">以普通成员身份重新启用，项目权限需要重新授予。</p>
+              {inactive.isLoading && <p role="status">加载中…</p>}
+              {inactive.isError && <Button variant="outline" onClick={() => void inactive.refetch()}>重试</Button>}
+              {inactive.data?.length === 0 && <p className="text-sm text-muted-foreground">暂无已停用成员。</p>}
+              {inactive.data?.map((member) => (
+                <div key={member.id} className="flex items-center justify-between rounded-md border p-3">
+                  <span className="text-sm">{member.display_name ?? member.username}</span>
+                  <Button size="sm" variant="outline" disabled={reactivating !== null}
+                    onClick={() => void reactivate(member.id)}>重新启用</Button>
+                </div>
+              ))}
+            </section>
+          )}
           <AddMemberDialog open={addOpen} onOpenChange={setAddOpen} onCreated={setSetupUrl} />
           <PasswordSetupLinkDialog setupUrl={setupUrl} onOpenChange={(open) => { if (!open) setSetupUrl(null) }} />
         </>

@@ -28,11 +28,11 @@ def _user_payload(user: User, db: Session) -> dict:
     }
 
 
-def _set_cookie(response: Response, user_id: str, typ: str, ttl: int | None = None) -> None:
+def _set_cookie(response: Response, user: User, typ: str, ttl: int | None = None) -> None:
     settings = get_settings()
     response.set_cookie(
         key=settings.session_cookie_name,
-        value=create_token(user_id, typ, ttl),
+        value=create_token(str(user.id), typ, ttl, session_epoch=user.session_epoch),
         max_age=ttl or settings.session_ttl_seconds,
         httponly=True,
         samesite="lax",
@@ -54,7 +54,7 @@ def bootstrap_status(db: Session = Depends(get_db)) -> dict:
 @router.post("/bootstrap")
 def bootstrap(body: UsernamePassword, response: Response, db: Session = Depends(get_db)) -> dict:
     user = auth_service.bootstrap(db, body.username.strip(), body.password)
-    _set_cookie(response, str(user.id), SESSION)
+    _set_cookie(response, user, SESSION)
     return {"needs_password": False, "user": _user_payload(user, db)}
 
 
@@ -62,9 +62,9 @@ def bootstrap(body: UsernamePassword, response: Response, db: Session = Depends(
 def login(body: UsernamePassword, response: Response, db: Session = Depends(get_db)) -> dict:
     user, needs_password = auth_service.login(db, body.username.strip(), body.password)
     if needs_password:
-        _set_cookie(response, str(user.id), PENDING_PASSWORD, SET_PASSWORD_TTL)
+        _set_cookie(response, user, PENDING_PASSWORD, SET_PASSWORD_TTL)
         return {"needs_password": True}
-    _set_cookie(response, str(user.id), SESSION)
+    _set_cookie(response, user, SESSION)
     return {"needs_password": False, "user": _user_payload(user, db)}
 
 
@@ -76,7 +76,7 @@ def set_password(
     db: Session = Depends(get_db),
 ) -> dict:
     auth_service.set_password(db, user.id, body.password)
-    _set_cookie(response, str(user.id), SESSION)
+    _set_cookie(response, user, SESSION)
     return {"needs_password": False, "user": _user_payload(user, db)}
 
 
@@ -85,7 +85,7 @@ def set_password_with_token(
     body: SetPasswordWithToken, response: Response, db: Session = Depends(get_db)
 ) -> dict:
     user = auth_service.set_password_with_token(db, body.token, body.password)
-    _set_cookie(response, str(user.id), SESSION)
+    _set_cookie(response, user, SESSION)
     return {"needs_password": False, "user": _user_payload(user, db)}
 
 
