@@ -352,6 +352,18 @@ class V2ReleaseTests(unittest.TestCase):
         self.assertFalse((self.state / "v2-current.json").exists())
         self.assertFalse(any("pg_restore" in command or "down" in command for command in self.commands))
 
+    def test_backup_failure_recovers_writers_before_writing_the_failure_status(self):
+        self.setup_mocks()
+        self.item.preflight()
+        self.item.configure_release()
+        self.item.backup = Mock(side_effect=OSError("backup disk full"))
+        self.item.save = Mock(side_effect=lambda _: self.assertTrue(
+            self.running, "recording a failed backup cannot be required to resume the writers",
+        ))
+        with self.assertRaisesRegex(OSError, "backup disk full"):
+            self.item.activate()
+        self.assertEqual(self.item.save.call_args_list[-1].args[0], "rolled_back")
+
 
 if __name__ == "__main__":
     unittest.main()

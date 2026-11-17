@@ -625,16 +625,21 @@ class V2Release(Release):
             for path, data in self.maintenance.items():
                 write_private(path, data.replace(self.previous_images["api"].encode(), self.backend.encode(), 1))
         except BaseException:
-            self.save("manual_recovery_required")
-            if self.db_revision() == self.old_revision:
-                for path, data in self.maintenance.items():
-                    if path.read_bytes() != data:
-                        write_private(path, data)
-                self.start_apps(self.rollback_file)
-                self.reload_gateway(self.old_nginx)
-                self.check_bindings(self.previous_images)
-                self.verify_live(backend=self.previous_images["api"], frontend=self.previous_images["frontend"])
-                self.save("rolled_back")
+            try:
+                if self.db_revision() == self.old_revision:
+                    self.start_apps(self.rollback_file)
+                    self.reload_gateway(self.old_nginx)
+                    for path, data in self.maintenance.items():
+                        if path.read_bytes() != data:
+                            write_private(path, data)
+                    self.check_bindings(self.previous_images)
+                    self.verify_live(backend=self.previous_images["api"], frontend=self.previous_images["frontend"])
+                    self.save("rolled_back")
+                else:
+                    self.save("manual_recovery_required")
+            except BaseException:
+                self.save("manual_recovery_required")
+                raise
             raise
         try:
             sync_repository(self.root, self.args.commit, self.old_head)
