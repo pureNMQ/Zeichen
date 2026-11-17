@@ -4,7 +4,7 @@ from enum import StrEnum
 from uuid import UUID
 
 from pydantic import BaseModel
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, true, tuple_
 from sqlalchemy.orm import Session
 
 from ..errors import invalid_request, permission_denied
@@ -15,9 +15,11 @@ from .file_models import ProjectFile
 from .files import file_summary
 from .page_cursor import as_utc, decode_position, decode_time_position, encode_position, scope_key
 from .resource_refs import ResourceKind, ResourceRef, parse_uuid
+from .search_filters import SearchFilters, file_used_at_predicate, wiki_tag_predicate
 from .timeline_models import TimelineEntry, TimelineRevision
-from .wiki import visible_wiki_codes
-from .wiki_models import Wiki
+from .wiki_models import Wiki, visible_wiki_tree
+
+MAX_SEARCH_PROJECTS = 12
 
 
 class SearchDomain(StrEnum):
@@ -55,8 +57,8 @@ class SearchResult(BaseModel):
 
 def _query_terms(query: str) -> tuple[str, ...]:
     query = query.strip()
-    if not query or len(query) > 256 or "\x00" in query:
-        raise invalid_request("search query 须为 1 至 256 个有效字符")
+    if len(query) > 256 or "\x00" in query:
+        raise invalid_request("搜索关键词最多 256 个有效字符")
     terms = tuple(dict.fromkeys(query.split()))
     if len(terms) > 16:
         raise invalid_request("一次最多检索 16 个关键词")
@@ -64,7 +66,7 @@ def _query_terms(query: str) -> tuple[str, ...]:
 
 
 def _matches(terms: tuple[str, ...], *columns):
-    return and_(*(or_(*(column.icontains(term, autoescape=True) for column in columns)) for term in terms))
+    return and_(true(), *(or_(*(column.icontains(term, autoescape=True) for column in columns)) for term in terms))
 
 
 def _source_span(text: str, folded: str, start: int, end: int) -> tuple[int, int]:
@@ -101,56 +103,87 @@ def _snippet(terms: tuple[str, ...], *fields: str | None) -> str:
     return ""
 
 
-def _identifier_position(scope: str, cursor: str | None, kind: ResourceKind, project_id: UUID) -> str | None:
+def _identifier_position(
+    scope: str, cursor: str | None, kind: ResourceKind, project_ids: tuple[UUID, ...],
+) -> tuple[UUID, str] | None:
     value = decode_position(scope, cursor)
     if value is None:
         return None
-    if len(value) != 1 or not isinstance(value[0], str):
+    if len(value) != 2 or not all(isinstance(field, str) for field in value):
         raise invalid_request("检索游标格式无效")
-    return ResourceRef(project_id, kind, value[0]).identifier
+    project_id = parse_uuid(value[0], "cursor.project_id")
+    if project_id not in project_ids:
+        raise invalid_request("检索游标项目不在当前范围内")
+    return project_id, ResourceRef(project_id, kind, value[1]).identifier
 
 
-def _shortcode_results(db: Session, statement, column, *, kind: ResourceKind,
-                       project_id: UUID, scope: str, cursor: str | None, limit: int):
-    after = _identifier_position(scope, cursor, kind, project_id)
+def _identifier_results(
+    db: Session, statement, project_column, code_column, *, kind: ResourceKind,
+    project_ids: tuple[UUID, ...], scope: str, cursor: str | None, limit: int,
+):
+    after = _identifier_position(scope, cursor, kind, project_ids)
     if after is not None:
-        statement = statement.where(column > after)
-    rows = list(db.execute(statement.order_by(column).limit(limit + 1)))
-    return rows[:limit], encode_position(scope, [rows[limit - 1].code]) if len(rows) > limit else None
+        project, identifier = after
+        code = parse_uuid(identifier, "cursor.id") if kind == ResourceKind.FILE else identifier
+        statement = statement.where(tuple_(project_column, code_column) > tuple_(project, code))
+    rows = list(db.execute(statement.order_by(project_column, code_column).limit(limit + 1)))
+    if len(rows) <= limit:
+        return rows, None
+    last_project, last_id = rows[limit - 1][:2]
+    return rows[:limit], encode_position(scope, [str(last_project), str(last_id)])
 
 
-def _requirements(db: Session, project_id: UUID, terms: tuple[str, ...], scope: str,
-                  cursor: str | None, limit: int) -> SearchPage:
+def _requirements(db: Session, project_ids: tuple[UUID, ...], terms: tuple[str, ...], filters: SearchFilters,
+                  scope: str, cursor: str | None, limit: int) -> SearchPage:
     req = Requirement
-    statement = select(req.code, req.title, req.description, req.status).where(
-        req.project_id == project_id, req.deleted_at.is_(None), _matches(terms, req.code, req.title, req.description),
+    statement = select(req.project_id, req.code, req.title, req.description, req.status).where(
+        req.project_id.in_(project_ids), req.deleted_at.is_(None), _matches(terms, req.code, req.title, req.description),
+        *filters.time_predicates(req.updated_at),
     )
-    rows, next_cursor = _shortcode_results(db, statement, req.code, kind=ResourceKind.REQUIREMENT,
-                                           project_id=project_id, scope=scope, cursor=cursor, limit=limit)
+    if filters.requirement_status is not None:
+        statement = statement.where(req.status == filters.requirement_status)
+    rows, next_cursor = _identifier_results(db, statement, req.project_id, req.code, kind=ResourceKind.REQUIREMENT,
+                                            project_ids=project_ids, scope=scope, cursor=cursor, limit=limit)
     overview = {}
     if rows:
-        counts = db.execute(select(Task.requirement_id, func.count(), func.count().filter(Task.status == "done")).where(
-            Task.project_id == project_id, Task.deleted_at.is_(None), Task.requirement_id.in_([row.code for row in rows]),
-        ).group_by(Task.requirement_id))
-        overview = {code: (count, done) for code, count, done in counts}
+        counts = db.execute(select(
+            Task.project_id, Task.requirement_id, func.count(), func.count().filter(Task.status == "done"),
+        ).where(Task.deleted_at.is_(None), tuple_(Task.project_id, Task.requirement_id).in_([
+            (row.project_id, row.code) for row in rows
+        ])).group_by(Task.project_id, Task.requirement_id))
+        overview = {(project_id, code): (count, done) for project_id, code, count, done in counts}
     return SearchPage(items=[SearchItem(
-        id=row.code, project_id=project_id, domain=SearchDomain.REQUIREMENT, title=row.title, status=row.status,
-        href=ResourceRef(project_id, ResourceKind.REQUIREMENT, row.code).path,
+        id=row.code, project_id=row.project_id, domain=SearchDomain.REQUIREMENT, title=row.title, status=row.status,
+        href=ResourceRef(row.project_id, ResourceKind.REQUIREMENT, row.code).path,
         snippet=_snippet(terms, row.description, row.title, row.code),
-        task_count=overview.get(row.code, (0, 0))[0], done_task_count=overview.get(row.code, (0, 0))[1],
+        task_count=overview.get((row.project_id, row.code), (0, 0))[0],
+        done_task_count=overview.get((row.project_id, row.code), (0, 0))[1],
     ) for row in rows], next_cursor=next_cursor)
 
 
-def _timeline(db: Session, project_id: UUID, terms: tuple[str, ...], scope: str,
-              cursor: str | None, limit: int) -> SearchPage:
+def _timeline(db: Session, project_ids: tuple[UUID, ...], terms: tuple[str, ...], filters: SearchFilters,
+              scope: str, cursor: str | None, limit: int) -> SearchPage:
     entry, revision, requirement = TimelineEntry, TimelineRevision, Requirement
-    statement = select(entry.id, entry.requirement_code, entry.occurred_at, requirement.title, revision.body).select_from(entry).join(
+    event_summary = entry.event_data["summary"].as_string()
+    statement = select(
+        entry.project_id, entry.id, entry.requirement_code, entry.occurred_at, requirement.title, revision.body,
+        entry.event_type, event_summary.label("event_summary"),
+    ).select_from(entry).outerjoin(
         revision, and_(revision.project_id == entry.project_id, revision.requirement_code == entry.requirement_code,
                        revision.entry_id == entry.id, revision.version == entry.latest_version),
     ).join(requirement, and_(requirement.project_id == entry.project_id, requirement.code == entry.requirement_code)).where(
-        entry.project_id == project_id, requirement.deleted_at.is_(None), entry.kind == "manual",
-        revision.kind != "withdraw", _matches(terms, revision.body),
+        entry.project_id.in_(project_ids), requirement.deleted_at.is_(None),
+        or_(entry.kind == "system", revision.kind != "withdraw"),
+        *filters.time_predicates(entry.occurred_at),
     )
+    if filters.timeline_kind is not None:
+        statement = statement.where(entry.kind == filters.timeline_kind)
+    if filters.timeline_actor_id is not None:
+        statement = statement.where(entry.actor_id == filters.timeline_actor_id)
+    if filters.timeline_source_task is not None:
+        ResourceRef(project_ids[0], ResourceKind.TASK, filters.timeline_source_task)
+        statement = statement.where(entry.source_task_code == filters.timeline_source_task)
+    statement = statement.where(_matches(terms, revision.body, event_summary, entry.event_type))
     position = decode_time_position(scope, cursor)
     if position is not None:
         cutoff, target_id = position
@@ -161,36 +194,53 @@ def _timeline(db: Session, project_id: UUID, terms: tuple[str, ...], scope: str,
         last = rows[limit - 1]
         next_cursor = encode_position(scope, [as_utc(last.occurred_at).isoformat(), str(last.id)])
     return SearchPage(items=[SearchItem(
-        id=str(row.id), project_id=project_id, domain=SearchDomain.TIMELINE, title=row.title, requirement_id=row.requirement_code,
-        href=f"{ResourceRef(project_id, ResourceKind.REQUIREMENT, row.requirement_code).path}#timeline-{row.id}",
-        snippet=_snippet(terms, row.body),
+        id=str(row.id), project_id=row.project_id, domain=SearchDomain.TIMELINE, title=row.title,
+        requirement_id=row.requirement_code,
+        href=f"{ResourceRef(row.project_id, ResourceKind.REQUIREMENT, row.requirement_code).path}#timeline-{row.id}",
+        snippet=_snippet(terms, row.body, row.event_summary, row.event_type),
     ) for row in rows[:limit]], next_cursor=next_cursor)
 
 
-def _wiki(db: Session, project_id: UUID, terms: tuple[str, ...], scope: str, cursor: str | None, limit: int) -> SearchPage:
-    statement = select(Wiki.code, Wiki.title, Wiki.summary, Wiki.body).where(
-        Wiki.project_id == project_id, Wiki.code.in_(visible_wiki_codes(project_id)),
-        _matches(terms, Wiki.title, Wiki.summary, Wiki.body),
+def _wiki(db: Session, project_ids: tuple[UUID, ...], terms: tuple[str, ...], filters: SearchFilters,
+          scope: str, cursor: str | None, limit: int) -> SearchPage:
+    trees = [visible_wiki_tree(project_id) for project_id in project_ids]
+    visible = or_(*(and_(
+        Wiki.project_id == project_id, Wiki.code.in_(select(tree.c.code)),
+    ) for project_id, tree in zip(project_ids, trees, strict=True)))
+    statement = select(Wiki.project_id, Wiki.code, Wiki.title, Wiki.summary, Wiki.body).where(
+        visible, _matches(terms, Wiki.title, Wiki.summary, Wiki.body), *filters.time_predicates(Wiki.updated_at),
     )
-    rows, next_cursor = _shortcode_results(db, statement, Wiki.code, kind=ResourceKind.WIKI,
-                                           project_id=project_id, scope=scope, cursor=cursor, limit=limit)
+    if filters.wiki_category is not None:
+        statement = statement.where(Wiki.category == filters.wiki_category)
+    if filters.wiki_tag is not None:
+        statement = statement.where(wiki_tag_predicate(db, filters.wiki_tag))
+    rows, next_cursor = _identifier_results(db, statement, Wiki.project_id, Wiki.code, kind=ResourceKind.WIKI,
+                                            project_ids=project_ids, scope=scope, cursor=cursor, limit=limit)
     return SearchPage(items=[SearchItem(
-        id=row.code, project_id=project_id, domain=SearchDomain.WIKI, title=row.title,
-        href=ResourceRef(project_id, ResourceKind.WIKI, row.code).path, snippet=_snippet(terms, row.body, row.summary, row.title),
+        id=row.code, project_id=row.project_id, domain=SearchDomain.WIKI, title=row.title,
+        href=ResourceRef(row.project_id, ResourceKind.WIKI, row.code).path,
+        snippet=_snippet(terms, row.body, row.summary, row.title),
     ) for row in rows], next_cursor=next_cursor)
 
 
-def _files(db: Session, project_id: UUID, terms: tuple[str, ...], scope: str, cursor: str | None, limit: int) -> SearchPage:
-    statement = select(ProjectFile).where(
-        ProjectFile.project_id == project_id, ProjectFile.deleted_at.is_(None), _matches(terms, ProjectFile.name, ProjectFile.media_type),
+def _files(db: Session, project_ids: tuple[UUID, ...], terms: tuple[str, ...], filters: SearchFilters,
+           scope: str, cursor: str | None, limit: int) -> SearchPage:
+    file = ProjectFile
+    statement = select(file.project_id, file.id, file).where(
+        file.project_id.in_(project_ids), file.deleted_at.is_(None), _matches(terms, file.name, file.media_type),
+        *filters.time_predicates(file.created_at),
     )
-    after = _identifier_position(scope, cursor, ResourceKind.FILE, project_id)
-    if after is not None:
-        statement = statement.where(ProjectFile.id > parse_uuid(after, "cursor.id"))
-    rows = list(db.scalars(statement.order_by(ProjectFile.id).limit(limit + 1)))
+    if filters.file_media_type is not None:
+        statement = statement.where(file.media_type == filters.file_media_type.lower())
+    if filters.file_uploader_id is not None:
+        statement = statement.where(file.created_by == filters.file_uploader_id)
+    if filters.file_used_at is not None:
+        statement = statement.where(file_used_at_predicate(filters.file_used_at, project_ids))
+    rows, next_cursor = _identifier_results(db, statement, file.project_id, file.id, kind=ResourceKind.FILE,
+                                            project_ids=project_ids, scope=scope, cursor=cursor, limit=limit)
     return SearchPage(items=[SearchItem(
         domain=SearchDomain.FILE, title=row.name, snippet=_snippet(terms, row.name, row.media_type), **file_summary(row),
-    ) for row in rows[:limit]], next_cursor=encode_position(scope, [str(rows[limit - 1].id)]) if len(rows) > limit else None)
+    ) for _, _, row in rows], next_cursor=next_cursor)
 
 
 _SEARCH = {SearchDomain.REQUIREMENT: _requirements, SearchDomain.TIMELINE: _timeline, SearchDomain.WIKI: _wiki, SearchDomain.FILE: _files}
@@ -199,11 +249,20 @@ _SEARCH = {SearchDomain.REQUIREMENT: _requirements, SearchDomain.TIMELINE: _time
 def search_project(
     db: Session, actor: User, project_id: UUID, *, query: str, domains: list[SearchDomain] | None = None,
     cursor: str | None = None, limit: int = DEFAULT_PAGE_SIZE,
+    additional_project_ids: list[UUID] | None = None, filters: SearchFilters | None = None,
 ) -> SearchResult:
     if actor.deleted_at is not None:
         raise permission_denied("账号已停用")
-    get_accessible_project(db, actor.id, project_id)
+    if additional_project_ids is not None and len(additional_project_ids) >= MAX_SEARCH_PROJECTS:
+        raise invalid_request(f"每次最多选择 {MAX_SEARCH_PROJECTS} 个检索项目")
+    project_ids = tuple(sorted({project_id, *(additional_project_ids or [])}))
+    for selected in project_ids:
+        get_accessible_project(db, actor.id, selected)
+
     terms = _query_terms(query)
+    filters = filters or SearchFilters()
+    filters.validate_range()
+    filter_values = filters.model_dump(mode="json", exclude_none=True)
     if type(limit) is not int or not 1 <= limit <= MAX_PAGE_SIZE:
         raise invalid_request(f"每个域须为 1 至 {MAX_PAGE_SIZE} 个结果")
     try:
@@ -212,7 +271,19 @@ def search_project(
         raise invalid_request("检索域须为 requirement、timeline、wiki 或 file") from None
     if not requested or (cursor is not None and len(requested) != 1):
         raise invalid_request("续页时通过 domains 明确选择一个检索域")
+    if not terms and not filter_values:
+        raise invalid_request("请输入关键词或选择筛选条件")
+    if not terms and filters.from_at is None and filters.to_at is None:
+        applicable = [domain for domain in requested if any(key.startswith(f"{domain}_") for key in filter_values)]
+        if not applicable:
+            raise invalid_request("请选择适用于检索域的筛选条件")
+        requested = applicable
     return SearchResult(domains={
-        domain: _SEARCH[domain](db, project_id, terms, scope_key("search.v2", str(actor.id), str(project_id), domain, terms, limit), cursor, limit)
+        domain: _SEARCH[domain](
+            db, project_ids, terms, filters,
+            scope_key("search.v2.scope", str(actor.id), str(project_id), [str(selected) for selected in project_ids],
+                      domain, terms, filter_values, limit),
+            cursor, limit,
+        )
         for domain in requested
     })
