@@ -3,17 +3,18 @@ from uuid import uuid4
 
 from sqlalchemy import func, select
 
+from app.api import files_v2
 from app.models import Activity, Attachment, Comment, Document, DocumentVersion, Requirement, Task
 from app.tests.conftest import login
 from app.v2.import_legacy_timeline import import_timeline
 from app.v2.import_legacy_wiki import import_wiki
-from app.v2 import import_legacy_files
+from app.v2 import files, import_legacy_files
 from app.v2.file_models import FileAssociation, ProjectFile
 from app.v2.timeline_models import TimelineEntry, TimelineFileReference, TimelineRevision
 from app.v2.wiki_models import Wiki, WikiReference, WikiVersion
 
 
-def test_legacy_files_keep_bytes_original_uuid_and_independent_usage(tmp_path, db, world, monkeypatch):
+def test_legacy_files_keep_bytes_original_uuid_and_independent_usage(tmp_path, client, db, world, monkeypatch):
     pid = world["project"].id
     payload = b"%PDF-1.7\nsynthetic fixture"
     attachment = Attachment(project_id=pid, target_type="requirement", target_id="REQ-1",
@@ -40,6 +41,19 @@ def test_legacy_files_keep_bytes_original_uuid_and_independent_usage(tmp_path, d
     db.flush()
     assert import_wiki(db)[0]["documents_imported"] == 1
     assert db.get(Wiki, (pid, "DOC-1")).body == f"[Open](</projects/{pid}/files/{attachment.id}>)"
+    db.commit()
+
+    monkeypatch.setattr(files_v2, "file_path", lambda project, ident: target)
+    monkeypatch.setattr(files, "file_path", lambda project, ident: target)
+    login(client, "admin", "admin-pass-1")
+    file_url = f"/api/v2/projects/{pid}/files/{attachment.id}"
+    old_url = f"/api/attachments/{attachment.id}/download"
+    assert client.get(old_url).content == payload
+    assert client.get(old_url, headers={"Range": "bytes=0-3"}).content == b"%PDF"
+    assert client.delete(file_url).status_code == 200
+    assert client.get(old_url).status_code == 404
+    assert client.post(f"{file_url}/restore").status_code == 200
+    assert client.get(old_url).content == payload
 
 
 def test_import_history_preserves_source_and_does_not_guess_reparented_task(db, world):

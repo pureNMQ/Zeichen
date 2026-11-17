@@ -5,15 +5,17 @@ Web 端经 multipart 上传,与 MCP 的 bytes 参数共用同一 service 层。
 
 import uuid
 
-from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..models import User
+from ..models import Attachment, User
 from ..services import attachments as service
 from ..services.pagination import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
+from ..v2.file_models import ProjectFile
 from .deps import current_user
+from .files_v2 import download_file
 
 router = APIRouter(prefix="/api", tags=["attachments"])
 
@@ -60,6 +62,7 @@ def list_attachments(
     )
 
 
+@router.head("/attachments/{attachment_id}/download", include_in_schema=False)
 @router.get("/attachments/{attachment_id}/download")
 def download_attachment(
     attachment_id: uuid.UUID,
@@ -67,6 +70,11 @@ def download_attachment(
     db: Session = Depends(get_db),
 ) -> Response:
     from urllib.parse import quote
+
+    legacy = db.get(Attachment, attachment_id)
+    if legacy is not None and legacy.project_id is not None:
+        if db.get(ProjectFile, (legacy.project_id, attachment_id)) is not None:
+            return download_file(legacy.project_id, attachment_id, user, db)
 
     file_name, data, _ = service.download(db, user, attachment_id)
     return Response(
