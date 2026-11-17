@@ -7,6 +7,14 @@ description: 按最小范围在生产环境执行 Zeichen 功能升级，保证�
 
 在生产环境执行一次功能升级的完整规程：最小范围热更新、数据零意外变更、分层验证、部署日志。本 Skill 面向**实际生产环境**（当前 compose 栈：根 docker-compose.yml + deploy/docker-compose.prod.yml 组合，nginx 唯一入口）。
 
+## v2 净室切换
+
+- 以 [DOC-44](https://zeichen.mochigm.cn/documents/wiki/DOC-44) 查实施状态及演练证据。对最终提交执行 `deploy.ps1 -CheckOnly`，核对其验证回执和 AC-01 至 AC-31。
+- 停写窗口先停旧写入和旧清理进程。用 `deploy/prepare_v2_cutover.py` 从一致的旧库和附件快照准备独立新库、新卷和切换清单。旧版原位迁移入口不能发布 v2。
+- 按切换清单核对新应用镜像、库和卷，检查 Zeichen 与 MochiSite 后恢复写入，再启用 v2 维护。恢复写入前失败切回旧库、旧卷、旧应用和入口配置；已开放写入后先保全新版增量。
+
+下文仅用于 v1 常规升级。
+
 ## 前置检查（每次必做）
 
 1. 确认当前项目与本次升级对应的 Requirement/Task 及其验收范围；读取相关 Wiki 与评论。
