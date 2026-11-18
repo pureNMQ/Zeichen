@@ -15,6 +15,8 @@ database and file volume. Routine v2 releases require the same database schema.
 ./deploy.ps1 -CheckOnly -Revision <full-commit-sha>
 .EXAMPLE
 ./deploy.ps1 -AllowMigration
+.EXAMPLE
+./deploy.ps1 -V2SchemaMigration
 #>
 [CmdletBinding()]
 param(
@@ -22,7 +24,8 @@ param(
     [ValidatePattern('^/[a-zA-Z0-9_/-]+$')][string]$ServerRoot = '/srv/zeichen',
     [switch]$CheckOnly,
     [ValidatePattern('^[0-9a-f]{40}$')][string]$Revision,
-    [switch]$AllowMigration
+    [switch]$AllowMigration,
+    [switch]$V2SchemaMigration
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -73,6 +76,7 @@ python3 -u '$remote/remote_release.py' --root "`$HOME/.zeichen-checks" --commit 
     }
 }
 
+if ($V2SchemaMigration -and ($AllowMigration -or $CheckOnly)) { throw 'Use -V2SchemaMigration after a successful separate -CheckOnly run.' }
 if ($Revision -and -not $CheckOnly) { throw '-Revision is only supported with -CheckOnly.' }
 if ($CheckOnly -and $AllowMigration) { throw '-AllowMigration applies to publishing only; candidate checks always use an isolated database.' }
 
@@ -86,32 +90,34 @@ try {
         Test-CandidateCommit $Revision.ToLowerInvariant() $bundle
         return
     }
-    if ((Invoke-Git branch --show-current) -ne 'develop') { throw 'Switch to develop before publishing.' }
+    if (-not $V2SchemaMigration -and (Invoke-Git branch --show-current) -ne 'develop') { throw 'Switch to develop before publishing.' }
     if (Invoke-Git status --porcelain) { throw 'Commit or stash changes before publishing; only committed files are deployed.' }
     $revision = (Invoke-Git rev-parse HEAD).Trim()
     if ($revision -notmatch '^[0-9a-f]{40}$') { throw 'Invalid commit.' }
-    Invoke-Git push origin develop
+    Invoke-Git push origin HEAD:refs/heads/develop
     # Transfer the exact pushed commit over SSH as well: the server need not
     # reach GitHub or store GitHub credentials to deploy it.
     $upload = "/tmp/zeichen-$revision-$([guid]::NewGuid().ToString('N')).bundle"
-    Invoke-Git bundle create $bundle develop
+    Invoke-Git bundle create $bundle HEAD
     & scp -q -o BatchMode=yes -o ClearAllForwardings=yes $bundle "${SshHost}:$upload"
     if ($LASTEXITCODE -ne 0) { throw 'Could not transfer the release bundle.' }
     $flags = ''
     if ($AllowMigration) { $flags += ' --allow-migration' }
     # The bootstrap touches Git objects only. Production source is never pulled
     # before verification; the release runner serializes all activation work.
+    $runner = 'remote_release.py'
+    if ($V2SchemaMigration) { $runner = 'migrate_v2_release.py' }
     $remoteScript = @"
 set -euo pipefail
 cd '$ServerRoot'
-git fetch '$upload' refs/heads/develop:refs/remotes/origin/develop
+git fetch '$upload' HEAD:refs/remotes/origin/develop
 git merge-base --is-ancestor '$revision' origin/develop
 staging=`$(mktemp -d /tmp/zeichen-release.XXXXXXXX)
 trap 'rm -rf -- "`$staging"; rm -f -- "$upload"' EXIT
 git archive '$revision' | tar -x -C "`$staging"
 umask 077
 mkdir -p '$ServerRoot/.release/logs'
-python3 -u "`$staging/deploy/remote_release.py" --root '$ServerRoot' --commit '$revision'$flags 2>&1 | tee '$ServerRoot/.release/logs/'`$(date -u +%Y%m%dT%H%M%SZ)'-$revision.log'
+python3 -u "`$staging/deploy/$runner" --root '$ServerRoot' --commit '$revision'$flags 2>&1 | tee '$ServerRoot/.release/logs/'`$(date -u +%Y%m%dT%H%M%SZ)'-$revision.log'
 "@
     Invoke-RemoteScript $remoteScript
 } finally {

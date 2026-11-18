@@ -263,6 +263,10 @@ class Release:
             run(["docker", "run", "--rm", "--network", name, "--memory", "1024m", "--cpus", "1",
                  "-e", f"ZEICHEN_TEST_V2_POSTGRES_URL=postgresql+psycopg://postgres:release-test-only@{name}/zeichen_v2_candidate",
                  image, "python", "-m", "pytest", "app/tests/test_v2_postgres_rehearsal.py"])
+            run(["docker", "exec", name, "createdb", "-U", "postgres", "zeichen_claim_test"])
+            run(["docker", "run", "--rm", "--network", f"container:{name}", "--memory", "1024m", "--cpus", "1",
+                 "-e", "ZEICHEN_TEST_CLAIM_POSTGRES_URL=postgresql+psycopg://postgres:release-test-only@127.0.0.1/zeichen_claim_test",
+                 image, "python", "-m", "pytest", "app/tests/test_task_claim_concurrency_api.py", "-k", "postgresql"])
         finally:
             subprocess.run(["docker", "rm", "-f", name], stdout=subprocess.DEVNULL)
             subprocess.run(["docker", "network", "rm", name], stdout=subprocess.DEVNULL)
@@ -347,7 +351,7 @@ class Release:
             raise RuntimeError("Database was replaced")
         if digest(http_get("https://mochigm.cn/")) != self.mochi_hash:
             raise RuntimeError("MochiSite content changed")
-        if self.db_revision() != self.target_revision:
+        if self.db_revision() != (self.old_revision if backend is not None else self.target_revision):
             raise RuntimeError("Unexpected database version")
 
     def activate(self):
@@ -501,8 +505,10 @@ class V2Release(Release):
         if self.last is not None:
             last = json.loads(self.last)
             if (last["status"] != "deployed" or last["cutover_manifest_sha256"] != manifest_hash
-                    or last["commit"] != self.old_head or last["database_after"] != self.old_revision):
+                    or last["commit"] != self.old_head
+                    or last["database_after"] != last.get("database_target", self.old_revision)):
                 raise RuntimeError("Prior v2 release state does not match the active cutover")
+            self.old_revision = last["database_after"]
             self.old_ingress_hash = last["ingress_sha256"]
             backend, frontend = last["backend_image"], last["frontend_image"]
         if not all(IMAGE_ID.fullmatch(value) for value in (backend, frontend)):
@@ -552,9 +558,12 @@ class V2Release(Release):
             raise RuntimeError("Routine v2 releases must retain the installed maintenance Compose configuration")
         return dict.fromkeys(paths, expected)
 
-    def configure_release(self):
+    def check_target_revision(self):
         if self.target_revision != self.old_revision:
             raise RuntimeError("Routine v2 releases require the active Alembic head")
+
+    def configure_release(self):
+        self.check_target_revision()
         for file, images in (
             (self.artifacts, {"api": self.backend, "mcp": self.backend, "frontend": self.frontend}),
             (self.rollback_file, self.previous_images),
