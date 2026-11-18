@@ -14,6 +14,7 @@ export type ProjectFileSummary = {
 }
 
 export type FileTargetKind = 'requirements' | 'tasks'
+export type FileAssociationTarget = FileTargetKind | 'project' | 'wiki'
 export type StagedProjectFile = { file: File; requestId: string }
 
 const UUID = '[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}'
@@ -27,15 +28,21 @@ export function projectFileContentUrl(projectId: string, fileId: string, inline 
   return `/api${projectFileApiPath(projectId, fileId)}/content${inline ? '?inline=true' : ''}`
 }
 
-export function fileAssociationQuery(targetKind: FileTargetKind, targetId: string) {
+export function fileAssociationQuery(targetKind: FileAssociationTarget, targetId: string) {
   return new URLSearchParams({ target_kind: targetKind, target_id: targetId })
 }
 
 export async function uploadAssociatedFile(
-  projectId: string, targetKind: FileTargetKind, targetId: string, attempt: StagedProjectFile,
+  projectId: string, targetKind: FileAssociationTarget, targetId: string, attempt: StagedProjectFile,
 ): Promise<void> {
   const saved = await uploadFileToProject(projectId, attempt.file, attempt.requestId, new AbortController().signal, () => {})
-  await api.put(`${projectFileApiPath(projectId, saved.id)}/usage?${fileAssociationQuery(targetKind, targetId)}`, {})
+  await associateProjectFile(projectId, targetKind, targetId, saved.id)
+}
+
+export async function associateProjectFile(
+  projectId: string, targetKind: FileAssociationTarget, targetId: string, fileId: string,
+): Promise<void> {
+  await api.put(`${projectFileApiPath(projectId, fileId)}/usage?${fileAssociationQuery(targetKind, targetId)}`, {})
 }
 
 export function previewUrlForFileLink(href: string) {

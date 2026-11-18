@@ -72,3 +72,15 @@ def test_http_completion_uses_existing_viewer_scope(client, world):
     [person] = response.json()["items"]
     assert person["kind"] == "agent"
     assert client.get(f"{route}/people/{person['id']}").json() == person
+
+
+def test_assignees_preserve_human_only_project_roster_and_owner_access(client, db, world):
+    route = f"/api/projects/{world['project'].id}"
+    login(client, "admin", "admin-pass-1")
+    people = client.get(f"{route}/assignees").json()
+    agent_id = str(world["agent"].id)
+    assert any(row["id"] == agent_id and row["is_agent"] for row in people)
+    assert all(not row["is_agent"] for row in client.get(f"{route}/members").json())
+    world["agent_owner"].deleted_at = datetime.now(timezone.utc)
+    db.commit()
+    assert agent_id not in {row["id"] for row in client.get(f"{route}/assignees").json()}

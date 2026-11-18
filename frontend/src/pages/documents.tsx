@@ -3,7 +3,10 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { DndContext, PointerSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { ArrowUpToLine, Bot, ChevronDown, ChevronRight, History, Link2, ListTree, MoreHorizontal, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react'
-import { VditorIrEditor, VditorMarkdownViewer } from '@/components/vditor-ir-editor'
+import { MarkdownComposer } from '@/components/markdown-composer'
+import { useProjectCompletion } from '@/lib/project-completion'
+import { projectFileUpload } from '@/lib/project-files'
+import { VditorMarkdownViewer } from '@/components/vditor-ir-editor'
 import { AttachmentList } from '@/components/attachment-list'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -12,22 +15,12 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { ErrorNotification } from '@/components/ui/notification'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { api, ApiError, type AuthorIdentity, type DocumentNode, type DocumentRow, type DocumentType, type DocumentVersionRow, type ReferenceRow, type WikiIndex, type WikiLinks, withProject } from '@/lib/api'
+import { api, ApiError, type AuthorIdentity, type DocumentNode, type DocumentRow, type DocumentType, type DocumentVersionRow, type WikiIndex, type WikiLinks, withProject } from '@/lib/api'
 import { filterNodesByTitle } from '@/lib/document-search'
 import { planDocumentMove, rootZoneFirstPointerWithin } from '@/lib/document-tree-dnd'
 import { useCurrentProject, useProjectRole } from '@/lib/current-project'
 import { useDocumentNavigation } from '@/lib/document-navigation'
-import { projectReferenceHref, projectResourceHref } from '@/lib/project-links'
-import { TaskRefLink } from '@/components/task-ref-link'
-
-function referenceHref(type: string, id: string, projectId?: string) {
-  if (projectId) return projectReferenceHref(projectId, type, id)
-  if (type === 'requirement') return `/requirements/${id}`
-  // task 引用走 TaskRefLink(任务无独立页面,ADR 0003)
-  if (type === 'document') return `/documents/wiki/${id}`
-  return null
-}
-
+import { projectResourceHref } from '@/lib/project-links'
 // REQ-59 Q2④:九形态约定值(与后端 DOC_KINDS 对齐;未分类兜底)
 const DOC_KIND_LABELS: Record<string, string> = {
   decision: '决策', incident: '事故', preference: '偏好', concept: '概念',
@@ -294,13 +287,15 @@ function DocumentEditor({ document, containerId, onDirtyChange, onRegisterSave, 
   const qc = useQueryClient()
   const [title, setTitle] = useState(document?.title ?? '')
   const [content, setContent] = useState(document?.content ?? '')
+  const lookup = useProjectCompletion(projectId)
+  const [uploading, setUploading] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [linkWarnings, setLinkWarnings] = useState<{ count: number; items: { raw_text: string; reason: string }[] } | null>(null)
   function markDirty() { if (!dirty) { setDirty(true); onDirtyChange(true) } }
   async function save(): Promise<boolean> {
-    if (!projectId) return false
+    if (!projectId || uploading) return false
     setSubmitting(true)
     try {
       const payload = { title: title.trim() || '无标题', content }
@@ -316,7 +311,7 @@ function DocumentEditor({ document, containerId, onDirtyChange, onRegisterSave, 
     } catch (err) { setError(err instanceof ApiError ? err.message : '保存失败，请重试'); return false } finally { setSubmitting(false) }
   }
   useEffect(() => { onRegisterSave(save) })
-  return <form onSubmit={(event) => { event.preventDefault(); void save() }} className="flex min-w-0 flex-1 flex-col"><ErrorNotification message={error} /><header className="border-b bg-background"><div className="mx-auto flex min-h-14 w-full max-w-5xl items-center justify-between gap-3 px-5 sm:px-8"><div className="flex items-center gap-3"><span className="rounded-md bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">Wiki</span><span className="hidden text-xs text-muted-foreground sm:block">{dirty ? '未保存的更改' : document ? '已保存' : '尚未创建'}</span></div><div className="flex gap-2"><Button type="button" size="sm" variant="outline" onClick={linkWarnings && document ? () => { const saved = document; setLinkWarnings(null); onSaved(saved) } : onCancel}>{linkWarnings ? '继续' : '取消'}</Button><Button type="submit" size="sm" disabled={submitting}>{submitting ? '保存中…' : '保存'}</Button></div></div></header>{linkWarnings && <div className="border-b border-dashed bg-muted/40 px-5 py-3 sm:px-8" role="status" data-testid="link-warnings"><div className="mx-auto max-w-5xl text-sm"><p className="font-medium">已保存,但检测到 {linkWarnings.count} 处断链(保留原文,不阻塞):</p><ul className="mt-1 list-disc pl-5 text-muted-foreground">{linkWarnings.items.map((item) => <li key={item.raw_text}>[[{item.raw_text}]] — {item.reason}</li>)}</ul></div></div>}<main className="flex flex-1 flex-col bg-muted/30"><article data-testid="document-writing-canvas" className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-6 py-8 sm:px-10 sm:py-10"><h1 className="sr-only">{document ? `编辑${document.title}` : '新建 Wiki'}</h1><div className="text-xs text-muted-foreground">{document ? `Wiki / ${document.title || '未命名文档'}` : 'Wiki / 新建文档'}(正文顶部可写 YAML frontmatter:summary/doc_kind/tags/aliases;[[双链]]保存时自动落表)</div><div className="mt-5"><Label htmlFor="document-title" className="sr-only">标题</Label><Input id="document-title" autoComplete="off" value={title} onChange={(event) => { setTitle(event.target.value); markDirty() }} maxLength={256} placeholder="无标题" className="h-auto rounded-none border-0 bg-transparent px-0 py-0 text-[2.5rem] font-semibold leading-tight tracking-[-0.045em] shadow-none placeholder:text-muted-foreground/55 focus-visible:ring-0 md:!text-5xl" /></div><section className="mt-10 flex-1 pb-24"><Label id="document-content-label" className="sr-only">正文</Label><VditorIrEditor className="document-vditor min-h-[26rem]" initialMarkdown={content} onChange={(markdown) => { setContent(markdown); markDirty() }} disabled={submitting} ariaLabelledBy="document-content-label" /></section></article></main></form>
+  return <form onSubmit={(event) => { event.preventDefault(); void save() }} className="flex min-w-0 flex-1 flex-col"><ErrorNotification message={error} /><header className="border-b bg-background"><div className="mx-auto flex min-h-14 w-full max-w-5xl items-center justify-between gap-3 px-5 sm:px-8"><div className="flex items-center gap-3"><span className="rounded-md bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">Wiki</span><span className="hidden text-xs text-muted-foreground sm:block">{dirty ? '未保存的更改' : document ? '已保存' : '尚未创建'}</span></div><div className="flex gap-2"><Button type="button" size="sm" variant="outline" onClick={linkWarnings && document ? () => { const saved = document; setLinkWarnings(null); onSaved(saved) } : onCancel}>{linkWarnings ? '继续' : '取消'}</Button><Button type="submit" size="sm" disabled={submitting || uploading}>{submitting ? '保存中…' : '保存'}</Button></div></div></header>{linkWarnings && <div className="border-b border-dashed bg-muted/40 px-5 py-3 sm:px-8" role="status" data-testid="link-warnings"><div className="mx-auto max-w-5xl text-sm"><p className="font-medium">已保存,但检测到 {linkWarnings.count} 处断链(保留原文,不阻塞):</p><ul className="mt-1 list-disc pl-5 text-muted-foreground">{linkWarnings.items.map((item) => <li key={item.raw_text}>[[{item.raw_text}]] — {item.reason}</li>)}</ul></div></div>}<main className="flex flex-1 flex-col bg-muted/30"><article data-testid="document-writing-canvas" className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-6 py-8 sm:px-10 sm:py-10"><h1 className="sr-only">{document ? `编辑${document.title}` : '新建 Wiki'}</h1><div className="text-xs text-muted-foreground">{document ? `Wiki / ${document.title || '未命名文档'}` : 'Wiki / 新建文档'}(正文顶部可写 YAML frontmatter:summary/doc_kind/tags/aliases;[[双链]]保存时自动落表)</div><div className="mt-5"><Label htmlFor="document-title" className="sr-only">标题</Label><Input id="document-title" autoComplete="off" value={title} onChange={(event) => { setTitle(event.target.value); markDirty() }} maxLength={256} placeholder="无标题" className="h-auto rounded-none border-0 bg-transparent px-0 py-0 text-[2.5rem] font-semibold leading-tight tracking-[-0.045em] shadow-none placeholder:text-muted-foreground/55 focus-visible:ring-0 md:!text-5xl" /></div><section className="mt-10 flex-1 pb-24"><MarkdownComposer className="[--writing-height:26rem]" value={content} onChange={(markdown) => { setContent(markdown); markDirty() }} disabled={submitting} lookup={lookup} upload={projectId ? projectFileUpload(projectId) : undefined} onUploadPending={setUploading} /></section></article></main></form>
 }
 
 function LinkBadge({ broken }: { broken: boolean }) {
@@ -335,7 +330,7 @@ function DocumentDetail({ document, onEdit, onNavigate, readOnly }: { document: 
   const [error, setError] = useState<string | null>(null)
   const [brokenCreate, setBrokenCreate] = useState<string | null>(null)
   const { data: versions } = useQuery({ queryKey: ['document-versions', 'wiki', document.id, routeProjectId], queryFn: () => api.get<{ items: DocumentVersionRow[] }>(withProject(`/documents/wiki/${document.id}/versions`, routeProjectId)), enabled: versionsOpen })
-  const { data: references } = useQuery({ queryKey: ['document-references', 'wiki', document.id, routeProjectId], queryFn: () => api.get<{ count: number; items: ReferenceRow[] }>(withProject(`/documents/wiki/${document.id}/references`, routeProjectId)) })
+
   const links: WikiLinks | undefined = document.links
   const metadata = document.metadata ?? {}
   const kind = typeof metadata.doc_kind === 'string' ? metadata.doc_kind : null
@@ -365,7 +360,7 @@ function DocumentDetail({ document, onEdit, onNavigate, readOnly }: { document: 
       <LinkBadge broken={link.broken || !link.to_code} /></li>) : <li className="text-muted-foreground">暂无出链</li>}</ul></div>
     <div className="rounded-xl border p-5"><h2 className="flex items-center gap-2 font-medium"><Link2 className="h-4 w-4" />反链({links.incoming.length})</h2><ul className="mt-3 space-y-2 text-sm">{links.incoming.length ? links.incoming.map((link, index) => <li key={`${link.from_code}-${index}`}><a href={documentUrl(link.from_code, routeProjectId)} className="text-primary hover:underline" onClick={(event) => { event.preventDefault(); onNavigate(documentUrl(link.from_code, routeProjectId)) }}>{link.from_title}</a><span className="text-muted-foreground"> → 此处(经「{link.raw_text}」)</span></li>) : <li className="text-muted-foreground">暂无反链</li>}</ul></div>
   </section>}
-  <section className="mt-8 rounded-xl border p-5"><h2 className="font-medium">引用</h2><div className="mt-3 space-y-2 text-sm">{references?.items.length ? references.items.map((reference) => { const outgoing = reference.from_id === document.id; const type = outgoing ? reference.to_type : reference.from_type; const id = outgoing ? reference.to_id : reference.from_id; const title = outgoing ? reference.to_title : reference.from_title; const href = referenceHref(type, id, routeProjectId); return <p key={reference.id}>{outgoing ? '引用至' : '被引用于'} {href ? <a href={href} className="text-primary hover:underline">{title ?? id}</a> : type === 'task' ? <TaskRefLink taskId={id}>{title ?? id}</TaskRefLink> : (title ?? id)}</p> }) : <p className="text-muted-foreground">暂无引用</p>}</div></section><section className="mt-8"><AttachmentList targetType="document" targetId={document.id} projectId={routeProjectId} readOnly={readOnly} /></section></div><ErrorNotification message={error} />
+  <section className="mt-8"><AttachmentList targetType="document" targetId={document.id} projectId={routeProjectId} readOnly={readOnly} /></section></div><ErrorNotification message={error} />
   <CreateFromBrokenLinkDialog initialTitle={brokenCreate ?? ''} source={document} open={brokenCreate !== null} onOpenChange={(open) => { if (!open) setBrokenCreate(null) }} onCreated={async (createdId) => { await qc.invalidateQueries({ queryKey: ['document-node'] }); await qc.invalidateQueries({ queryKey: ['wiki-index', projectId] }); navigate(`${documentUrl(createdId, routeProjectId)}?mode=edit`) }} />
   <Dialog open={versionsOpen} onOpenChange={setVersionsOpen}><DialogContent><DialogHeader><DialogTitle>版本历史</DialogTitle><DialogDescription>回滚会恢复该版本内容并创建新版本。</DialogDescription></DialogHeader><div className="max-h-96 space-y-2 overflow-y-auto">{versions?.items.map((version) => <div key={version.id} className="flex items-center justify-between rounded border p-3 text-sm"><span>版本 {version.version_no} · {version.title}{version.author ? ` · ${authorDisplayName(version.author)}` : ''}</span>{canEdit && <Button size="sm" variant="outline" onClick={() => setRollbackTarget(version.version_no)}><RotateCcw className="mr-1.5 h-3.5 w-3.5" />回滚</Button>}</div>)}</div></DialogContent></Dialog><Dialog open={rollbackTarget !== null} onOpenChange={(open) => !open && setRollbackTarget(null)}><DialogContent><DialogHeader><DialogTitle>确认回滚</DialogTitle><DialogDescription>标题和正文会恢复为所选版本。</DialogDescription></DialogHeader><DialogFooter><Button variant="outline" onClick={() => setRollbackTarget(null)}>取消</Button><Button onClick={() => rollbackTarget !== null && void rollback(rollbackTarget)}>确认回滚</Button></DialogFooter></DialogContent></Dialog><Dialog open={deleteOpen} onOpenChange={setDeleteOpen}><DialogContent><DialogHeader><DialogTitle>删除文档</DialogTitle><DialogDescription>此操作会将文档移入已删除状态。</DialogDescription></DialogHeader><DialogFooter><Button variant="outline" onClick={() => setDeleteOpen(false)}>取消</Button><Button variant="destructive" onClick={() => void remove()}>确认删除</Button></DialogFooter></DialogContent></Dialog></main>
 }

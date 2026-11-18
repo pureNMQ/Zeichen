@@ -4,10 +4,12 @@ import { Download, Paperclip, Trash2, Upload } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { api, ApiError, withProject, type AttachmentRow, type Page } from '@/lib/api'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ErrorNotification, useNotification } from '@/components/ui/notification'
 import { useProjectRole } from '@/lib/current-project'
-import { fileAssociationQuery, projectFileApiPath, uploadAssociatedFile, type FileTargetKind,
+import { associateProjectFile, fileAssociationQuery, projectFileApiPath, uploadAssociatedFile, type FileAssociationTarget,
   type ProjectFileSummary, type StagedProjectFile } from '@/lib/project-files'
 
 function formatSize(bytes: number): string {
@@ -16,28 +18,93 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-type AssociatedFile = ProjectFileSummary | { id: string; unavailable: true }
+type RelatedFile = (ProjectFileSummary | { id: string; unavailable: true }) & { attached: boolean; referenced: boolean }
 
-export function ProjectAttachments({ projectId, targetKind, targetId, canEdit }: {
-  projectId: string; targetKind: FileTargetKind; targetId: string; canEdit: boolean
+function FilePicker({ projectId, linked, onSelect, onUpload, onClose, restoreFocus }: {
+  projectId: string; linked: Set<string>; onSelect: (id: string) => Promise<void>; onUpload: () => void; onClose: () => void
+  restoreFocus: () => void
+}) {
+  const [query, setQuery] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const search = useInfiniteQuery({
+    queryKey: ['project-files', projectId, 'picker', query.trim()],
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam, signal }) => {
+      const params = new URLSearchParams({ query: query.trim(), limit: '20' })
+      if (pageParam) params.set('cursor', pageParam)
+      return api.get<Page<ProjectFileSummary>>(`/v2/projects/${encodeURIComponent(projectId)}/files?${params}`, signal)
+    },
+    getNextPageParam: (page) => page.next_cursor,
+  })
+  const matches = search.data?.pages.flatMap((page) => page.items.filter((file) => file.project_id === projectId)) ?? []
+  async function select(id: string) {
+    setSaving(true)
+    setError(null)
+    try {
+      await onSelect(id)
+      onClose()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '添加文件失败，请重试。')
+    } finally {
+      setSaving(false)
+    }
+  }
+  return <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
+    <DialogContent aria-describedby={undefined} onCloseAutoFocus={(event) => {
+      event.preventDefault()
+      restoreFocus()
+    }}>
+      <DialogHeader><DialogTitle>添加文件</DialogTitle></DialogHeader>
+      <Input autoComplete="off" aria-label="搜索项目文件" placeholder="搜索项目文件" maxLength={256} value={query}
+        onChange={(event) => setQuery(event.target.value)} />
+      <div className="max-h-64 overflow-y-auto">
+        {search.isLoading && <p role="status">正在加载文件…</p>}
+        {search.isSuccess && !matches.length && <p className="text-sm text-muted-foreground">没有匹配的项目文件</p>}
+        {matches.map((file) => <button key={file.id} type="button" disabled={saving || linked.has(file.id)}
+          onClick={() => void select(file.id)} className="w-full rounded-md px-2 py-2 text-left hover:bg-muted focus-visible:ring-2 disabled:opacity-60">
+          <span className="block break-all font-medium">{file.name}</span>
+          <span className="text-xs text-muted-foreground" title={file.id}>{formatSize(file.size)} · {file.id.slice(-8)}{linked.has(file.id) && ' · 已关联'}</span>
+        </button>)}
+        {search.hasNextPage && <Button type="button" variant="ghost" disabled={search.isFetching} onClick={() => void search.fetchNextPage()}>加载更多文件</Button>}
+      </div>
+      {(error || search.error) && <p role="alert">{error ?? search.error?.message}</p>}
+      {search.isError && <Button variant="outline" onClick={() => void (search.isFetchNextPageError ? search.fetchNextPage() : search.refetch())}>重试加载</Button>}
+      <Button type="button" variant="outline" disabled={saving} onClick={onUpload}><Upload aria-hidden="true" />从本机上传</Button>
+    </DialogContent>
+  </Dialog>
+}
+
+export function RelatedFiles({ projectId, targetKind, targetId, canEdit }: {
+  projectId: string; targetKind: FileAssociationTarget; targetId: string; canEdit: boolean
 }) {
   const queryClient = useQueryClient()
   const input = useRef<HTMLInputElement>(null)
+  const addButton = useRef<HTMLButtonElement>(null)
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
+  const [pickerOpen, setPickerOpen] = useState(false)
   const [retry, setRetry] = useState<StagedProjectFile | null>(null)
-  const key = ['project-files', projectId, 'associations', targetKind, targetId]
+  const key = ['project-files', projectId, 'related', targetKind, targetId]
   const list = useInfiniteQuery({
     queryKey: key,
     initialPageParam: null as string | null,
     queryFn: ({ pageParam, signal }) => {
       const params = fileAssociationQuery(targetKind, targetId)
+      params.set('include_body', 'true')
       if (pageParam) params.set('cursor', pageParam)
-      return api.get<Page<AssociatedFile>>(`/v2/projects/${encodeURIComponent(projectId)}/files/associations?${params}`, signal)
+      return api.get<Page<RelatedFile>>(`/v2/projects/${encodeURIComponent(projectId)}/files/associations?${params}`, signal)
     },
     getNextPageParam: (page) => page.next_cursor,
   })
   const files = list.data?.pages.flatMap((page) => page.items) ?? []
+
+  async function refresh() {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['project-files', projectId] }),
+      queryClient.invalidateQueries({ queryKey: ['project-file-usage', projectId] }),
+    ])
+  }
 
   async function upload(attempt: StagedProjectFile) {
     setPending(true)
@@ -45,9 +112,9 @@ export function ProjectAttachments({ projectId, targetKind, targetId, canEdit }:
     setRetry(null)
     try {
       await uploadAssociatedFile(projectId, targetKind, targetId, attempt)
-      await queryClient.invalidateQueries({ queryKey: ['project-files', projectId] })
+      await refresh()
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '上传失败，请重试。')
+      setError(cause instanceof Error ? cause.message : '添加文件失败，请重试。')
       setRetry(attempt)
     } finally {
       setPending(false)
@@ -58,59 +125,71 @@ export function ProjectAttachments({ projectId, targetKind, targetId, canEdit }:
     setError(null)
     try {
       await api.delete(`${projectFileApiPath(projectId, id)}/usage?${fileAssociationQuery(targetKind, targetId)}`)
-      await queryClient.invalidateQueries({ queryKey: key })
+      await refresh()
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '移除关联失败，请重试。')
     }
   }
 
+  const addFile = canEdit && <div className="flex items-center gap-2">
+    <input ref={input} type="file" hidden autoComplete="off" aria-label="选择要添加的文件" disabled={pending}
+      onChange={(event) => {
+        const file = event.currentTarget.files?.[0]
+        event.currentTarget.value = ''
+        if (file) void upload({ file, requestId: crypto.randomUUID() })
+      }} />
+    <Button ref={addButton} type="button" variant="ghost" size="sm" disabled={pending} onClick={() => setPickerOpen(true)}>
+      <Paperclip aria-hidden="true" />{pending ? '添加中…' : '添加文件'}
+    </Button>
+    {retry && <Button type="button" variant="outline" size="sm" disabled={pending} onClick={() => void upload(retry)}>重试添加</Button>}
+  </div>
+
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="flex items-center gap-2 text-sm"><Paperclip className="h-4 w-4" /> 附件</CardTitle>
-        {canEdit && <div className="flex gap-2">
-          <input ref={input} type="file" hidden autoComplete="off" aria-label="选择附件" disabled={pending}
-            onChange={(event) => {
-              const file = event.currentTarget.files?.[0]
-              event.currentTarget.value = ''
-              if (file) void upload({ file, requestId: crypto.randomUUID() })
-            }} />
-          <Button type="button" variant="outline" size="sm" disabled={pending} onClick={() => input.current?.click()}>
-            {pending ? '上传中…' : '上传附件'}
-          </Button>
-          {retry && <Button type="button" variant="outline" size="sm" onClick={() => void upload(retry)}>重试上传</Button>}
-        </div>}
-      </CardHeader>
-      <CardContent className="space-y-2">
-        <ErrorNotification message={error ?? list.error?.message} />
-        {list.isLoading && <p role="status" className="text-sm text-muted-foreground">正在加载附件…</p>}
-        {!list.isLoading && !list.isError && files.length === 0 && (
-          <p className="text-sm text-muted-foreground">暂无附件</p>
-        )}
-        {files.map((file) => (
-          <div key={file.id} className="flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm">
-            {'unavailable' in file ? <span className="text-muted-foreground">此附件已删除</span> : (
-              <>
-                <div className="flex min-w-0 items-center gap-2">
-                  <Link to={file.href} className="truncate text-primary hover:underline">{file.name}</Link>
-                  <span className="shrink-0 text-xs text-muted-foreground">{formatSize(file.size)}</span>
-                </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  {file.download_href && <a href={file.download_href} className="underline-offset-4 hover:underline">下载</a>}
-                  {canEdit && (
-                    <Button type="button" variant="ghost" size="sm" onClick={() => void unlink(file.id)}>
-                      移除关联
-                    </Button>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-        ))}
-        {list.hasNextPage && <Button type="button" variant="outline" size="sm" disabled={list.isFetchingNextPage}
-          onClick={() => void list.fetchNextPage()}>{list.isFetchingNextPage ? '加载中…' : '加载更多'}</Button>}
-      </CardContent>
-    </Card>
+    <section aria-label="相关文件" className="space-y-2">
+      <ErrorNotification message={error ?? list.error?.message} />
+      {canEdit && pickerOpen && <FilePicker projectId={projectId} linked={new Set(files.filter((file) => file.attached).map((file) => file.id))}
+        onSelect={async (id) => {
+          await associateProjectFile(projectId, targetKind, targetId, id)
+          await refresh()
+        }}
+        onClose={() => setPickerOpen(false)} restoreFocus={() => addButton.current?.focus()} onUpload={() => {
+          input.current?.click()
+          setPickerOpen(false)
+        }} />}
+      {list.isLoading && <p role="status" className="text-sm text-muted-foreground">正在加载相关文件…</p>}
+      {files.length > 0 ? <>
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-sm font-medium">相关文件</h2>
+          {addFile}
+        </div>
+        <ul className="divide-y rounded-lg border">
+          {files.map((file) => (
+            <li key={file.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm">
+              <div className="min-w-0 flex-1">
+                {'unavailable' in file ? <span className="text-muted-foreground">文件已删除</span> :
+                  <Link to={file.href} className="block truncate font-medium hover:underline">{file.name}</Link>}
+                <span className="text-xs text-muted-foreground">
+                  {'unavailable' in file ? '' : formatSize(file.size) + ' · '}
+                  {file.referenced ? (file.attached ? '正文引用 · 单独添加' : '正文引用') : '单独添加'}
+                </span>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                {!('unavailable' in file) && file.download_href &&
+                  <a href={file.download_href} className="underline-offset-4 hover:underline">下载</a>}
+                {canEdit && file.attached && !('unavailable' in file) &&
+                  <Button type="button" variant="ghost" size="sm" onClick={() => void unlink(file.id)}>
+                    移除关联
+                  </Button>}
+              </div>
+            </li>
+          ))}
+        </ul>
+      </> : addFile}
+      {list.isError && !list.isFetchNextPageError && <Button type="button" variant="outline" size="sm"
+        disabled={list.isFetching} onClick={() => void list.refetch()}>重试加载</Button>}
+      {list.hasNextPage && <Button type="button" variant="outline" size="sm" disabled={list.isFetchingNextPage}
+        onClick={() => void list.fetchNextPage()}>{list.isFetchingNextPage ? '加载中…' : list.isFetchNextPageError ? '重试加载更多' : '加载更多'}</Button>}
+    </section>
   )
 }
 

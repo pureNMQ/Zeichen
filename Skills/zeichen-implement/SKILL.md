@@ -1,6 +1,6 @@
 ---
 name: zeichen-implement
-description: 按 Zeichen 任务执行软件变更，默认使用本地仓库和可运行测试，并把实施证据写回任务。Use when the user asks to implement, fix, or deliver a specific task.
+description: 按 Zeichen 任务执行软件变更，默认使用本地仓库和可运行测试，并把实施证据写到关联需求时间轴并标注来源任务。Use when the user asks to implement, fix, or deliver a specific task.
 ---
 
 # Zeichen Implement

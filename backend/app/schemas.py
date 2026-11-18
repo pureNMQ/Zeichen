@@ -67,19 +67,25 @@ class ProjectOwnerTransfer(BaseModel):
 
 class ProjectCreate(BaseModel):
     name: str = Field(min_length=1, max_length=128)
+    description: str = Field(default="", max_length=1000)
     members: list[ProjectMemberAdd] = []
 
 
 class ProjectUpdate(BaseModel):
-    name: str = Field(min_length=1, max_length=128)
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    description: str = Field(default="", max_length=1000)
 
 
 class RequirementCreate(BaseModel):
+    request_id: uuid.UUID | None = None
     title: str = Field(min_length=1, max_length=256)
     description: str | None = None
 
 
 class RequirementUpdate(BaseModel):
+    blocked_by: list[str] | None = None
+    expected_blocked_by: list[str] | None = None
+    expected_version: int | None = Field(default=None, ge=1)
     title: str | None = Field(default=None, min_length=1, max_length=256)
     description: str | None = None
 
@@ -88,24 +94,28 @@ class StatusBody(BaseModel):
     status: str = Field(min_length=1, max_length=16)
 
 
+class RequirementRejectBody(BaseModel):
+    reason: str = Field(min_length=1, max_length=2000)
+    request_id: uuid.UUID
+
+
 class RequirementDeleteBody(BaseModel):
     confirm_task_count: int | None = Field(default=None, ge=0)
 
 
-class TaskCreate(BaseModel):
+class TaskCreate(BaseModel, extra="forbid"):
+    request_id: uuid.UUID | None = None
     title: str = Field(min_length=1, max_length=256)
     description: str | None = None
     # 必填由服务层强制(缺失 → invalid_request,而非 422;ADR 0003);值为需求短码 REQ-n(ADR 0002)
     requirement_id: str | None = None
     assignee_id: uuid.UUID | None = None
-    blocked_by: list[str] | None = None
 
 
-class TaskUpdate(BaseModel):
+class TaskUpdate(BaseModel, extra="forbid"):
+    expected_version: int | None = Field(default=None, ge=1)
     title: str | None = Field(default=None, min_length=1, max_length=256)
     description: str | None = None
-    requirement_id: str | None = None
-    blocked_by: list[str] | None = None
 
 
 class TaskAssignBody(BaseModel):
@@ -169,15 +179,6 @@ class RollbackBody(BaseModel):
 
 class CommentCreate(BaseModel):
     body: str = Field(min_length=1, max_length=5000)
-
-
-class ReferenceCreate(BaseModel):
-    # 五类实体端点传短码(REQ/TASK/DOC/TERM/DIR-n);repository/project 端点传 UUID(ADR 0002)
-    from_type: Literal["requirement", "task", "document", "repository", "project"]
-    from_id: str
-    to_type: Literal["requirement", "task", "document", "repository", "project"]
-    to_id: str
-    type: Literal["derives", "documents", "implements", "mentions"]
 
 
 class NotificationPreferencesUpdate(BaseModel):

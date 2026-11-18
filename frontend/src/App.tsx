@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { AppShell } from '@/components/app-shell'
 import { ErrorNotification } from '@/components/ui/notification'
 import { api } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
+import { authReturnPath } from '@/lib/auth-return'
 import { DocumentNavigationProvider } from '@/lib/document-navigation'
-import { CurrentProjectProvider } from '@/lib/current-project'
+import { CurrentProjectProvider, useCurrentProject } from '@/lib/current-project'
 import { projectResourceHref } from '@/lib/project-links'
 import { BootstrapPage } from '@/pages/bootstrap'
 import { LoginPage } from '@/pages/login'
@@ -17,19 +18,41 @@ import { CanonicalPersonRoute, CanonicalProjectRoute, CanonicalTaskRoute } from 
 import { ProjectFileDetailPage } from '@/pages/project/file-detail'
 import { ProjectFilesPage } from '@/pages/project/files'
 import { ProjectWikiPage } from '@/pages/project/wiki'
+import { WorkEditorPage } from '@/pages/project/work-editor'
 import { RequirementsPage } from '@/pages/requirements'
 import { RequirementDetailPage } from '@/pages/requirement-detail'
 import { SetPasswordPage } from '@/pages/set-password'
-import { DocumentWorkbenchPage } from '@/pages/documents'
 import { RepositoriesPage } from '@/pages/repositories'
 import { SearchPage } from '@/pages/search'
 import { ProjectSearchPage } from '@/pages/project/search-v2'
 import { ManualPage } from '@/pages/manual'
 
-/** REQ-59:旧词条 URL(TERM-n)重定向到 wiki 工作台同短码页面。 */
-function WikiTermRedirect() {
-  const { id } = useParams<{ id: string }>()
-  return <Navigate to={`/documents/wiki/${id ?? ''}`} replace />
+function LegacyWikiRedirect({ directory = false }: { directory?: boolean }) {
+  const { id } = useParams()
+  const code = directory ? undefined : id
+  const { search, hash } = useLocation()
+  const { projectId, isLoading } = useCurrentProject()
+  const params = new URLSearchParams(search)
+  const scope = params.get('project_id')
+  const lookup = useQuery({
+    queryKey: ['legacy-wiki-project', code],
+    queryFn: ({ signal }) => api.get<{ project_id: string }>(`/documents/wiki/${encodeURIComponent(code!)}`, signal),
+    enabled: Boolean(code && !scope),
+    retry: false,
+  })
+  const targetProject = scope ?? (code ? lookup.data?.project_id : projectId)
+  if (targetProject) {
+    params.delete('project_id')
+    const query = params.toString()
+    return <Navigate to={`${projectResourceHref(targetProject, 'wiki', code)}${query ? `?${query}` : ''}${hash}`} replace />
+  }
+  if (lookup.isLoading || isLoading) return <p role="status" className="text-sm text-muted-foreground">加载 Wiki…</p>
+  return <div className="space-y-2">
+    <ErrorNotification message={lookup.error?.message} />
+    <Link className="text-sm underline" to={projectId ? projectResourceHref(projectId, 'wiki') : '/projects'}>
+      {projectId ? '打开当前项目的 Wiki' : '选择项目'}
+    </Link>
+  </div>
 }
 
 function LegacyRequirementRedirect() {
@@ -54,17 +77,18 @@ function LegacyRequirementRedirect() {
 function BootstrapGate() {
   const navigate = useNavigate()
   const { loading } = useAuth()
+  const { search } = useLocation()
   useEffect(() => {
     if (loading) return
     void (async () => {
       try {
         const { needs_bootstrap } = await api.get<{ needs_bootstrap: boolean }>('/auth/bootstrap')
-        if (!needs_bootstrap) navigate('/login', { replace: true })
+        if (!needs_bootstrap) navigate(`/login${search}`, { replace: true })
       } catch {
-        navigate('/login', { replace: true })
+        navigate(`/login${search}`, { replace: true })
       }
     })()
-  }, [loading, navigate])
+  }, [loading, navigate, search])
 
   if (loading) return null
   return <BootstrapPage />
@@ -72,13 +96,15 @@ function BootstrapGate() {
 
 function LoginGate() {
   const { user, loading } = useAuth()
+  const [params] = useSearchParams()
   if (loading) return null
-  if (user) return <Navigate to="/projects" replace />
+  if (user) return <Navigate to={authReturnPath(params.get('from'))} replace />
   return <LoginPage />
 }
 
 function RequireAuth() {
   const { user, loading } = useAuth()
+  const { pathname, search, hash } = useLocation()
   const [bootstrap, setBootstrap] = useState<boolean | null>(null)
 
   useEffect(() => {
@@ -100,7 +126,8 @@ function RequireAuth() {
   if (loading) return null
   if (!user) {
     if (bootstrap === null) return null
-    return <Navigate to={bootstrap ? '/bootstrap' : '/login'} replace />
+    const from = new URLSearchParams({ from: `${pathname}${search}${hash}` })
+    return <Navigate to={`${bootstrap ? '/bootstrap' : '/login'}?${from}`} replace />
   }
   return (
     <CurrentProjectProvider>
@@ -123,25 +150,27 @@ export function App() {
         <Route path="projects/:projectId" element={<ProjectLayout />} />
         <Route path="projects/:projectId" element={<CanonicalProjectRoute />}>
           <Route path="requirements" element={<RequirementsPage />} />
+          <Route path="requirements/new" element={<WorkEditorPage kind="requirements" creating />} />
+          <Route path="requirements/:id/edit" element={<WorkEditorPage kind="requirements" />} />
+          <Route path="requirements/:id/tasks/new" element={<WorkEditorPage kind="tasks" creating />} />
+          <Route path="requirements/:id/tasks/:taskId/edit" element={<WorkEditorPage kind="tasks" />} />
           <Route path="requirements/:id" element={<RequirementDetailPage />} />
           <Route path="tasks/:id" element={<CanonicalTaskRoute />} />
-          <Route path="wiki" element={<ProjectWikiPage />} />
-          <Route path="wiki/:id" element={<ProjectWikiPage />} />
+          <Route path="wiki/:id?" element={<ProjectWikiPage />} />
           <Route path="people/:id" element={<CanonicalPersonRoute />} />
           <Route path="files" element={<ProjectFilesPage />} />
           <Route path="files/:id" element={<ProjectFileDetailPage />} />
+          <Route path="repositories" element={<RepositoriesPage />} />
+          <Route path="search" element={<ProjectSearchPage />} />
         </Route>
         <Route path="requirements" element={<RequirementsPage />} />
         <Route path="requirements/:id" element={<LegacyRequirementRedirect />} />
-        <Route path="documents/wiki" element={<DocumentWorkbenchPage module="wiki" readOnly />} />
-        <Route path="documents/wiki/:id" element={<DocumentWorkbenchPage module="wiki" readOnly />} />
-        {/* REQ-59:glossary 并入 wiki,旧词条 URL 重定向保持不断链 */}
-        <Route path="documents/glossary" element={<Navigate to="/documents/wiki" replace />} />
-        <Route path="documents/glossary/directory/:id" element={<Navigate to="/documents/wiki" replace />} />
-        <Route path="documents/glossary/term/:id" element={<WikiTermRedirect />} />
+        <Route path="documents/wiki/:id?" element={<LegacyWikiRedirect />} />
+        <Route path="documents/glossary" element={<LegacyWikiRedirect directory />} />
+        <Route path="documents/glossary/directory/:id" element={<LegacyWikiRedirect directory />} />
+        <Route path="documents/glossary/term/:id" element={<LegacyWikiRedirect />} />
         <Route path="repositories" element={<RepositoriesPage />} />
         <Route path="search" element={<SearchPage />} />
-        <Route path="projects/:projectId/search" element={<ProjectSearchPage />} />
         <Route path="manual" element={<ManualPage />} />
         <Route path="members" element={<MembersPage />} />
       </Route>

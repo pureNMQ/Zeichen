@@ -91,13 +91,14 @@ function DraggableCard({ id, canDrag, children }: DraggableCardProps) {
 interface KanbanProps<T extends KanbanItem> {
   items: T[]
   canDrag: boolean
+  canDragItem?: (item: T) => boolean
   renderCard: (item: T) => ReactNode
-  onMove: (id: string, to: WorkflowStatus) => void
+  onMove: (id: string, to: WorkflowStatus) => Promise<void>
   columns?: WorkflowStatus[]
   className?: string
 }
 
-export function Kanban<T extends KanbanItem>({ items, canDrag, renderCard, onMove, columns = DEFAULT_COLUMNS, className }: KanbanProps<T>) {
+export function Kanban<T extends KanbanItem>({ items, canDrag, canDragItem, renderCard, onMove, columns = DEFAULT_COLUMNS, className }: KanbanProps<T>) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
   const [activeId, setActiveId] = useState<string | null>(null)
   const [overrides, setOverrides] = useState<Record<string, WorkflowStatus>>({})
@@ -121,7 +122,14 @@ export function Kanban<T extends KanbanItem>({ items, canDrag, renderCard, onMov
     const item = items.find((i) => i.id === id)
     if (!item || getEffectiveStatus(item, overrides) === to) return
     setOverrides((prev) => ({ ...prev, [id]: to as WorkflowStatus }))
-    onMove(id, to as WorkflowStatus)
+    void onMove(id, to as WorkflowStatus).finally(() => {
+      setOverrides(previous => {
+        if (previous[id] !== to) return previous
+        const next = { ...previous }
+        delete next[id]
+        return next
+      })
+    })
   }
 
   const activeItem = activeId ? items.find((i) => i.id === activeId) : null
@@ -129,13 +137,13 @@ export function Kanban<T extends KanbanItem>({ items, canDrag, renderCard, onMov
   return (
     <div className={cn('flex min-h-0 flex-col', className)}>
       <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-        <div className="flex min-h-0 flex-1 items-start gap-3 overflow-x-auto pb-2">
+        <div data-kanban-scroll className="flex min-h-0 min-w-0 flex-1 items-start gap-3 overflow-x-auto pb-2">
           {columns.map((status) => (
             <Column key={status} status={status} canDrop={canDrag} isActiveTarget={!!activeItem}>
               {items
                 .filter((i) => getEffectiveStatus(i, overrides) === status)
                 .map((item) => (
-                  <DraggableCard key={item.id} id={item.id} canDrag={canDrag}>
+                  <DraggableCard key={item.id} id={item.id} canDrag={canDrag && (canDragItem?.(item) ?? true)}>
                     {renderCard(item)}
                   </DraggableCard>
                 ))}

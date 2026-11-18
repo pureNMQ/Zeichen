@@ -210,7 +210,7 @@ export function ManualPage() {
         {MANUAL_CHAPTERS.map((chapter) => (
           <section key={chapter.id} id={chapter.id} className="scroll-mt-6">
             <h2 className="text-2xl font-semibold tracking-tight">{chapter.title}</h2>
-            <div className="mt-1 text-sm">{renderBlocks(chapter.markdown)}</div>
+            <div className="mt-1 wrap-anywhere text-sm">{renderBlocks(chapter.markdown)}</div>
           </section>
         ))}
       </div>

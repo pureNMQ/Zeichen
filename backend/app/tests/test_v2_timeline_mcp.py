@@ -4,7 +4,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from app.models import ProjectMember, Team, User, WorkspaceMember
-from app.tests.test_mcp_e2e import RawMcpClient, mcp_server  # noqa: F401
+from app.tests.test_mcp_e2e import channels, RawMcpClient, mcp_server  # noqa: F401
 
 
 def _client(mcp_server: dict) -> RawMcpClient:
@@ -59,6 +59,61 @@ def test_timeline_wire_supports_retries_revisions_and_withdrawal(mcp_server):
     assert "invalid_request:" in client.call("timeline.revisions", **entry, include_body=True)["error"]
     originals = client.call("timeline.revisions", **entry, include_body=True, limit=3)
     assert [item["body"] for item in originals["items"]] == [None, "Revised progress", "Original progress"]
+
+
+def test_web_mcp_assignment_rejection_and_timeline_roundtrip(channels, mcp_server):
+    web, client = channels
+    project = {"project_id": mcp_server["project_id"]}
+    base = f"/api/projects/{project['project_id']}"
+    assignees = client.call("tasks.assignees", **project)["items"]
+    assert web.get(f"{base}/assignees").json() == assignees
+    assert any(user["id"] == mcp_server["agent_id"] and user["is_agent"] for user in assignees)
+    requirement = web.post(f"{base}/requirements", json={"title": "确认退回"}).json()
+    target = {**project, "id": requirement["id"]}
+    req = f"{base}/requirements/{requirement['id']}"
+    scope = {**project, "requirement_id": requirement["id"]}
+    args = {**target, "reason": "补充验收说明", "request_id": str(uuid4())}
+    assert "conflict:" in client.call("requirements.reject", **args)["error"]
+    assert web.post(f"{req}/status", json={"status": "verifying"}).status_code == 200
+    result = client.call("requirements.reject", **args)
+    assert result["version"] == 1 and client.call("requirements.reject", **args) == result
+    assert web.get(req).json()["status"] == "backlog"
+    entries = web.get(f"{req}/timeline", params={"keyword": args["reason"]}).json()["items"]
+    assert [row["id"] for row in entries] == [result["entry_id"]]
+    client.call("requirements.set_status", **target, status="verifying")
+    rejected = web.post(f"{req}/reject", json={"request_id": str(uuid4()), "reason": "补上附件"}).json()
+    assert client.call("requirements.get", **target)["status"] == "backlog"
+    assert client.call("timeline.get", **scope, entry_id=rejected["entry_id"])["body"] == "打回：补上附件"
+
+    task_id = client.call("tasks.create", **scope, title="验收用例")["id"]
+    assert web.post(f"/api/tasks/{task_id}/assign", params=project,
+                    json={"assignee_id": mcp_server["agent_id"]}).status_code == 200
+    assert client.call("tasks.get", **project, id=task_id)["assignee_id"] == mcp_server["agent_id"]
+    original = web.post(f"{req}/timeline", json={
+        "source_task": task_id, "request_id": str(uuid4()), "body": "等待复查",
+    }).json()["entry_id"]
+    assert client.call("timeline.get", **scope, entry_id=original)["source_task"] == task_id
+    reply = client.call("timeline.append", **scope, source_task=task_id, reply_to=original,
+                        request_id=str(uuid4()), body="已补齐")["entry_id"]
+    revision = client.call("timeline.revise", **scope, entry_id=original, request_id=str(uuid4()),
+                           expected_version=1, body="等待验收", reason="同步验收用语")
+    assert revision["version"] == 2
+    filters = {"kind": "manual", "source_task": task_id, "actor_id": mcp_server["agent_id"], "keyword": "补齐"}
+    web_reply, = web.get(f"{req}/timeline", params=filters).json()["items"]
+    mcp_reply, = client.call("timeline.list", **scope, **filters)["items"]
+    assert web_reply["id"] == mcp_reply["id"] == reply
+    for row in (web_reply, mcp_reply):
+        assert row["reply_to"]["entry_id"] == original and row["reply_to"]["revised"]
+        assert row["reply_to"]["actor_name"] == "admin" and row["reply_to"]["body_preview"] == "等待验收"
+    by_version = web.get(f"{req}/timeline/{original}/revisions").json()["items"]
+    assert [row["actor_name"] for row in by_version] == ["agent-e2e", "admin"]
+    assert web.patch(f"{req}/timeline/{original}", json={
+        "expected_version": 2, "request_id": str(uuid4()), "body": "完成验收",
+    }).status_code == 200
+    versions = client.call("timeline.revisions", **scope, entry_id=original, include_body=True, limit=3)["items"]
+    assert [(row["actor_name"], row["body"]) for row in versions] == [
+        ("admin", "完成验收"), ("agent-e2e", "等待验收"), ("admin", "等待复查"),
+    ]
 
 
 def test_mcp_project_candidates_use_existing_access_scope(mcp_server):

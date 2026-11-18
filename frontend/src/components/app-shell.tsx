@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { ChevronDown, LogOut, KeyRound, Menu, Search, UserRound, Sun, Moon } from 'lucide-react'
+import { NavLink, Outlet, useLocation, useMatch, useNavigate } from 'react-router-dom'
+import { LogOut, KeyRound, Menu, Search, UserRound, Sun, Moon } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { useCurrentProject } from '@/lib/current-project'
@@ -50,12 +50,13 @@ const WORKSPACE_NAV = [
   { to: '/manual', label: '使用手册' },
 ]
 
-function GuardedNavLink({ to, children }: { to: string; children: ReactNode }) {
+function GuardedNavLink({ to, end, children }: { to: string; end?: boolean; children: ReactNode }) {
   const { requestNavigation } = useDocumentNavigation()
 
   return (
     <NavLink
       to={to}
+      end={end}
       onClick={(event) => {
         if (event.button !== 0 || event.metaKey || event.altKey || event.ctrlKey || event.shiftKey) return
         if (requestNavigation(to)) event.preventDefault()
@@ -73,66 +74,34 @@ function GuardedNavLink({ to, children }: { to: string; children: ReactNode }) {
   )
 }
 
-function NavGroup({ title, items, isAdmin }: { title: string; items: { to: string; label: string; adminOnly?: boolean }[]; isAdmin: boolean }) {
+function NavGroup({ title, items, isAdmin }: { title: string; items: { to: string; label: string; adminOnly?: boolean; end?: boolean }[]; isAdmin: boolean }) {
   return (
     <div className="space-y-1">
-      <p className="px-3 pb-1.5 pt-4 text-[11px] font-semibold uppercase tracking-wider text-foreground/50">
+      <p className="px-3 pb-1.5 pt-4 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
         {title}
       </p>
       {items
         .filter((item) => !item.adminOnly || isAdmin)
         .map((item) => (
-          <GuardedNavLink key={item.to} to={item.to}>{item.label}</GuardedNavLink>
+          <GuardedNavLink key={item.to} to={item.to} end={item.end}>{item.label}</GuardedNavLink>
         ))}
     </div>
   )
 }
 
-function DocumentNav() {
-  const location = useLocation()
-  const { projectId } = useCurrentProject()
-  const documentsActive = location.pathname.startsWith('/documents')
-    || /^\/projects\/[^/]+\/wiki(?:\/|$)/u.test(location.pathname)
-  const wikiHref = projectId ? projectResourceHref(projectId, 'wiki') : '/documents/wiki'
-  const [open, setOpen] = useState(documentsActive)
-
-  useEffect(() => {
-    if (documentsActive) setOpen(true)
-  }, [documentsActive])
-
-  return (
-    <div className="space-y-1">
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        aria-expanded={open}
-        className="flex w-full items-center justify-between rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
-      >
-        文档
-        <ChevronDown className={`h-4 w-4 transition-transform ${open ? '' : '-rotate-90'}`} />
-      </button>
-      {open && (
-        <div className="space-y-1 pl-3">
-          <GuardedNavLink to={wikiHref}>Wiki</GuardedNavLink>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function ProjectSwitcher() {
-  const { projects, currentProject, selectProject, isLoading } = useCurrentProject()
+function ProjectSwitcher({ projectId, onChange }: { projectId: string | null; onChange: (project: string) => void }) {
+  const { projects, isLoading } = useCurrentProject()
 
   return (
     <div className="border-t p-2">
-      <p className="px-1 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-foreground/50">当前项目</p>
+      <p className="px-1 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">当前项目</p>
       {isLoading ? (
         <p className="px-1 text-sm text-muted-foreground">加载中…</p>
       ) : projects.length === 0 ? (
         <p className="px-1 text-sm text-muted-foreground">暂无可见项目</p>
       ) : (
-        <Select value={currentProject?.id ?? ''} onValueChange={selectProject}>
-          <SelectTrigger className="w-full">
+        <Select value={projectId ?? ''} onValueChange={onChange}>
+          <SelectTrigger aria-label="当前项目" className="w-full">
             <SelectValue placeholder="选择项目" />
           </SelectTrigger>
           <SelectContent>
@@ -253,16 +222,16 @@ function ThemeToggleButton() {
   )
 }
 
-function GlobalSearchBox() {
+function GlobalSearchBox({ projectId }: { projectId: string | null }) {
   const [query, setQuery] = useState('')
   const navigate = useNavigate()
-  const { currentProject } = useCurrentProject()
+  const label = projectId ? '搜索当前项目' : '全局搜索'
 
   function onSubmit(e: FormEvent) {
     e.preventDefault()
     const trimmed = query.trim()
     if (!trimmed) return
-    const prefix = currentProject ? `/projects/${encodeURIComponent(currentProject.id)}/search` : '/search'
+    const prefix = projectId ? projectResourceHref(projectId, 'search') : '/search'
     navigate(`${prefix}?q=${encodeURIComponent(trimmed)}`)
   }
 
@@ -274,10 +243,10 @@ function GlobalSearchBox() {
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="全局搜索…"
+            placeholder={`${label}…`}
             className="pl-8"
             autoComplete="off"
-            aria-label="全局搜索"
+            aria-label={label}
           />
         </div>
       </form>
@@ -287,29 +256,54 @@ function GlobalSearchBox() {
 
 export function AppShell() {
   const { user, logout, refresh } = useAuth()
-  const { projectId } = useCurrentProject()
+  const { projectId, projects, selectProject } = useCurrentProject()
   const navigate = useNavigate()
   const location = useLocation()
+  const wikiRoute = useMatch('/projects/:projectId/wiki/:id?')
+  const scopedRoute = useMatch('/projects/:projectId/*')
+  const routeProject = projects.find((project) => project.id === scopedRoute?.params.projectId)?.id
+  const activeProject = routeProject ?? projectId
+  const section = scopedRoute?.params['*']?.split('/')[0]
   const [pwdOpen, setPwdOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
   const [mobileLocation, setMobileLocation] = useState<string | null>(null)
 
   const isAdmin = user?.workspace_role === 'admin'
-  const workspaceNav = projectId
-    ? [...WORKSPACE_NAV, { to: projectResourceHref(projectId, 'files'), label: '文件' }]
-    : WORKSPACE_NAV
+  useEffect(() => {
+    if (routeProject && location.state?.selectedProject === routeProject && projectId !== routeProject) selectProject(routeProject)
+  }, [routeProject, location.state, projectId, selectProject])
+
+  function switchProject(id: string) {
+    if (!scopedRoute) {
+      selectProject(id)
+      return
+    }
+    const target = section === 'wiki' || section === 'files' || section === 'repositories' || section === 'search'
+      ? projectResourceHref(id, section)
+      : section === 'requirements' || section === 'tasks'
+        ? projectResourceHref(id, 'requirements')
+        : `/projects/${encodeURIComponent(id)}`
+    navigate(target, { state: { selectedProject: id } })
+  }
+
+  const workspaceNav = [
+    ...WORKSPACE_NAV.map((item) => routeProject && (item.to === '/requirements' || item.to === '/repositories')
+      ? { ...item, to: projectResourceHref(routeProject, item.to === '/requirements' ? 'requirements' : 'repositories') }
+      : item),
+    ...(activeProject ? [{ to: projectResourceHref(activeProject, 'files'), label: '文件' }] : []),
+    { to: activeProject ? projectResourceHref(activeProject, 'wiki') : '/documents/wiki', label: 'Wiki' },
+  ]
 
   const navigation = (
     <>
         <div className="px-4 py-4 text-base font-semibold">贼船 Zeichen</div>
-        <GlobalSearchBox />
+        <GlobalSearchBox projectId={activeProject} />
         <nav className="flex-1 space-y-1 overflow-y-auto px-2">
-          <NavGroup title="团队功能" items={TEAM_NAV} isAdmin={isAdmin} />
+          <NavGroup title="团队功能" items={TEAM_NAV.map((item) => ({ ...item, end: item.to === '/projects' && !!section }))} isAdmin={isAdmin} />
           <div className="mx-3 my-1 border-t" />
           <NavGroup title="工作区" items={workspaceNav} isAdmin={isAdmin} />
-          <DocumentNav />
         </nav>
-        <ProjectSwitcher />
+        <ProjectSwitcher projectId={activeProject} onChange={switchProject} />
         <div className="flex items-center gap-1 border-t p-2">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -370,7 +364,7 @@ export function AppShell() {
           </Dialog>
           <span className="text-sm font-semibold">贼船 Zeichen</span>
         </header>
-        <main className="min-h-0 min-w-0 flex-1 overflow-auto p-3 sm:p-6">
+        <main className={`relative min-h-0 min-w-0 flex-1 ${wikiRoute ? 'overflow-hidden' : 'overflow-auto p-3 sm:p-6'}`}>
           <Outlet />
         </main>
       </div>

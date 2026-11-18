@@ -2,6 +2,8 @@
 
 from fastapi import APIRouter
 
+from . import work_content
+
 from . import agents, attachments, auth, documents, files_v2, filter_views, members, notifications, polymorphic, projects, repositories, requirements, search, tasks, users
 from . import notifications_v2, project_completion, search_v2, timeline, wiki_v2, work_trash
 
@@ -28,3 +30,5 @@ api_router.include_router(repositories.router)
 api_router.include_router(polymorphic.router)
 api_router.include_router(users.router)
 api_router.include_router(filter_views.router)
+
+api_router.include_router(work_content.router)

@@ -27,7 +27,7 @@ def _model(kind: WorkKind):
 def find_deleted(db: Session, actor: User, kind: WorkKind, code: str, project_id: UUID | None):
     model = _model(kind)
     require_valid_code(kind, code)
-    query = select(model).where(model.code == code, model.deleted_at.is_not(None))
+    query = select(model).where(Task.matches_code(code) if model is Task else model.code == code, model.deleted_at.is_not(None))
     if project_id is None:
         candidates = [project.id for project, role in list_projects(db, actor) if role in ("editor", "owner")]
         query = query.where(model.project_id.in_(candidates))

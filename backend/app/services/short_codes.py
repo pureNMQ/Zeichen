@@ -24,19 +24,21 @@ CODE_PREFIXES = {
 }
 
 _CODE_PATTERN = {t: re.compile(rf"^{p}-([1-9][0-9]*)$") for t, p in CODE_PREFIXES.items()}
+_CODE_PATTERN["task"] = re.compile(r"(?:TASK-[1-9][0-9]*|REQ-[1-9][0-9]*-T[1-9][0-9]*)")
 # document 泛型寻址同时接受 Wiki(DOC)与词条(TERM);分配用 doc_type 专属键
 _CODE_PATTERN["document"] = re.compile(r"^(DOC|TERM)-([1-9][0-9]*)$")
 
 
 def is_valid_code(entity_type: str, code: str) -> bool:
     pattern = _CODE_PATTERN.get(entity_type)
-    return bool(pattern and isinstance(code, str) and pattern.match(code))
+    return bool(pattern and isinstance(code, str) and pattern.fullmatch(code))
 
 
 def require_valid_code(entity_type: str, code: str) -> str:
     if not is_valid_code(entity_type, code):
         prefix = CODE_PREFIXES.get(entity_type, "?")
-        raise invalid_request(f"非法的短码格式(应为 {prefix}-<序号>,不补零): {code}")
+        example = "REQ-<需求序号>-T<任务序号>" if entity_type == "task" else f"{prefix}-<序号>"
+        raise invalid_request(f"非法的短码格式(应为 {example},不补零): {code}")
     return code
 
 
@@ -52,9 +54,13 @@ class ShortCodeCounter(TimestampMixin, Base):
     last_seq: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
-def allocate_code(db, project_id: uuid.UUID, entity_type: str) -> str:
+def allocate_code(db, project_id: uuid.UUID, entity_type: str, *, requirement_code: str | None = None) -> str:
     """分配一个新短码:并发安全(原子自增),不承诺绝对连续。调用方负责 commit。"""
-    prefix = CODE_PREFIXES[entity_type]
+    prefix = CODE_PREFIXES[entity_type] + "-"
+    if entity_type == "task":
+        require_valid_code("requirement", requirement_code)
+        entity_type = requirement_code
+        prefix = requirement_code + "-T"
 
     def _next_seq() -> int | None:
         row = db.execute(
@@ -89,4 +95,4 @@ def allocate_code(db, project_id: uuid.UUID, entity_type: str) -> str:
                     ShortCodeCounter.entity_type == entity_type,
                 )
             ).scalar_one() + 1
-    return f"{prefix}-{seq}"
+    return f"{prefix}{seq}"

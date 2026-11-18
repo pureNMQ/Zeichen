@@ -3,6 +3,7 @@
 import contextvars
 import functools
 import uuid
+from typing import Literal
 
 from mcp.server.fastmcp.exceptions import ToolError
 from sqlalchemy import select
@@ -17,7 +18,7 @@ from ..services import requirements as req_svc
 from ..services import tasks as task_svc
 from ..services import work_trash as work_trash_svc
 from ..services.work_trash import WorkKind
-from ..v2 import notifications as notification_svc
+from ..v2 import notifications as notification_svc, work_content
 from ..v2.resource_refs import parse_uuid as parse_v2_uuid
 from . import auth
 
@@ -69,21 +70,6 @@ def _req_id(requirement_id: str | None) -> str | None:
         raise ToolError(f"{exc.code}: {exc.message}") from None
 
 
-def _uuid_list(values: list[str] | None) -> list[str] | None:
-    """MCP blocked_by:任务短码列表(TASK-n);None/[] 原样传递(None/[]=清空语义)。"""
-    if values is None:
-        return None
-    from app.services.short_codes import require_valid_code
-
-    result: list[str] = []
-    for value in values:
-        try:
-            result.append(require_valid_code("task", value))
-        except AppError:
-            raise ToolError("invalid_request: blocked_by 必须是合法任务短码(TASK-n)列表") from None
-    return result
-
-
 def _split_statuses(status: str | None) -> list[str] | None:
     """MCP status 逗号分隔字符串 → list;单值不变;None/空 → None(不过滤)。"""
     if status is None:
@@ -129,6 +115,9 @@ def _parse_uuid(value: str, field_name: str) -> uuid.UUID:
 
 
 def _register_all(mcp) -> None:
+    from .governance_tools import register_governance_tools
+
+    register_governance_tools(mcp)
     # ---------- repositories.* ----------
     @mcp.tool(name="repositories.list")
     @sessioned
@@ -211,14 +200,34 @@ def _register_all(mcp) -> None:
         repository = repository_svc.restore_repository(db, actor, _parse_uuid(id, "id"))
         return repository_svc._repository_dict(repository)
 
+    @mcp.tool(name="work.versions")
+    @sessioned
+    def work_versions(project_id: str, kind: work_content.WorkKind, id: str, before: int | None = None, limit: int = 50) -> dict:
+        """列出需求或任务的正文版本，按版本倒序，用 next_before 续页。"""
+        db, actor = dbc()
+        return work_content.versions(db, actor, _require_scope(project_id), kind, id, before, limit)
+
+    @mcp.tool(name="work.read_version")
+    @sessioned
+    def work_read_version(project_id: str, kind: work_content.WorkKind, id: str, version: int) -> dict:
+        """读取指定历史版本的标题和 Markdown 正文。"""
+        db, actor = dbc()
+        return work_content.version(db, actor, _require_scope(project_id), kind, id, version)
+
+    @mcp.tool(name="work.restore_version")
+    @sessioned
+    def work_restore_version(project_id: str, kind: work_content.WorkKind, id: str, version: int, expected_version: int) -> dict:
+        """恢复需求或任务的指定正文版本，保留中间历史并生成新版本。"""
+        db, actor = dbc()
+        return work_content.restore(db, actor, _require_scope(project_id), kind, id, version, expected_version)
+
     # ---------- requirements.* ----------
     @mcp.tool(name="requirements.create")
     @sessioned
-    def requirements_create(project_id: str, title: str, description: str | None = None) -> dict:
-        """创建需求(状态=待确认)。"""
+    def requirements_create(project_id: str, title: str, description: str | None = None, request_id: uuid.UUID | None = None) -> dict:
+        """创建需求；使用同一 request_id 安全重试。"""
         db, actor = dbc()
-        r = req_svc.create_requirement(db, actor, _require_scope(project_id), title, description)
-        return req_svc._requirement_dict(db, r)
+        return work_content.create(db, actor, _require_scope(project_id), "requirements", title, description, request_id)
 
     @mcp.tool(name="requirements.get")
     @sessioned
@@ -233,30 +242,43 @@ def _register_all(mcp) -> None:
     @sessioned
     def requirements_list(
         project_id: str,
+        participated_by_me: bool = False,
         status: str | None = None,
         updated_within_days: int | None = None,
         keyword: str | None = None,
         cursor: str | None = None,
         limit: int | None = None,
     ) -> dict:
-        """需求列表(cursor 分页;keyword 标题/描述包含、updated_within_days 时间窗口;
+        """需求列表，正文仅返回前 240 字，读全文用 requirements.get (cursor 分页;keyword 标题/描述包含、updated_within_days 时间窗口;
         status 多值用逗号分隔,如 status='backlog,in_progress')。"""
         db, actor = dbc()
         cursor, limit = _paged({}, cursor, limit)
         return req_svc.list_requirements(
             db, actor, _require_scope(project_id), _split_statuses(status), cursor, limit,
-            updated_within_days=updated_within_days, keyword=keyword,
+            updated_within_days=updated_within_days, keyword=keyword, participated_by_me=participated_by_me,
         )
+
+    @mcp.tool(name="requirements.set_blockers")
+    @sessioned
+    def requirements_set_blockers(id: str, project_id: str, blocked_by: list[str],
+                                 expected_blocked_by: list[str] | None = None) -> dict:
+        """替换同项目需求的前置需求集合。全部前置需求已完成时解除阻塞，空列表移除依赖。"""
+        from ..services.requirement_board import set_blockers
+
+        db, actor = dbc()
+        return req_svc._requirement_dict(db, set_blockers(
+            db, actor, id, _require_scope(project_id), blocked_by, expected_blocked_by))
 
     @mcp.tool(name="requirements.update")
     @sessioned
     def requirements_update(
         id: str, project_id: str, title: str | None = None, description: str | None = None,
+        expected_version: int | None = None,
     ) -> dict:
-        """更新需求元数据(标题/描述,不涉状态)。project_id 必传:短码按项目内寻址。"""
+        """更新需求标题和 Markdown 正文。传读取时的 expected_version，过期返回 conflict。"""
         db, actor = dbc()
         r = req_svc.update_requirement(
-            db, actor, id, title, description, project_id=_require_scope(project_id)
+            db, actor, id, title, description, project_id=_require_scope(project_id), expected_version=expected_version
         )
         return req_svc._requirement_dict(db, r)
 
@@ -271,6 +293,17 @@ def _register_all(mcp) -> None:
             db, actor, id, status, project_id=_require_scope(project_id)
         )
         return req_svc._requirement_dict(db, r)
+
+    @mcp.tool(name="requirements.reject")
+    @sessioned
+    def requirements_reject(id: str, project_id: str, reason: str, request_id: str) -> dict:
+        """将验收中的需求打回待办，同时记录原因。重试时请复用 request_id。"""
+        db, actor = dbc()
+        result = req_svc.reject_requirement(
+            db, actor, _require_scope(project_id), id, reason, _parse_uuid(request_id, "request_id")
+        )
+        db.commit()
+        return result
 
     @mcp.tool(name="requirements.cancel")
     @sessioned
@@ -310,18 +343,12 @@ def _register_all(mcp) -> None:
         description: str | None = None,
         requirement_id: str | None = None,
         assignee_id: str | None = None,
-        blocked_by: list[str] | None = None,
+        request_id: uuid.UUID | None = None,
     ) -> dict:
-        """创建任务(requirement_id 必填=同项目已确认需求,缺失返回 invalid_request;
-        assignee_id 可空=待认领;blocked_by=前置任务 id 列表,仅同项目)。"""
+        """在指定需求内创建任务，返回 REQ-n-Tm 短码。"""
         db, actor = dbc()
-        t = task_svc.create_task(
-            db, actor, _require_scope(project_id), title, description,
-            _req_id(requirement_id),
-            _optional_uuid(assignee_id, "assignee_id"),
-            _uuid_list(blocked_by),
-        )
-        return task_svc._task_dict(db, t)
+        return work_content.create(db, actor, _require_scope(project_id), "tasks", title, description, request_id,
+                                   requirement_id=_req_id(requirement_id), assignee_id=_optional_uuid(assignee_id, "assignee_id"))
 
     @mcp.tool(name="tasks.get")
     @sessioned
@@ -344,7 +371,7 @@ def _register_all(mcp) -> None:
         cursor: str | None = None,
         limit: int | None = None,
     ) -> dict:
-        """任务列表(多维度过滤,cursor 分页;keyword 标题/描述包含、updated_within_days 时间窗口;
+        """任务列表，正文仅返回前 240 字，读全文用 tasks.get (多维度过滤,cursor 分页;keyword 标题/描述包含、updated_within_days 时间窗口;
         status 多值用逗号分隔,如 status='backlog,in_progress')。"""
         db, actor = dbc()
         cursor, limit = _paged({}, cursor, limit)
@@ -362,20 +389,12 @@ def _register_all(mcp) -> None:
         project_id: str,
         title: str | None = None,
         description: str | None = None,
-        requirement_id: str | None = _UNSET,
-        blocked_by: list[str] | None = _UNSET,
+        expected_version: int | None = None,
     ) -> dict:
-        """更新任务元数据；省略 requirement_id/blocked_by 保留原值，requirement_id 仅可改指向
-        同项目其他需求(传 null/空字符串解除关联会被拒绝，任务必须挂需求)，blocked_by 传 null
-        或 [] 清空(整体替换)。project_id 必传:短码按项目内寻址。"""
+        """更新任务标题和 Markdown 正文。传读取时的 expected_version，过期返回 conflict。"""
         db, actor = dbc()
-        kwargs: dict = {}
-        if requirement_id is not _UNSET:
-            kwargs["requirement_id"] = _req_id(requirement_id)
-        if blocked_by is not _UNSET:
-            kwargs["blocked_by"] = _uuid_list(blocked_by)
         t = task_svc.update_task(
-            db, actor, id, title, description, project_id=_require_scope(project_id), **kwargs
+            db, actor, id, title, description, project_id=_require_scope(project_id), expected_version=expected_version
         )
         return task_svc._task_dict(db, t)
 
@@ -465,47 +484,15 @@ def _register_all(mcp) -> None:
             project_id=scope,
         )
 
-    # ---------- ref.* ----------
-    @mcp.tool(name="ref.create")
+    # ---------- Markdown backlinks ----------
+    @mcp.tool(name="markdown.backlinks")
     @sessioned
-    def ref_create(
-        from_type: str, from_id: str, to_type: str, to_id: str, type: str,
-        project_id: str | None = None,
-    ) -> dict:
-        """建立实体间引用(type: derives/documents/implements/mentions;双方须同项目)。
-        实体目标(短码寻址)必传 project_id;project/repository 目标(UUID 寻址)可省。"""
+    def markdown_backlinks(project_id: str, target_kind: Literal["requirements", "tasks", "wiki"],
+                           target_id: str, cursor: str | None = None, limit: int = 50) -> dict:
+        """读取当前需求、任务和 Wiki 正文中指向目标的反向链接。通过编辑来源正文添加或移除链接。"""
+        from ..v2.backlinks import list_backlinks
         db, actor = dbc()
-        r = poly_svc.create_reference(
-            db, actor, from_type, from_id, to_type, to_id, type,
-            project_id=_target_scope(project_id, (from_type, to_type)),
-        )
-        return {
-            "id": str(r.id), "from_type": r.from_type, "from_id": r.from_id,
-            "to_type": r.to_type, "to_id": r.to_id, "type": r.type,
-        }
-
-    @mcp.tool(name="ref.list")
-    @sessioned
-    def ref_list(
-        target_type: str, target_id: str, cursor: str | None = None,
-        limit: int | None = None, project_id: str | None = None,
-    ) -> dict:
-        """实体的引用(双向:from/to 任一命中)。
-        实体目标(短码寻址)必传 project_id;project/repository 目标(UUID 寻址)可省。"""
-        db, actor = dbc()
-        cursor, limit = _paged({"type": target_type, "id": target_id}, cursor, limit)
-        return poly_svc.list_references(
-            db, actor, target_type, target_id, cursor, limit,
-            project_id=_target_scope(project_id, (target_type,)),
-        )
-
-    @mcp.tool(name="ref.delete")
-    @sessioned
-    def ref_delete(id: str) -> dict:
-        """删除引用。"""
-        db, actor = dbc()
-        poly_svc.delete_reference(db, actor, _parse_uuid(id, "id"))
-        return {"deleted": True, "id": id}
+        return list_backlinks(db, actor, _parse_uuid(project_id, "project_id"), target_kind, target_id, cursor, limit)
 
     # ---------- project.* / agent.* ----------
     @mcp.tool(name="project.list")
@@ -513,10 +500,7 @@ def _register_all(mcp) -> None:
     def project_list() -> list[dict]:
         """我有权限的项目列表(admin 全量;否则已加入)。"""
         db, actor = dbc()
-        return [
-            {"id": str(p.id), "name": p.name, "my_role": role}
-            for p, role in project_svc.list_projects(db, actor)
-        ]
+        return project_svc.project_directory(db, actor)
 
     @mcp.tool(name="project.get")
     @sessioned
@@ -524,7 +508,7 @@ def _register_all(mcp) -> None:
         """项目详情(非成员 404)。"""
         db, actor = dbc()
         project, role = project_svc.get_project(db, actor, _parse_uuid(id, "id"))
-        return {"id": str(project.id), "name": project.name, "my_role": role}
+        return project_svc.project_summary(project, role)
 
     @mcp.tool(name="trash.projects_list")
     @sessioned
@@ -603,6 +587,13 @@ def _register_all(mcp) -> None:
         """读取共享提及/回复通知；列表读取不标记已读，使用 next_cursor 继续。"""
         db, actor = dbc()
         return notification_svc.list_notifications(db, actor, cursor=cursor, limit=limit, unread_only=unread_only)
+
+    @mcp.tool(name="notifications.unread_count")
+    @sessioned
+    def notifications_unread_count() -> dict:
+        """统计当前 Agent 可见的未读通知，保留仅主人可见通知的隐私。"""
+        db, actor = dbc()
+        return {"count": notification_svc.unread_count(db, actor)}
 
     @mcp.tool(name="notifications.get")
     @sessioned

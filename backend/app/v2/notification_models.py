@@ -23,7 +23,7 @@ class Notification(Base):
         CheckConstraint("(read_at IS NULL) = (read_by_id IS NULL)", name="ck_v2_notification_read"),
         CheckConstraint(
             "(source_kind = 'timeline' AND entry_id IS NOT NULL) OR "
-            "(source_kind = 'wiki' AND entry_id IS NULL)", name="ck_v2_notification_source",
+            "(source_kind IN ('wiki', 'requirement', 'task') AND entry_id IS NULL)", name="ck_v2_notification_source",
         ),
         Index("ix_v2_notification_inbox", "owner_id", "created_at", "id"),
     )
@@ -33,9 +33,9 @@ class Notification(Base):
     owner_id: Mapped[UUID] = mapped_column(ForeignKey("user.id"), nullable=False)
     actor_id: Mapped[UUID] = mapped_column(ForeignKey("user.id"), nullable=False)
     visibility: Mapped[str] = mapped_column(String(12), nullable=False)
-    source_kind: Mapped[str] = mapped_column(String(8), nullable=False)
+    source_kind: Mapped[str] = mapped_column(String(16), nullable=False)
     source_key: Mapped[str] = mapped_column(String(36), nullable=False)
-    source_code: Mapped[str] = mapped_column(String(16), nullable=False)
+    source_code: Mapped[str] = mapped_column(String(36), nullable=False)
     source_version: Mapped[int] = mapped_column(Integer, nullable=False)
     entry_id: Mapped[UUID | None] = mapped_column()
     mentioned_user_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False)

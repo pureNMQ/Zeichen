@@ -1,22 +1,24 @@
 # deploy/ — 生产部署产物
 
-单机 Docker Compose 全栈部署(规格书 §8),目标:单机服务器 / Ubuntu 22.04/24.04 LTS。
+现有生产实例先按本文「v2 首次切换」迁移，之后使用「v2 日常发布」。v2 定时维护只回收过期文件授权和废弃的上传暂存文件。新建独立环境可按仓库根 README 启动四个服务。
 
 | 文件 | 说明 |
 |---|---|
 | `docker-compose.prod.yml` | 生产 compose override(叠在根 `docker-compose.yml` 上):去宿主端口、密钥守卫、资源上限 |
 | `nginx.conf` | 生产 TLS nginx(TLS 终止、/api /mcp 反代、SSE 关缓冲、附件 25m、80→443) |
 | `.env.prod.example` | 全变量清单(占位符;真实 `.env` 在服务器上填写,不入 git) |
-| `backup.sh` | 每日备份:pg_dump + 附件卷 → 本地 + 异地对象存储 |
-| `restore.sh` | 覆盖式恢复(灾难恢复 / 每月演练) |
-| `docs/first-deploy.md` | 首次部署步骤(装 Docker → 镜像加速 → 证书 → .env → up -d → 首用户) |
-| `docs/ops.md` | 日常运维:巡检、升级/回滚、备份恢复演练、证书续期、危险命令 |
+| `backup.sh` | 旧单机栈每日备份:pg_dump + 附件卷 → 本地 + 异地对象存储 |
+| `restore.sh` | 旧单机栈覆盖式恢复(灾难恢复 / 每月演练) |
+| `docs/first-deploy.md` | 历史 v1 单机首次部署步骤(装 Docker → 镜像加速 → 证书 → .env → up -d → 首用户) |
+| `docs/ops.md` | 历史 v1 单机日常运维:巡检、升级/回滚、备份恢复演练、证书续期、危险命令 |
 
-## 快速命令(仓库根目录)
+## 历史 v1 单机栈命令
+
+以下命令供维护既有 v1 数据库的人员查阅。构建时使用与该数据库版本一致的 v1 提交，恢复时使用当次已归档的配置与镜像。当前工作树的 API 启动命令会迁移到其 Alembic head，只适合新建环境。旧 worker 需要显式启用 `legacy-only` profile。已切换的实例使用下文 v2 发布流程。
 
 ```bash
 # 启动(生产,需先建 .env)
-docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d --build
+docker compose --profile legacy-only -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d --build
 
 # 查看 / 日志 / 重启
 docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml ps

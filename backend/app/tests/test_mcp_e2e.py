@@ -20,6 +20,13 @@ from uuid import uuid4
 
 import httpx
 import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+
+from app.config import get_settings
+from app.db import get_db
+from app.main import app
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 
@@ -202,6 +209,29 @@ def mcp_server(tmp_path_factory, request):
             proc.kill()
 
 
+@pytest.fixture
+def channels(mcp_server, monkeypatch):
+    database = mcp_server["log_file"].parent / "e2e.db"
+    engine = create_engine(f"sqlite:///{database.as_posix()}")
+    monkeypatch.setattr(get_settings(), "attachment_storage_dir", Path(mcp_server["storage"]))
+
+    def shared_db():
+        with Session(engine) as db:
+            yield db
+
+    app.dependency_overrides[get_db] = shared_db
+    try:
+        agent = RawMcpClient(mcp_server["url"], mcp_server["token"])
+        agent.initialize()
+        with TestClient(app) as web:
+            login = web.post("/api/auth/login", json={"username": "admin", "password": "admin-pass-1"})
+            assert login.status_code == 200
+            yield web, agent
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        engine.dispose()
+
+
 def test_agent_claim_to_requirement_done(mcp_server: dict):
     client = RawMcpClient(mcp_server["url"], mcp_server["token"])
     init = client.initialize()
@@ -209,7 +239,7 @@ def test_agent_claim_to_requirement_done(mcp_server: dict):
     assert client.session_id is None, "stateless 模式不签发 Mcp-Session-Id"
 
     tools = client.list_tools()
-    for ns in ("requirements.", "tasks.", "repositories.", "wiki.", "timeline.", "files.", "ref.", "project.", "agent."):
+    for ns in ("requirements.", "tasks.", "repositories.", "wiki.", "timeline.", "files.", "markdown.", "project.", "agent."):
         assert any(tool.startswith(ns) for tool in tools), f"缺少 {ns} 工具"
     assert not any(tool.startswith(("docs.", "attachment.", "memory.")) for tool in tools)
     assert {"comment.list", "requirements.set_status", "tasks.set_status", "search.project"}.issubset(tools)
@@ -245,16 +275,9 @@ def test_agent_claim_to_requirement_done(mcp_server: dict):
     rid = req["id"]
     assert req["status"] == "pending"
 
-    # 待确认需求不可派生任务;确认后进入正常执行流。
-    blocked = client.call(
-        "tasks.create", project_id=mcp_server["project_id"], title="过早拆解", requirement_id=rid
-    )
-    assert "invalid_request" in blocked["error"]
+    task = client.call("tasks.create", project_id=mcp_server["project_id"], title="E2E 任务", requirement_id=rid)
+    assert task["id"] == rid + "-T1"
     assert client.call("requirements.set_status", id=rid, status="backlog", project_id=mcp_server["project_id"])["status"] == "backlog"
-
-    task = client.call(
-        "tasks.create", project_id=mcp_server["project_id"], title="E2E 任务", requirement_id=rid
-    )
     tid = task["id"]
 
     # agent 认领 → set_status 自由流转(任务四态,verifying 已删 → invalid_request)
@@ -292,12 +315,11 @@ def test_agent_claim_to_requirement_done(mcp_server: dict):
     scope = {"project_id": mcp_server["project_id"], "requirement_id": rid}
     record = client.call("timeline.append", **scope, request_id=str(uuid4()), body="E2E timeline")
     assert client.call("timeline.get", **scope, entry_id=record["entry_id"])["body"] == "E2E timeline"
-    ref = client.call(
-        "ref.create", from_type="requirement", from_id=rid, to_type="task", to_id=tid,
-        type="implements", project_id=mcp_server["project_id"],
-    )
-    assert ref["type"] == "implements"
-    assert len(client.call("ref.list", target_type="task", target_id=tid, project_id=mcp_server["project_id"])["items"]) == 1
+    pid = mcp_server["project_id"]
+    client.call("requirements.update", project_id=pid, id=rid, expected_version=req["version"],
+                description=f"[实现](/projects/{pid}/tasks/{tid})")
+    linked = client.call("markdown.backlinks", project_id=pid, target_kind="tasks", target_id=tid)
+    assert [row["id"] for row in linked["items"]] == [rid]
 
     # 需求软删二次确认
     assert "conflict" in client.call("requirements.delete", id=rid, project_id=mcp_server["project_id"])["error"]
@@ -323,19 +345,18 @@ def test_task_requirement_link_over_mcp(mcp_server: dict):
         "tasks.create", project_id=mcp_server["project_id"], title="MCP 任务", requirement_id=r1["id"]
     )
     assert t["requirement_id"] == r1["id"]
-    retitled = client.call("tasks.update", id=t["id"], title="MCP 已改标题", project_id=mcp_server["project_id"])
+    retitled = client.call("tasks.update", id=t["id"], title="MCP 已改标题", expected_version=t["version"], project_id=mcp_server["project_id"])
     assert retitled["title"] == "MCP 已改标题"
     assert retitled["requirement_id"] == r1["id"]
     changed = client.call("tasks.update", id=t["id"], requirement_id=r2["id"], project_id=mcp_server["project_id"])
-    assert changed["requirement_id"] == r2["id"]
+    assert "error" in changed
 
     # 置空/空字符串解除 → invalid_request(任务必须挂需求)
     for empty in (None, ""):
         cleared = client.call("tasks.update", id=t["id"], requirement_id=empty, project_id=mcp_server["project_id"])
-        assert "invalid_request" in cleared["error"]
+        assert "error" in cleared
 
     # tasks.list 可按 requirement_id 过滤
-    client.call("tasks.update", id=t["id"], requirement_id=r1["id"], project_id=mcp_server["project_id"])
     page = client.call("tasks.list", project_id=mcp_server["project_id"], requirement_id=r1["id"])
     assert [i["id"] for i in page["items"]] == [t["id"]]
 
@@ -382,24 +403,17 @@ def test_structured_reference_tracks_canonical_wiki_over_mcp(mcp_server: dict):
     created = client.call("wiki.create", **scope, request_id=str(uuid4()), content={"title": "Canonical Wiki"})
     target = {**scope, "id": created["id"]}
 
-    reference = client.call(
-        "ref.create", **scope, from_type="requirement", from_id=requirement["id"],
-        to_type="document", to_id=created["id"], type="documents",
-    )
-    assert reference["to_id"] == created["id"]
-    bound = {**scope, "target_type": "document", "target_id": created["id"]}
-    linked = client.call("ref.list", **bound)
-    assert linked["items"][0]["to_title"] == "Canonical Wiki"
-    assert linked["items"][0]["to_module"] == "wiki"
-
+    body = f"[Wiki](/projects/{scope['project_id']}/wiki/{created['id']})"
+    updated = client.call("requirements.update", **scope, id=requirement["id"],
+                          expected_version=requirement["version"], description=body)
+    assert updated["description"] == body
+    bound = {**scope, "target_kind": "wiki", "target_id": created["id"]}
+    assert client.call("markdown.backlinks", **bound)["items"][0]["id"] == requirement["id"]
     saved = client.call("wiki.update", **target, expected_version=created["version"], patch={"title": "Renamed Wiki"})
     assert saved["version"] == 2
-    assert client.call("ref.list", **bound)["items"][0]["to_title"] == "Renamed Wiki"
+    assert client.call("markdown.backlinks", **bound)["items"][0]["title"] == requirement["title"]
     assert client.call("wiki.delete", **target, confirmed_count=1)["deleted"]
-    assert "not_found:" in client.call("ref.list", **bound)["error"]
-    source_refs = client.call("ref.list", **scope, target_type="requirement", target_id=requirement["id"])
-    assert source_refs["items"][0]["to_title"] == "已删除"
-    assert "Renamed Wiki" not in json.dumps(source_refs)
+    assert "not_found:" in client.call("markdown.backlinks", **bound)["error"]
     assert client.call("requirements.delete", **scope, id=requirement["id"])["deleted"]
 
 

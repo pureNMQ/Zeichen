@@ -2,13 +2,14 @@
 
 import uuid
 
-from sqlalchemy import and_, literal, or_, select, union_all
+from sqlalchemy import String, and_, cast, literal, or_, select, union_all
 from sqlalchemy.orm import Session
 
 from ..errors import not_found
-from ..models import Project, ProjectMember, Requirement, User, WorkspaceMember
+from ..models import Project, ProjectMember, Requirement, Task, User, WorkspaceMember
 from ..services.permissions import get_accessible_project
-from ..services.user_profiles import display_name
+from ..services.user_profiles import display_name, payload
+from .file_models import ProjectFile
 from .resource_refs import ResourceKind, ResourceRef
 from .wiki import visible_wiki_codes
 from .wiki_models import Wiki
@@ -16,7 +17,7 @@ from .wiki_models import Wiki
 LIMIT = 20
 
 
-def _eligible_people(project: Project):
+def _eligible_people(project: Project, *, include_workspace_admins: bool = False):
     active_members = (
         select(User.id)
         .join(ProjectMember, ProjectMember.user_id == User.id)
@@ -28,10 +29,23 @@ def _eligible_people(project: Project):
             User.is_agent.is_(False),
         )
     )
+    if include_workspace_admins:
+        active_members = active_members.union(
+            select(User.id).join(WorkspaceMember, WorkspaceMember.user_id == User.id).where(
+                WorkspaceMember.team_id == project.team_id, WorkspaceMember.role == "admin",
+                User.deleted_at.is_(None), User.is_agent.is_(False),
+            )
+        )
     return select(User).where(
         User.deleted_at.is_(None),
         or_(User.id.in_(active_members), and_(User.is_agent.is_(True), User.owner_id.in_(active_members))),
     )
+
+
+def list_assignees(db: Session, actor: User, project_id: uuid.UUID) -> list[dict]:
+    project = get_accessible_project(db, actor.id, project_id, min_level="editor")
+    people = _eligible_people(project, include_workspace_admins=True).order_by(User.username, User.id)
+    return [payload(person) for person in db.scalars(people)]
 
 
 def _person_candidate(project_id: uuid.UUID, person: User) -> dict:
@@ -77,20 +91,22 @@ def _references(db: Session, project_id: uuid.UUID, query: str) -> list[dict]:
         return stmt
 
     wiki_candidates = candidates(Wiki, "wiki").where(Wiki.code.in_(visible_wiki_codes(project_id)))
-    combined = union_all(candidates(Requirement, "requirement"), wiki_candidates).subquery()
+    task_candidates = candidates(Task, "task").where(Task.has_active_requirement())
+    files = select(cast(ProjectFile.id, String).label("code"), ProjectFile.name.label("title"),
+                   literal("file").label("kind")).where(ProjectFile.project_id == project_id, ProjectFile.deleted_at.is_(None))
+    if query:
+        files = files.where(ProjectFile.name.icontains(query, autoescape=True))
+    combined = union_all(candidates(Requirement, "requirement"), wiki_candidates, task_candidates, files).subquery()
+    kinds = {"requirement": ResourceKind.REQUIREMENT, "task": ResourceKind.TASK, "wiki": ResourceKind.WIKI, "file": ResourceKind.FILE}
     rows = db.execute(select(combined).order_by(combined.c.title, combined.c.kind, combined.c.code).limit(LIMIT))
-    return [
-        {
-            "id": code,
-            "label": title,
-            "kind": kind,
-            "detail": code,
-            "href": ResourceRef(
-                project_id, ResourceKind.REQUIREMENT if kind == "requirement" else ResourceKind.WIKI, code
-            ).path,
-        }
-        for code, title, kind in rows
-    ]
+    items = []
+    for code, title, kind in rows:
+        if kind == "file":
+            # SQLite stores UUIDs as hex; public hrefs always use their hyphenated spelling.
+            code = str(uuid.UUID(code))
+        items.append({"id": code, "label": title, "kind": kind, "detail": code,
+                      "href": ResourceRef(project_id, kinds[kind], code).path})
+    return items
 
 
 def completion_candidates(db: Session, actor: User, project_id: uuid.UUID, mode: str, query: str) -> list[dict]:

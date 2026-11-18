@@ -74,6 +74,23 @@ def test_update_project_requires_owner(client, db, world):
     login(client, "bob", "whatever-1")
     client.post("/api/auth/set-password", json={"password": "bob-pass-1"})
     assert client.patch(f"/api/projects/{project_id}", json={"name": "x"}).status_code == 403
+    assert client.patch(f"/api/projects/{project_id}", json={"description": "x"}).status_code == 403
+
+
+def test_project_card_and_independent_description_edits(client, db, world):
+    _admin_client(client)
+    project = client.post("/api/projects", json={
+        "name": "协作", "description": " 首份说明 ",
+        "members": [{"user_id": str(world["member"].id), "role": "viewer"}],
+    }).json()
+    url = f"/api/projects/{project['id']}"
+    assert project["description"] == "首份说明"
+    card = next(p for p in client.get("/api/projects").json() if p["id"] == project["id"])
+    assert (card["owner_name"], card["member_count"], card["description"]) == ("admin", 2, "首份说明")
+    assert client.patch(url, json={"name": "新名称"}).json()["description"] == "首份说明"
+    assert client.patch(url, json={"description": "第二段\n换行"}).json()["name"] == "新名称"
+    assert client.get(url).json()["description"] == "第二段\n换行"
+    assert client.patch(url, json={"description": " "}).json()["description"] == ""
 
 
 def test_update_project_empty_name_rejected(client, db, world):
@@ -125,7 +142,7 @@ def test_add_member_owner_only(client, db, world):
 
 
 def test_add_non_member_human_rejected(client, db, world):
-    """非工作区成员的账号不能被加入项目(agent 除外)。"""
+    """非工作区成员的账号不能被加入项目。"""
     _admin_client(client)
     outsider = make_user(db, "outsider", role=None)
     resp = client.post(
@@ -241,23 +258,57 @@ def test_transfer_owner_requires_current_password_and_existing_member(client, db
 
 
 def test_member_candidates(client, db, world):
+    from datetime import datetime, timezone
+
     project_id = str(world["project"].id)
     make_user(db, "carol", role="member")
+    make_user(db, "new-admin", role="admin")
+    disabled = make_user(db, "disabled", role="member")
+    disabled.deleted_at = datetime.now(timezone.utc)
+    make_user(db, "old-agent-row", role="member", is_agent=True)
+    db.commit()
     _admin_client(client)
 
     resp = client.get(f"/api/projects/{project_id}/member_candidates")
     assert resp.status_code == 200
-    names = {m["username"]: m["is_agent"] for m in resp.json()}
-    assert names["carol"] is False
-    assert "admin" not in names  # admin 自动 owner,不列为候选人
-    assert "bob" not in names  # 已在项目中
-    assert "a-owner" not in names  # 已在项目中
-    assert "agent-a" not in names  # ADR 0004:agent 不单独授权,不列为候选人
+    assert {m["username"]: m["workspace_role"] for m in resp.json()} == {
+        "carol": "member", "admin": "admin", "new-admin": "admin",
+    }
+    assert all(not m["is_agent"] for m in resp.json())
+    for target, status in [(world["agent"], 400), (disabled, 404)]:
+        assert client.post(
+            f"/api/projects/{project_id}/members", json={"user_id": str(target.id), "role": "viewer"}
+        ).status_code == status
 
     # viewer 成员无候选人访问权
     login(client, "bob", "whatever-1")
     client.post("/api/auth/set-password", json={"password": "bob-pass-1"})
     assert client.get(f"/api/projects/{project_id}/member_candidates").status_code == 403
+
+
+def test_workspace_admin_can_join_other_admins_project_without_becoming_its_owner(client, db, world):
+    make_user(db, "creator", role="admin", with_password="creator-pass-1")
+    login(client, "creator", "creator-pass-1")
+    project_id = client.post("/api/projects", json={"name": "其他管理员的项目"}).json()["id"]
+    route = f"/api/projects/{project_id}"
+    _admin_client(client)
+    assert client.get(route).json()["my_role"] == "owner"
+    assert [row["username"] for row in client.get(f"{route}/members").json()] == ["creator"]
+
+    member_id = str(world["admin"].id)
+    assert member_id in [row["id"] for row in client.get(f"{route}/member_candidates").json()]
+    assert client.get(f"{route}/people/{member_id}").status_code == 404
+    assert client.post(f"{route}/members", json={"user_id": member_id, "role": "viewer"}).status_code == 201
+    assert member_id not in [row["id"] for row in client.get(f"{route}/member_candidates").json()]
+    assert client.get(f"{route}/people/{member_id}").status_code == 200
+    own = next(row for row in client.get(f"{route}/members").json() if row["is_current_user"])
+    assert (own["role"], own["workspace_role"]) == ("viewer", "admin")
+    assert client.post(f"{route}/owner-transfer", json={
+        "user_id": member_id, "password": "admin-pass-1"
+    }).status_code == 403
+    assert client.delete(f"{route}/members/{member_id}").status_code == 200
+    assert client.get(route).json()["my_role"] == "owner"
+    assert client.get(f"{route}/people/{member_id}").status_code == 404
 
 
 def test_project_access_matrix(client, db, world):

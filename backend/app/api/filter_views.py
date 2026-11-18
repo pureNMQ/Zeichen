@@ -38,7 +38,7 @@ def create_filter_view(
     view = service.create_filter_view(
         db, user, project_id, body.entity_type, body.name, body.criteria
     )
-    return service._view_dict(view)
+    return service.view_summary(view)
 
 
 @router.get("/filter-views/{view_id}")
@@ -47,7 +47,7 @@ def get_filter_view(
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    return service._view_dict(service.get_filter_view(db, user, view_id))
+    return service.view_summary(service.get_filter_view(db, user, view_id))
 
 
 @router.patch("/filter-views/{view_id}")
@@ -67,7 +67,7 @@ def update_filter_view(
         name_set="name" in fields,
         criteria_set="criteria" in fields,
     )
-    return service._view_dict(view)
+    return service.view_summary(view)
 
 
 @router.delete("/filter-views/{view_id}")

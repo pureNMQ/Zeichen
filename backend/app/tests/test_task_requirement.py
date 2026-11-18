@@ -67,110 +67,16 @@ def test_create_requires_same_project_requirement(client: TestClient, world: dic
     assert resp.json()["requirement_id"] == r["id"]
 
 
-def test_change_requirement_but_not_clear(client: TestClient, world: dict):
+def test_tasks_numbered_per_requirement_and_cannot_be_moved(client, world):
     login(client, "admin", "admin-pass-1")
     pid = str(world["project"].id)
-    r1 = _req(client, pid, "需求一")
-    r2 = _req(client, pid, "需求二")
-    t = _task(client, pid, r1["id"])
-    tid = t["id"]
-
-    # 更换 → OK
-    resp = client.patch(f"/api/tasks/{tid}", json={"requirement_id": r2["id"]})
-    assert resp.status_code == 200
-    assert resp.json()["requirement_id"] == r2["id"]
-
-    # 显式 null 解除 → invalid_request
-    resp = client.patch(f"/api/tasks/{tid}", json={"requirement_id": None})
-    assert resp.status_code == 400
-    assert resp.json()["code"] == "invalid_request"
-    assert client.get(f"/api/tasks/{tid}").json()["requirement_id"] == r2["id"]
-
-    # 未传字段 = 不变
-    resp = client.patch(f"/api/tasks/{tid}", json={"title": "改名"})
-    assert resp.status_code == 200
-    assert resp.json()["requirement_id"] == r2["id"]
-
-    # 活动流记录关联变更(不再有「解除需求关联」)
-    activity = client.get(f"/api/targets/task/{tid}/activity").json()["items"]
-    summaries = [a["summary"] for a in activity]
-    assert "关联需求" in summaries
-    assert "解除需求关联" not in summaries
-
-
-def test_cross_project_and_deleted_requirement_rejected(client: TestClient, world: dict, db: Session):
-    login(client, "admin", "admin-pass-1")
-    pid = str(world["project"].id)
-    other = Project(team_id=world["team"].id, name="另一个项目")
-    db.add(other)
-    db.commit()
-    r_other = _req(client, str(other.id), "他项目需求")
-    r = _req(client, pid, "本需求")
-    t = _task(client, pid, r["id"])
-
-    # ADR 0002:改指向按任务所在项目寻址;两项目各自 REQ-1 → 命中本项目的 r(项目内寻址)
-    resp = client.patch(f"/api/tasks/{t['id']}", json={"requirement_id": r_other["id"]})
-    assert resp.status_code == 200
-    assert resp.json()["requirement_id"] == r["id"]
-    assert client.get(f"/api/tasks/{t['id']}").json()["requirement_id"] == r["id"]
-
-    r_dead = _req(client, pid, "将被删的需求")
-    client.post(f"/api/requirements/{r_dead['id']}/delete", json={})
-    resp = client.patch(f"/api/tasks/{t['id']}", json={"requirement_id": r_dead["id"]})
-    assert resp.status_code == 404
-    assert resp.json()["code"] == "not_found"
-
-
-def test_requirement_link_permissions(client: TestClient, world: dict, db: Session):
-    """viewer 禁改;未指派任意编辑权;已指派仅本人/工作区 admin/项目 owner。"""
-    world["member"].password_hash = hash_password("bob-pass-1")
-    carol = make_user(db, "carol", role="member")
-    carol.password_hash = hash_password("carol-pass-1")
-    project = world["project"]
-    db.add(ProjectMember(project_id=project.id, user_id=carol.id, role="editor"))
-    db.commit()
-    pid = str(project.id)
-
-    login(client, "admin", "admin-pass-1")
-    r1 = _req(client, pid, "需求一")
-    r2 = _req(client, pid, "需求二")
-
-    # 未指派:viewer → 403,editor → 通过(任务以 admin 身份预建,bob/carol 只测 PATCH)
-    t = _task(client, pid, r1["id"])
-    login(client, "bob", "bob-pass-1")
-    resp = client.patch(f"/api/tasks/{t['id']}", json={"requirement_id": r2["id"]})
-    assert resp.status_code == 403
-    assert resp.json()["code"] == "permission_denied"
-    login(client, "carol", "carol-pass-1")
-    resp = client.patch(f"/api/tasks/{t['id']}", json={"requirement_id": r2["id"]})
-    assert resp.status_code == 200
-    assert resp.json()["requirement_id"] == r2["id"]
-
-    # 已指派给 agent:非本人 editor carol → 403;工作区 admin → 通过
-    login(client, "admin", "admin-pass-1")
-    t3 = client.post(
-        f"/api/projects/{pid}/tasks",
-        json={
-            "title": "已指派任务",
-            "requirement_id": r1["id"],
-            "assignee_id": str(world["agent"].id),
-        },
-    ).json()
-    login(client, "carol", "carol-pass-1")
-    resp = client.patch(f"/api/tasks/{t3['id']}", json={"requirement_id": r2["id"]})
-    assert resp.status_code == 403
-    assert resp.json()["code"] == "permission_denied"
-    login(client, "admin", "admin-pass-1")
-    resp = client.patch(f"/api/tasks/{t3['id']}", json={"requirement_id": r2["id"]})
-    assert resp.status_code == 200
-    assert resp.json()["requirement_id"] == r2["id"]
-
-    # 本人(agent,经服务层直接调用)可改指向,但置空被拒
-    from app.services import tasks as task_svc
-
-    tid = t3["id"]
-    got = task_svc.update_task(db, world["agent"], tid, requirement_id=r1["id"])
-    assert got.requirement_id == r1["id"]
-    with pytest.raises(AppError) as e:
-        task_svc.update_task(db, world["agent"], tid, requirement_id=None)
-    assert e.value.code == "invalid_request"
+    first = _req(client, pid, "一")["id"]
+    second = _req(client, pid, "二")["id"]
+    t1 = _task(client, pid, first)
+    t2 = _task(client, pid, second)
+    assert t1["id"] == first + "-T1"
+    assert t2["id"] == second + "-T1"
+    assert client.patch(f"/api/tasks/{t1['id']}", json={"requirement_id": second}).status_code == 422
+    assert client.get(f"/api/tasks/{t1['id']}").json()["requirement_id"] == first
+    client.post(f"/api/tasks/{t1['id']}/delete")
+    assert _task(client, pid, first)["id"] == first + "-T2"

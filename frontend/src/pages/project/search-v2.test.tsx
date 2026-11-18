@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { ProjectSearchPage } from '@/pages/project/search-v2'
+import { NotificationProvider } from '@/components/ui/notification'
 
 vi.mock('@/lib/api', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/lib/api')>(), api: { get: vi.fn() },
@@ -14,6 +15,23 @@ vi.mock('@/lib/current-project', () => ({
 }))
 
 describe('项目搜索', () => {
+  it('请求失败后可重试，成功但没有命中时才显示空态', async () => {
+    vi.mocked(api.get).mockRejectedValueOnce(new Error('搜索暂时不可用'))
+      .mockResolvedValueOnce({ domains: {} })
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <NotificationProvider><MemoryRouter initialEntries={['/projects/a/search?q=fixture']}>
+          <Routes><Route path="/projects/:projectId/search" element={<ProjectSearchPage />} /></Routes>
+        </MemoryRouter></NotificationProvider>
+      </QueryClientProvider>,
+    )
+    expect(await screen.findByRole('alert')).toHaveTextContent('搜索暂时不可用')
+    expect(screen.queryByText('没有匹配结果。')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '重试' }))
+    expect(await screen.findByText('没有匹配结果。')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
   it('按当前项目聚合，只续读选择的结果域', async () => {
     vi.mocked(api.get).mockImplementation((url) => {
       if (url.includes('cursor=wiki-page')) {

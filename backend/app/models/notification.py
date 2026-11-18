@@ -55,7 +55,7 @@ class EntityWatch(IdMixin, TimestampMixin, ProjectScopeMixin, PolymorphicTargetM
 
     __tablename__ = "entity_watch"
     __table_args__ = (
-        UniqueConstraint("user_id", "target_type", "target_id", name="uq_entity_watch_user_target"),
+        UniqueConstraint("project_id", "user_id", "target_type", "target_id", name="uq_entity_watch_user_target"),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(

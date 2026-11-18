@@ -2,19 +2,21 @@
 
 from datetime import UTC
 from typing import Annotated, Literal
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, StringConstraints
 from sqlalchemy import String, and_, cast, func, or_, select
 from sqlalchemy.orm import Session
 
+from ..config import get_settings
 from ..errors import invalid_request
 from ..models import Requirement, Task
 from ..models.requirement import REQUIREMENT_STATUS_VALUES
 from .file_models import FileAssociation, ProjectFile
 from .resource_refs import ResourceKind, ResourceRef, parse_uuid
 from .timeline_models import TimelineEntry, TimelineFileReference
+from .work_content_models import WorkReference
 from .wiki_models import Wiki, WikiReference, visible_wiki_tree
 
 
@@ -74,8 +76,12 @@ def file_used_at_predicate(href: str, project_ids: tuple[UUID, ...]):
         parts = urlsplit(href)
     except ValueError as exc:
         raise invalid_request(message) from exc
-    if parts.scheme or parts.netloc or parts.query or href != parts.path + (f"#{parts.fragment}" if parts.fragment else ""):
-        raise invalid_request(message)
+    if parts.scheme or parts.netloc:
+        trusted = [urlsplit(origin) for origin in [get_settings().web_base_url, *get_settings().cors_origins]]
+        if parts.scheme not in {"https", "http"} or not any(
+            (parts.scheme, parts.netloc) == (origin.scheme, origin.netloc) for origin in trusted
+        ):
+            raise invalid_request(message)
     target = None
     if parts.path.startswith("/projects/") and parts.path.count("/") == 2 and not parts.fragment:
         project_id = parse_uuid(parts.path.split("/")[-1], "file_used_at.project_id")
@@ -85,6 +91,16 @@ def file_used_at_predicate(href: str, project_ids: tuple[UUID, ...]):
         if target is None or target.kind not in {ResourceKind.REQUIREMENT, ResourceKind.TASK, ResourceKind.WIKI}:
             raise invalid_request(message)
         project_id, kind, target_id = target.project_id, target.kind.value, target.identifier
+    if parts.query:
+        pairs = parse_qsl(parts.query, keep_blank_values=True)
+        params = dict(pairs)
+        task = params.get("task", "")
+        if (parts.fragment or kind != ResourceKind.REQUIREMENT or len(params) != len(pairs)
+                or params.keys() - {"task", "tab", "taskTab", "version", "focus"}
+                or task.rpartition("-T")[0] != target_id):
+            raise invalid_request(message)
+        target = ResourceRef(project_id, ResourceKind.TASK, task)
+        kind, target_id = target.kind.value, target.identifier
     if project_id not in project_ids:
         raise invalid_request("使用位置必须属于已选择的检索项目")
     if parts.fragment:
@@ -115,7 +131,14 @@ def file_used_at_predicate(href: str, project_ids: tuple[UUID, ...]):
         return and_(in_project, visible, or_(explicit_use, wiki_use))
     else:
         return and_(in_project, explicit_use)
-    return and_(in_project, visible, explicit_use)
+    model = Requirement if kind == ResourceKind.REQUIREMENT else Task
+    ref = WorkReference
+    body_use = select(ref.target_id).join(model, and_(model.project_id == ref.project_id,
+        model.code == ref.code, model.version == ref.version)).where(
+        ref.project_id == project_id, ref.code == target_id, ref.target_kind == ResourceKind.FILE.value,
+        func.replace(ref.target_id, "-", "") == func.replace(cast(ProjectFile.id, String), "-", ""),
+    ).correlate(ProjectFile).exists()
+    return and_(in_project, visible, or_(explicit_use, body_use))
 
 
 def wiki_tag_predicate(db: Session, tag: str):

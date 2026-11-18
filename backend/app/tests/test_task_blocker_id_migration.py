@@ -20,7 +20,7 @@ from alembic.config import Config
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
-from app.models import Project, Requirement, Task, TaskBlocker, Team, User
+from sqlalchemy import inspect
 
 _TEST_PG_URL_ENV = "ZEICHEN_TEST_POSTGRES_URL"
 
@@ -52,41 +52,10 @@ def test_task_blocker_schema_matches_model_after_full_chain():
         config = Config(str(Path(__file__).parents[2] / "alembic.ini"))
         command.upgrade(config, "head")
 
-        model_columns = set(TaskBlocker.__table__.columns.keys())
-        db_columns = {
-            row[0] for row in engine.connect().execute(
-                text(
-                    "SELECT column_name FROM information_schema.columns "
-                    "WHERE table_name = 'task_blocker'"
-                )
-            )
-        }
-        assert db_columns == model_columns, (
-            f"task_blocker 迁移链与模型漂移: 多余 {db_columns - model_columns}, "
-            f"缺失 {model_columns - db_columns}"
-        )
-
-        with Session(engine) as session:
-            team_id, user_id, project_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
-            session.add_all([
-                Team(id=team_id, name="t"),
-                User(id=user_id, username=f"u-{user_id.hex[:8]}", password_hash="x",
-                     is_agent=False, is_bootstrap=False),
-                Project(id=project_id, team_id=team_id, name="p"),
-            ])
-            session.flush()
-            session.add_all([
-                Requirement(project_id=project_id, code="REQ-1", title="r",
-                            status="in_progress", created_by=user_id),
-                Task(project_id=project_id, code="TASK-1", title="前置", status="backlog",
-                     requirement_id="REQ-1", created_by=user_id),
-                Task(project_id=project_id, code="TASK-2", title="被阻塞", status="backlog",
-                     requirement_id="REQ-1", created_by=user_id),
-            ])
-            session.flush()
-            # REQ-56 复现路径:模型 INSERT 不提供 id 列
-            session.add(TaskBlocker(project_id=project_id, task_id="TASK-2",
-                                    blocker_id="TASK-1", created_by=user_id))
-            session.commit()
+        tables = inspect(engine).get_table_names()
+        assert "task_blocker" not in tables
+        assert "legacy_task_blocker_archive" in tables
+        columns = {row["name"] for row in inspect(engine).get_columns("task")}
+        assert {"legacy_code", "requirement_id", "code"} <= columns
     finally:
         engine.dispose()

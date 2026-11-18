@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { ParticipantAvatars } from '@/components/participant-avatars'
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query'
 import { FolderOpen, LayoutGrid, List, Plus } from 'lucide-react'
 
 import { Kanban } from '@/components/kanban'
+import { WorkTrash } from '@/components/work-trash'
 import { StatusSelect } from '@/components/status-select'
 import { StatusFilterPopover } from '@/components/status-filter-popover'
 import { FilterViewSwitcher, type ViewDef } from '@/components/filter-view-switcher'
@@ -20,7 +22,9 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
+import { MarkdownComposer } from '@/components/markdown-composer'
+import { useProjectCompletion } from '@/lib/project-completion'
+import { projectFileUpload } from '@/lib/project-files'
 import { ErrorNotification } from '@/components/ui/notification'
 import {
   api,
@@ -35,9 +39,6 @@ import {
 } from '@/lib/api'
 import { useCurrentProject, useProjectRole } from '@/lib/current-project'
 import { projectResourceHref } from '@/lib/project-links'
-import { clearDraft, readDraft, writeDraft } from '@/lib/form-draft'
-import { CreateExtras, type StagedReference } from '@/components/create-extras'
-import { uploadAssociatedFile, type StagedProjectFile } from '@/lib/project-files'
 
 const TIME_WINDOWS = [
   { value: '', label: '不限' },
@@ -88,6 +89,8 @@ function RequirementCard({
             {r.done_task_count ?? 0}/{r.task_count} 任务
           </Badge>
         </div>
+        {r.blocked && <p className="text-xs text-muted-foreground">等待前置需求</p>}
+        <ParticipantAvatars participants={r.participants} />
         {(canDelete || (canEdit && onReject && r.status === 'verifying')) && (
           <div className="flex items-center gap-1">
             {canDelete && (
@@ -128,28 +131,46 @@ function NoProjectGuide() {
   )
 }
 
+type BoardSettings = {
+  statuses: string[]; days: string; keyword: string; view: FilterViewMode; activeView: string; mine: boolean
+}
 export function RequirementsPage() {
+  const { projectId } = useCurrentProject()
+  return <RequirementBoard key={projectId} />
+}
+function RequirementBoard() {
   const { projectId, currentProject, isLoading: cpLoading } = useCurrentProject()
   const qc = useQueryClient()
   const role = useProjectRole()
   const canEdit = role === 'editor' || role === 'owner'
 
-  // 筛选条件(服务端下推)与视图状态
-  const [statuses, setStatuses] = useState<string[]>([])
-  const [updatedWithinDays, setUpdatedWithinDays] = useState('3')
-  const [keywordInput, setKeywordInput] = useState('')
-  const [keyword, setKeyword] = useState('')
-  const [viewMode, setViewMode] = useState<FilterViewMode>('board')
-  const [activeViewId, setActiveViewId] = useState('recent')
-
-  const [createOpen, setCreateOpen] = useState(false)
+  const cacheKey = ['requirement-board-settings', projectId]
+  const initial = qc.getQueryData<BoardSettings>(cacheKey)
+  const [statuses, setStatuses] = useState<string[]>(initial?.statuses ?? [])
+  const [updatedWithinDays, setUpdatedWithinDays] = useState(initial?.days ?? '3')
+  const [keywordInput, setKeywordInput] = useState(initial?.keyword ?? '')
+  const [keyword, setKeyword] = useState(initial?.keyword ?? '')
+  const [viewMode, setViewMode] = useState<FilterViewMode>(initial?.view ?? 'board')
+  const [activeViewId, setActiveViewId] = useState(initial?.activeView ?? 'recent')
+  const [mine, setMine] = useState(initial?.mine ?? false)
+  const navigate = useNavigate()
+  const board = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (projectId) qc.setQueryData(['requirement-board-settings', projectId], {
+      statuses, days: updatedWithinDays, keyword, view: viewMode, activeView:activeViewId, mine,
+    })
+  }, [qc, projectId, statuses, updatedWithinDays, keyword, viewMode, activeViewId, mine])
   const [deleteTarget, setDeleteTarget] = useState<RequirementRow | null>(null)
   const [confirmCount, setConfirmCount] = useState('')
   const [actionError, setActionError] = useState<string | null>(null)
   const [rejectTarget, setRejectTarget] = useState<RequirementRow | null>(null)
   const [rejectReason, setRejectReason] = useState('')
+  const [rejectUploading, setRejectUploading] = useState(false)
+  const rejectLookup = useProjectCompletion(rejectTarget?.project_id ?? null)
+  const reasonTooLong = Array.from(rejectReason.trim()).length > 2000
   const [rejectError, setRejectError] = useState<string | null>(null)
   const [rejecting, setRejecting] = useState(false)
+  const rejectAttempt = useRef<{ reason: string; id: string } | null>(null)
 
   const keywordTimer = useRef<number | null>(null)
 
@@ -168,6 +189,7 @@ export function RequirementsPage() {
       keywordTimer.current = null
     }
     const c = def.criteria ?? {}
+    setMine(c.participated_by_me ?? false)
     setStatuses(c.statuses ?? [])
     setUpdatedWithinDays(c.updated_within_days != null ? String(c.updated_within_days) : '')
     const kw = c.keyword ?? ''
@@ -179,6 +201,7 @@ export function RequirementsPage() {
 
   const criteria: FilterCriteria = {
     view_mode: viewMode,
+    ...(mine ? { participated_by_me: true } : {}),
     ...(statuses.length > 0 ? { statuses: [...statuses] } : {}),
     ...(updatedWithinDays !== '' ? { updated_within_days: Number(updatedWithinDays) } : {}),
     ...(keyword.trim() !== '' ? { keyword: keyword.trim() } : {}),
@@ -188,13 +211,16 @@ export function RequirementsPage() {
     data: pageData,
     isLoading,
     error,
+    refetch,
+    isFetchNextPageError,
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
   } = useInfiniteQuery({
-    queryKey: ['requirements', projectId, { statuses, updatedWithinDays, keyword }],
+    queryKey: ['requirements', projectId, { statuses, updatedWithinDays, keyword, mine }],
     queryFn: ({ pageParam }) => {
       const params = new URLSearchParams()
+      if (mine) params.set('participated_by_me', 'true')
       for (const s of statuses) params.append('status', s)
       if (updatedWithinDays !== '') params.set('updated_within_days', updatedWithinDays)
       const kw = keyword.trim()
@@ -212,6 +238,25 @@ export function RequirementsPage() {
 
   const items = (pageData?.pages ?? []).flatMap((p) => p.items)
   const boardItems = items
+
+  useEffect(() => {
+    const container = board.current?.closest('main')
+    if (!container || !projectId || isLoading) return
+    const key = ['requirement-board-scroll', projectId]
+    const columns = board.current?.querySelector<HTMLElement>('[data-kanban-scroll]')
+    const saved = qc.getQueryData<{top:number;left:number}>(key)
+    if (saved) {
+      container.scrollTop = saved.top
+      if (columns) columns.scrollLeft = saved.left
+    }
+    const remember = () => qc.setQueryData(key, {top:container.scrollTop, left:columns?.scrollLeft ?? 0})
+    container.addEventListener('scroll', remember)
+    columns?.addEventListener('scroll', remember)
+    return () => {
+      container.removeEventListener('scroll', remember)
+      columns?.removeEventListener('scroll', remember)
+    }
+  }, [isLoading, projectId, qc, viewMode])
 
   async function doMove(id: string, to: RequirementStatus) {
     setActionError(null)
@@ -245,35 +290,34 @@ export function RequirementsPage() {
   }
 
   function openReject(r: RequirementRow) {
+    rejectAttempt.current = null
+    setRejectUploading(false)
     setRejectTarget(r)
     setRejectReason('')
     setRejectError(null)
   }
 
   async function doReject() {
-    if (!rejectTarget) return
+    if (!rejectTarget || rejecting || rejectUploading) return
     const reason = rejectReason.trim()
-    if (reason === '') return
+    if (!reason || reasonTooLong) return
     setRejecting(true)
     setRejectError(null)
     try {
-      await api.post(withProject(`/targets/requirement/${rejectTarget.id}/comments`, projectId), { body: `打回：${reason}` })
-    } catch (err) {
-      setRejectError(err instanceof ApiError ? err.message : '评论发布失败,请重试')
-      setRejecting(false)
-      return
-    }
-    try {
-      await moveRequirement(rejectTarget.id, 'backlog', projectId)
-      await qc.invalidateQueries({ queryKey: ['requirements', projectId] })
+      const previous = rejectAttempt.current
+      const requestId = previous?.reason === reason ? previous.id : crypto.randomUUID()
+      rejectAttempt.current = { reason, id: requestId }
+      const scope = rejectTarget.project_id
+      await api.post(`/projects/${scope}/requirements/${rejectTarget.id}/reject`, { reason, request_id: requestId })
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['requirements', scope] }),
+        qc.invalidateQueries({ queryKey: ['requirement', rejectTarget.id, scope] }),
+        qc.invalidateQueries({ queryKey: ['requirement-timeline', scope, rejectTarget.id] }),
+      ])
       setRejectTarget(null)
       setRejectReason('')
     } catch (err) {
-      setRejectError(
-        err instanceof ApiError
-          ? `打回理由已发布到评论区,但状态回退失败:${err.message}`
-          : '打回理由已发布到评论区,但状态回退失败,请手动改回待办',
-      )
+      setRejectError(err instanceof ApiError ? err.message : '打回未确认，请重试')
     } finally {
       setRejecting(false)
     }
@@ -283,7 +327,7 @@ export function RequirementsPage() {
   if (!currentProject) return <NoProjectGuide />
 
   return (
-    <div className="flex min-h-[calc(100dvh-3rem)] flex-col gap-4">
+    <div ref={board} className="flex min-w-0 flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">需求</h1>
@@ -291,7 +335,7 @@ export function RequirementsPage() {
             当前项目:{currentProject.name}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           <FilterViewSwitcher
             projectId={projectId ?? ''}
             entityType="requirement"
@@ -299,8 +343,9 @@ export function RequirementsPage() {
             onSelectView={applyView}
             currentCriteria={criteria}
           />
+          {canEdit && projectId && <WorkTrash key={projectId} projectId={projectId} />}
           {canEdit && (
-            <Button onClick={() => setCreateOpen(true)}>
+            <Button onClick={() => navigate(`/projects/${projectId}/requirements/new`)}>
               <Plus className="mr-2 h-4 w-4" />
               新建需求
             </Button>
@@ -309,9 +354,11 @@ export function RequirementsPage() {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
+        <Button size="sm" variant={mine ? 'default' : 'outline'} aria-pressed={mine} onClick={() => setMine(!mine)}>我参与的</Button>
         <StatusFilterPopover statuses={REQUIREMENT_STATUSES} value={statuses} onChange={setStatuses} />
         <select
           aria-label="时间窗口"
+          autoComplete="off"
           value={updatedWithinDays}
           onChange={(e) => setUpdatedWithinDays(e.target.value)}
           className="h-8 rounded-md border bg-transparent px-2 text-sm"
@@ -356,19 +403,27 @@ export function RequirementsPage() {
         </div>
       </div>
 
-      {isLoading && <p className="text-sm text-muted-foreground">加载中…</p>}
+      {isLoading && <p role="status" className="text-sm text-muted-foreground">加载需求…</p>}
       <ErrorNotification message={error ? (error as Error).message : null} />
       <ErrorNotification message={actionError} />
-      {!isLoading && items.length === 0 && (
-        <p className="py-10 text-center text-sm text-muted-foreground">暂无需求</p>
+      {error && !isFetchNextPageError && <Button variant="outline" className="self-start" onClick={() => void refetch()}>重试加载</Button>}
+      {!isLoading && !error && items.length === 0 && (
+        <div className="flex flex-wrap items-center gap-2 py-4 text-sm text-muted-foreground">
+          <p>{mine || statuses.length || updatedWithinDays || keyword.trim() ? '没有符合筛选条件的需求' : '暂无需求'}</p>
+          {(mine || statuses.length > 0 || updatedWithinDays || keyword.trim()) && (
+            <Button size="sm" variant="ghost" onClick={() => applyView({ id: 'all', name: '全部', criteria: {}, view_mode: viewMode })}>
+              清除筛选
+            </Button>
+          )}
+        </div>
       )}
 
-      {viewMode === 'board' ? (
+      {items.length > 0 && (viewMode === 'board' ? (
         <Kanban
           className="flex-1"
           items={boardItems}
           canDrag={canEdit}
-          onMove={(id, to) => void doMove(id, to as RequirementStatus)}
+          onMove={(id, to) => doMove(id, to as RequirementStatus)}
           columns={REQUIREMENT_STATUSES}
           renderCard={(r) => (
             <RequirementCard
@@ -394,7 +449,7 @@ export function RequirementsPage() {
             />
           ))}
         </div>
-      )}
+      ))}
 
       {hasNextPage && (
         <div className="flex justify-center">
@@ -403,42 +458,37 @@ export function RequirementsPage() {
             onClick={() => void fetchNextPage()}
             disabled={isFetchingNextPage}
           >
-            {isFetchingNextPage ? '加载中…' : '加载更多'}
+            {isFetchingNextPage ? '加载中…' : isFetchNextPageError ? '重试下一页' : '加载更多'}
           </Button>
         </div>
       )}
 
-      <CreateRequirementDialog open={createOpen} onOpenChange={setCreateOpen} />
 
-      <Dialog open={rejectTarget !== null} onOpenChange={(v) => !v && setRejectTarget(null)}>
-        <DialogContent>
+      <Dialog open={rejectTarget !== null} onOpenChange={(v) => !v && !rejecting && setRejectTarget(null)}>
+        <DialogContent className="sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>打回需求</DialogTitle>
             <DialogDescription>
-              打回理由将发布到需求「{rejectTarget?.title}」的评论区,确认后需求状态回退到待办。
+              确认后，「{rejectTarget?.title}」将回到待办，打回理由会记入需求时间轴。
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-1.5">
-            <Label htmlFor="reject-reason">打回理由</Label>
-            <Textarea
-              id="reject-reason"
-              value={rejectReason}
-              onChange={(e) => setRejectReason(e.target.value)}
-              autoComplete="off"
-              maxLength={2000}
-              rows={4}
-              placeholder="请填写需要修改或补充的内容"
-            />
+            <div className="text-sm font-medium">打回理由</div>
+            <MarkdownComposer id="reject-reason" label="打回理由" value={rejectReason}
+              onChange={setRejectReason} lookup={rejectLookup} disabled={rejecting}
+              upload={rejectTarget ? projectFileUpload(rejectTarget.project_id) : undefined} onUploadPending={setRejectUploading}
+              className="[--writing-height:7rem]" />
+            {reasonTooLong && <p role="alert" className="text-sm text-destructive">打回理由最多可保存 2000 个字符，含 Markdown 标记。</p>}
             {rejectError && <p className="text-sm text-destructive">{rejectError}</p>}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setRejectTarget(null)}>
+            <Button variant="outline" disabled={rejecting} onClick={() => setRejectTarget(null)}>
               取消
             </Button>
             <Button
               variant="destructive"
               onClick={() => void doReject()}
-              disabled={rejecting || rejectReason.trim() === ''}
+              disabled={rejecting || rejectUploading || reasonTooLong || rejectReason.trim() === ''}
             >
               {rejecting ? '提交中…' : '确认打回'}
             </Button>
@@ -473,124 +523,5 @@ export function RequirementsPage() {
         </DialogContent>
       </Dialog>
     </div>
-  )
-}
-
-function CreateRequirementDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
-  const { projectId } = useCurrentProject()
-  const qc = useQueryClient()
-  const [title, setTitle] = useState('')
-  const [description, setDescription] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [submitting, setSubmitting] = useState(false)
-  const [refs, setRefs] = useState<StagedReference[]>([])
-  const [files, setFiles] = useState<StagedProjectFile[]>([])
-  const [createdId, setCreatedId] = useState<string | null>(null)
-
-  const draftKey = projectId ? `zeichen.draft.requirement:${projectId}` : null
-
-  useEffect(() => {
-    if (!open) return
-    setError(null)
-    setCreatedId(null)
-    const draft = draftKey ? readDraft<{ title: string; description: string }>(draftKey) : null
-    setTitle(draft?.title ?? '')
-    setDescription(draft?.description ?? '')
-    setRefs([])
-    setFiles([])
-  }, [open, draftKey])
-
-  useEffect(() => {
-    if (!open || !draftKey) return
-    // 全空内容不持久化,并清掉既有草稿
-    if (!title && !description) {
-      clearDraft(draftKey)
-      return
-    }
-    writeDraft(draftKey, { title, description })
-  }, [open, draftKey, title, description])
-
-  function clearFormDraft() {
-    if (draftKey) clearDraft(draftKey)
-    setTitle('')
-    setDescription('')
-    setRefs([])
-    setFiles([])
-    setError(null)
-  }
-
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault()
-    if (!projectId) return
-    setError(null)
-    setSubmitting(true)
-    try {
-      const id = createdId ?? (await api.post<{ id: string }>(`/projects/${projectId}/requirements`, {
-        title: title.trim(),
-        description: description.trim() || null,
-      })).id
-      setCreatedId(id)
-      const remainingRefs = [...refs]
-      const remainingFiles = [...files]
-      try {
-        while (remainingRefs.length > 0) {
-          const r = remainingRefs[0]
-          await api.post(withProject(`/targets/requirement/${id}/references`, projectId), { from_type: 'requirement', from_id: id, to_type: r.toType, to_id: r.toId, type: r.type })
-          remainingRefs.shift()
-        }
-        while (remainingFiles.length > 0) {
-          await uploadAssociatedFile(projectId, 'requirements', id, remainingFiles[0])
-          remainingFiles.shift()
-        }
-      } catch {
-        setRefs(remainingRefs)
-        setFiles(remainingFiles)
-        setError('需求已创建。部分引用或附件保存失败，请重试。')
-        return
-      }
-      setRefs([])
-      setFiles([])
-      if (draftKey) clearDraft(draftKey)
-      setTitle('')
-      setDescription('')
-      onOpenChange(false)
-      if (files.length) void qc.invalidateQueries({ queryKey: ['project-files', projectId] })
-      await qc.invalidateQueries({ queryKey: ['requirements', projectId] })
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : '创建失败,请重试')
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>新建需求</DialogTitle>
-          <DialogDescription>需求是项目内的可验收变更单元,可用任务承接拆解。</DialogDescription>
-        </DialogHeader>
-        <form onSubmit={onSubmit} className="space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="req-title">标题</Label>
-            <Input id="req-title" value={title} onChange={(e) => setTitle(e.target.value)} autoComplete="off" maxLength={256} required />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="req-desc">描述</Label>
-            <Input id="req-desc" value={description} onChange={(e) => setDescription(e.target.value)} autoComplete="off" maxLength={512} />
-          </div>
-          {projectId && <CreateExtras projectId={projectId} refs={refs} onRefsChange={setRefs} files={files} onFilesChange={setFiles} />}
-          {error && <p className="text-sm text-destructive">{error}</p>}
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={clearFormDraft}>
-              清空草稿
-            </Button>
-            <Button type="submit" disabled={submitting}>
-              {submitting ? '创建中…' : '创建'}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
   )
 }

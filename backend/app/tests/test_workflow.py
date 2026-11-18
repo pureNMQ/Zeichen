@@ -136,14 +136,10 @@ class TestRequirementLifecycle:
             set_req(db, world["admin"], r.code, "nonsense")
         assert e.value.code == "invalid_request"
 
-    def test_pending_requirement_rejects_task_derivation(self, db: Session, world: dict, proj: dict):
-        r = make_requirement(db, world["admin"], world["project"])
-        with pytest.raises(AppError) as e:
-            task_svc.create_task(
-                db, world["admin"], world["project"].id, "过早拆解", None, r.code
-            )
-        assert e.value.code == "invalid_request"
-        assert "请先确认需求" in e.value.message
+    def test_pending_requirement_allows_task_derivation(self, db, world, proj):
+        requirement = make_requirement(db, world["admin"], world["project"])
+        task = task_svc.create_task(db, world["admin"], world["project"].id, "拆解", requirement_id=requirement.code)
+        assert task.requirement_id == requirement.code
 
     def test_done_with_pending_tasks_no_validation(self, db: Session, world: dict, proj: dict):
         """需求带未决任务可直接置 done:无任何前置校验(方案 B 完全自由)。"""
@@ -348,7 +344,7 @@ class TestConcurrency:
         )
         task = Task(
             project_id=project.id,
-            code="TASK-1",
+            code="REQ-1-T1",
             title="race task",
             status="backlog",
             created_by=admin.id,
@@ -366,7 +362,7 @@ class TestConcurrency:
             barrier.wait()
             try:
                 user = local.get(User, user_id)
-                task_svc.claim_task(local, user, "TASK-1")
+                task_svc.claim_task(local, user, "REQ-1-T1")
                 outcomes.append(str(user_id))
             except AppError as e:
                 outcomes.append(e.code)

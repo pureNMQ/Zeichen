@@ -45,19 +45,29 @@ describe('使用手册内容完整性', () => {
     }
   })
 
-  it('状态词与前端功能需求 v1.0 定稿一致(需求五态/任务五态)', () => {
+  it('使用 v2 的需求六态与任务四态', () => {
     const all = allMarkdown()
-    // 需求五态:待确认/待办/实现中/已完成/已取消;任务五态:待办/实现中/验收中/已完成/已取消
+    expect(all).toContain('需求六态')
+    expect(all).toContain('任务四态')
     for (const term of ['待确认', '待办', '实现中', '验收中', '已完成', '已取消']) {
       expect(all).toContain(term)
     }
   })
 
+  it('通知、设密、配额与恢复说明符合当前实现', () => {
+    const manual = allMarkdown()
+    for (const term of ['仅主人可见', '首次设密链接', '仍计入项目配额', '工作项回收站']) {
+      expect(manual).toContain(term)
+    }
+    expect(manual).not.toMatch(/一键已读|20MB|2GB|超过物理清理周期|管理员可协助重置/)
+  })
+
   it('正文覆盖 Wiki 知识层、看板、API key 与权限矩阵角色', () => {
     const all = allMarkdown()
-    for (const term of ['Wiki', 'INDEX', '双链', 'frontmatter', '看板', 'admin', 'owner', 'editor', 'viewer']) {
+    for (const term of ['Wiki', '时间轴', '版本历史', '回收站', '看板', 'admin', 'owner', 'editor', 'viewer']) {
       expect(all).toContain(term)
     }
+    expect(all).not.toMatch(/知识 INDEX|frontmatter/u)
     expect(all).toMatch(/api key/i)
   })
 })

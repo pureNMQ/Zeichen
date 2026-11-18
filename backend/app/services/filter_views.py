@@ -17,19 +17,19 @@ from sqlalchemy.orm import Session
 
 from ..errors import conflict, invalid_request, not_found
 from ..models import ProjectFilterView, User
-from .permissions import get_accessible_project
+from .permissions import effective_user_id, get_accessible_project
 from .workflow import REQUIREMENT_STATUSES, TASK_STATUSES
 
 ENTITY_TYPES = ("requirement", "task")
 VIEW_MODES = ("board", "list")
-CRITERIA_KEYS = ("statuses", "updated_within_days", "keyword", "assignee_id", "view_mode")
+CRITERIA_KEYS = ("statuses", "updated_within_days", "keyword", "assignee_id", "participated_by_me", "view_mode")
 _STATUSES_BY_ENTITY = {
     "requirement": frozenset(REQUIREMENT_STATUSES),
     "task": frozenset(TASK_STATUSES),
 }
 
 
-def _view_dict(view: ProjectFilterView) -> dict:
+def view_summary(view: ProjectFilterView) -> dict:
     return {
         "id": str(view.id),
         "project_id": str(view.project_id),
@@ -69,6 +69,8 @@ def _validate_criteria(entity_type: str, criteria: dict | None) -> dict:
         if key not in CRITERIA_KEYS:
             raise invalid_request(f"非法的筛选条件键: {key}")
     statuses = criteria.get("statuses")
+    if "participated_by_me" in criteria and (entity_type != "requirement" or type(criteria["participated_by_me"]) is not bool):
+        raise invalid_request("participated_by_me 仅支持需求视图，须为布尔值")
     if statuses is not None:
         if not isinstance(statuses, list) or not all(isinstance(s, str) for s in statuses):
             raise invalid_request("statuses 必须是字符串列表")
@@ -108,10 +110,11 @@ def create_filter_view(
     name = _validate_name(name)
     criteria = _validate_criteria(entity_type, criteria)
     get_accessible_project(db, actor.id, project_id, min_level="viewer")
+    owner_id = effective_user_id(db, actor.id)
     duplicate = db.scalar(
         select(ProjectFilterView).where(
             ProjectFilterView.project_id == project_id,
-            ProjectFilterView.user_id == actor.id,
+            ProjectFilterView.user_id == owner_id,
             ProjectFilterView.entity_type == entity_type,
             ProjectFilterView.name == name,
         )
@@ -120,7 +123,7 @@ def create_filter_view(
         raise conflict("同名筛选视图已存在")
     view = ProjectFilterView(
         project_id=project_id,
-        user_id=actor.id,
+        user_id=owner_id,
         entity_type=entity_type,
         name=name,
         criteria=criteria,
@@ -144,12 +147,12 @@ def list_filter_views(
         select(ProjectFilterView)
         .where(
             ProjectFilterView.project_id == project_id,
-            ProjectFilterView.user_id == user.id,
+            ProjectFilterView.user_id == effective_user_id(db, user.id),
             ProjectFilterView.entity_type == entity_type,
         )
         .order_by(ProjectFilterView.created_at)
     ).all()
-    return {"items": [_view_dict(view) for view in rows]}
+    return {"items": [view_summary(view) for view in rows]}
 
 
 def get_filter_view(db: Session, user: User, view_id: uuid.UUID) -> ProjectFilterView:
@@ -170,7 +173,11 @@ def update_filter_view(
         view.name = _validate_name(name)
     if criteria_set:
         view.criteria = _validate_criteria(view.entity_type, criteria)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise conflict("同名筛选视图已存在")
     return view
 
 
@@ -186,9 +193,10 @@ def _get_owned(db: Session, actor: User, view_id: uuid.UUID) -> ProjectFilterVie
     view = db.scalar(
         select(ProjectFilterView).where(
             ProjectFilterView.id == view_id,
-            ProjectFilterView.user_id == actor.id,
+            ProjectFilterView.user_id == effective_user_id(db, actor.id),
         )
     )
     if view is None:
         raise not_found("筛选视图不存在")
+    get_accessible_project(db, actor.id, view.project_id, min_level="viewer")
     return view

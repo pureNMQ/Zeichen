@@ -183,7 +183,7 @@ function FilesList({ projectId, canWrite, deleted }: { projectId: string; canWri
       <ErrorNotification message={actionError ?? list.error?.message} />
       {list.isLoading && <p role="status" className="text-sm text-muted-foreground">加载文件…</p>}
       {!list.isLoading && !list.isError && files.length === 0 && (
-        <p className="text-sm text-muted-foreground">{deleted ? '没有可恢复的文件' : '没有符合条件的文件'}</p>
+        <p className="text-sm text-muted-foreground">{query || imagesOnly ? '没有符合条件的文件' : deleted ? '没有可恢复的文件' : '暂无项目文件'}</p>
       )}
       {list.isError && !list.isFetchNextPageError && (
         <Button type="button" size="sm" variant="outline" onClick={() => void list.refetch()}>重试加载</Button>

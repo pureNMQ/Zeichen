@@ -61,7 +61,7 @@ class TestUpdateEdges:
         with pytest.raises(AppError) as e:
             svc.update_task(db, world["admin"], task, title="  ")
         assert e.value.code == "invalid_request"
-        updated = svc.update_task(db, world["admin"], task, description="描述更新")
+        updated = svc.update_task(db, world["admin"], task, description="描述更新", expected_version=1)
         assert updated.description == "描述更新"
 
 

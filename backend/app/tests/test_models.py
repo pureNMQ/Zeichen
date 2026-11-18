@@ -59,7 +59,7 @@ def test_roundtrip(session: Session, world: tuple[User, Team, Project]) -> None:
     assert req.code == "REQ-1" and req.status == "backlog"
     assert req.deleted_at is None
 
-    t = Task(project_id=p.id, code="TASK-1", title="建索引", requirement_id=req.code, assignee_id=u.id)
+    t = Task(project_id=p.id, code=f"{req.code}-T1", title="建索引", requirement_id=req.code, assignee_id=u.id)
     session.add(t)
     session.commit()
     assert t.requirement_id == req.code
@@ -84,7 +84,7 @@ def test_requirement_six_states_task_four_states(
     session.commit()
     assert req.status == "verifying"
 
-    t = Task(project_id=p.id, code="TASK-2", title="非法验收态", status="verifying", requirement_id=req.code)
+    t = Task(project_id=p.id, code=f"{req.code}-T2", title="非法验收态", status="verifying", requirement_id=req.code)
     session.add(t)
     with pytest.raises(IntegrityError):
         session.commit()

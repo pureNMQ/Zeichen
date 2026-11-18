@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { Link, MemoryRouter, Outlet } from 'react-router-dom'
+import { createMemoryRouter, Link, Outlet, RouterProvider } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { App } from '@/App'
@@ -11,8 +11,8 @@ vi.mock('@/components/app-shell', () => ({ AppShell: () => <Outlet /> }))
 vi.mock('@/lib/auth', () => ({
   useAuth: () => ({ user: { id: 'me', username: 'me', workspace_role: 'member' }, loading: false }),
 }))
-vi.mock('@/components/vditor-ir-editor', () => ({
-  VditorIrEditor: () => null,
+vi.mock('@/components/vditor-ir-editor', async () => ({
+  WysiwygMarkdownEditor: (await import('@/test/fake-wysiwyg-editor')).FakeWysiwygMarkdownEditor,
   VditorMarkdownViewer: ({ markdown }: { markdown: string }) => <p>{markdown}</p>,
 }))
 
@@ -42,9 +42,11 @@ let appendAttempts = 0
 let wikiParent: string | null = null
 let deleteAttempts = 0
 let wikiDeleted = false
+let wikiDirectoryPaginated = false
 let fileRestored = false
 let fileName = '橘猫.png'
 let fileDeleted = false
+const linkedFiles = new Set<string>()
 
 function respond(path: string, options?: RequestInit) {
   const url = new URL(path, 'https://app.test')
@@ -52,15 +54,31 @@ function respond(path: string, options?: RequestInit) {
   const name = scopedProject === b || url.pathname.includes(b) ? 'B' : 'A'
   const projectId = name === 'B' ? b : a
   const bare = url.pathname
+  const fileTarget = [projectId, url.searchParams.get('target_kind'), url.searchParams.get('target_id')].join(':')
   if (bare === `/api/projects/${denied}`) return Response.json({ message: '项目不存在' }, { status: 404 })
   if (bare === '/api/projects') return Response.json(projects)
   if (bare === `/api/projects/${a}`) return Response.json(projects[0])
   if (bare === `/api/projects/${b}`) return Response.json(projects[1])
+  if (bare === `/api/projects/${projectId}/members`) return Response.json([])
   if (bare === `/api/projects/${a}/completions`) {
     return Response.json({ items: [personCandidate(a), personCandidate(b)] })
   }
   if (bare === `/api/projects/${a}/people/${author}`) return Response.json(personCandidate(a))
+  if (bare === `/api/projects/${projectId}/markdown/backlinks`) {
+    const items = url.searchParams.get('target_kind') === 'wiki'
+      ? [{ kind: 'requirements', id: 'REQ-1', title: '引用本页的需求', href: `/projects/${projectId}/requirements/REQ-1` }]
+      : []
+    return Response.json({ items, next_cursor: null })
+  }
+  if (bare === `/api/projects/${a}/assignees`) {
+    return Response.json([{ id: author, username: 'agent-a', nickname: '验收助手', is_agent: true }])
+  }
+  if (bare === '/api/tasks/REQ-1-T1/assign') return Response.json({})
   const timeline = `/api/projects/${projectId}/requirements/REQ-1/timeline`
+  if (bare === `/api/projects/${projectId}/tasks` && url.searchParams.get('requirement_id') === 'REQ-1') {
+    return Response.json({ items: [{ id: 'REQ-1-T1', project_id: projectId, requirement_id: 'REQ-1',
+      title: '验收任务', status: 'backlog' }], next_cursor: null })
+  }
   if (bare === timeline) {
     if (options?.method === 'POST') {
       appendAttempts += 1
@@ -105,7 +123,7 @@ function respond(path: string, options?: RequestInit) {
     return Response.json({ max_file_bytes: 4096, project_quota_bytes: 32768 })
   }
   if (bare === `/api/v2/projects/${projectId}/files/associations`) {
-    return Response.json({ items: [], next_cursor: null })
+    return Response.json({ items: linkedFiles.has(fileTarget) ? [{ ...fileCandidate(projectId), attached: true, referenced: false }] : [], next_cursor: null })
   }
   if (bare === `/api/v2/projects/${a}/files/${attachment}`) {
     if (options?.method === 'PATCH') fileName = JSON.parse(String(options.body)).name
@@ -122,6 +140,11 @@ function respond(path: string, options?: RequestInit) {
     })
   }
   if (bare === `/api/v2/projects/${a}/files/${attachment}/usage`) {
+    if (options?.method === 'PUT' || options?.method === 'DELETE') {
+      if (options.method === 'PUT') linkedFiles.add(fileTarget)
+      else linkedFiles.delete(fileTarget)
+      return Response.json({ changed: true })
+    }
     const history = url.searchParams.get('include_history') === 'true'
       ? [
         { href: `/projects/${a}/wiki/DOC-1?version=2`, label: '设计手册 · v2', kind: 'wiki', current: false },
@@ -143,9 +166,9 @@ function respond(path: string, options?: RequestInit) {
   if (bare === `/api/projects/${projectId}/requirements/REQ-1` || bare === '/api/requirements/REQ-1') {
     return Response.json({ id: 'REQ-1', project_id: projectId, title: `同码需求 ${name}`, status: 'backlog' })
   }
-  if (bare === '/api/tasks/TASK-101') {
+  if (bare === '/api/tasks/TASK-101' || bare === '/api/tasks/REQ-1-T1') {
     return Response.json({
-      id: 'TASK-101', project_id: projectId, requirement_id: 'REQ-1',
+      id: 'REQ-1-T1', project_id: projectId, requirement_id: 'REQ-1',
       title: `独立读取任务 ${name}`, status: 'backlog',
     })
   }
@@ -198,12 +221,20 @@ function respond(path: string, options?: RequestInit) {
     return Response.json({ ...v2Document, id: 'TERM-8', title: '迁移词条' })
   }
   if (bare === `${v2Wiki}/DOC-404`) return Response.json({ message: 'Wiki 不存在' }, { status: 404 })
+  const wikiChild = { ...v2Document, id: 'DOC-3', parent_id: 'DOC-1', title: '自身子 Wiki' }
+  const wikiGrandchild = { ...v2Document, id: 'DOC-4', parent_id: 'DOC-3', title: '孙级 Wiki', body: '孙级正文' }
+  if (bare === `${v2Wiki}/DOC-4`) return Response.json(wikiGrandchild)
   if (bare === v2Wiki) {
     if (options?.method === 'POST') return Response.json({ id: 'DOC-1', project_id: projectId, version: 1 }, { status: 201 })
+    if (wikiDirectoryPaginated && url.searchParams.get('limit') === '100') {
+      return url.searchParams.has('cursor')
+        ? Response.json({ items: [v2Document], next_cursor: null })
+        : Response.json({ items: [wikiChild, wikiGrandchild], next_cursor: 'wiki-directory-page-2' })
+    }
     return Response.json({ items: [
       ...(wikiDeleted ? [] : [v2Document]),
       { ...v2Document, id: 'DOC-2', parent_id: null, title: '新上级 Wiki' },
-      ...(wikiDeleted ? [] : [{ ...v2Document, id: 'DOC-3', parent_id: 'DOC-1', title: '自身子 Wiki' }]),
+      ...(wikiDeleted ? [] : [wikiChild]),
     ], next_cursor: null })
   }
   return Response.json({ items: [] })
@@ -271,8 +302,10 @@ beforeEach(() => {
   wikiParent = null
   deleteAttempts = 0
   wikiDeleted = false
+  wikiDirectoryPaginated = false
   fileRestored = false
   fileDeleted = false
+  linkedFiles.clear()
   fileName = '橘猫.png'
   vi.stubGlobal('fetch', fetchMock)
 })
@@ -285,33 +318,73 @@ afterEach(() => {
 
 function open(path: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const router = createMemoryRouter([{ path: '*', element: <>
+    <Link to={`/projects/${a}/requirements/REQ-1`}>打开 A 同码需求</Link>
+    <Link to={`/projects/${a}/wiki/DOC-1`}>打开 A 同码 Wiki</Link>
+    <Link to={`/projects/${b}/wiki?mode=trash`}>打开 B 回收站</Link>
+    <Link to="/documents/wiki/DOC-1">旧版 Wiki</Link>
+    <App />
+  </> }], { initialEntries: [path] })
   render(
     <QueryClientProvider client={client}>
       <NotificationProvider>
-        <MemoryRouter initialEntries={[path]}>
-          <Link to={`/projects/${a}/requirements/REQ-1`}>打开 A 同码需求</Link>
-          <Link to={`/projects/${a}/wiki/DOC-1`}>打开 A 同码 Wiki</Link>
-          <Link to={`/projects/${b}/wiki?mode=trash`}>打开 B 回收站</Link>
-          <Link to="/documents/wiki/DOC-1">旧版 Wiki</Link>
-          <App />
-        </MemoryRouter>
+        <RouterProvider router={router} />
       </NotificationProvider>
     </QueryClientProvider>,
   )
-  return userEvent.setup()
+  return { ...userEvent.setup(), router }
 }
 
 describe('canonical project routes', () => {
+  it('opens a Markdown backlink in the same project', async () => {
+    const user = open(`/projects/${a}/wiki/DOC-1`)
+    await screen.findByRole('heading', { name: '同码 Wiki A' })
+    const source = await screen.findByRole('link', { name: /引用本页的需求/ })
+    expect(source).toHaveAttribute('href', `/projects/${a}/requirements/REQ-1`)
+    await user.click(source)
+    await waitFor(() => expect(user.router.state.location.pathname).toBe(`/projects/${a}/requirements/REQ-1`))
+  })
+
+  it('assigns an attached Agent from the task owner menu', async () => {
+    const user = open(`/projects/${a}/requirements/REQ-1?task=REQ-1-T1`)
+    await user.click(await screen.findByRole('button', { name: '负责人：未指派' }))
+    await user.click(await screen.findByRole('menuitem', { name: /验收助手.*Agent/ }))
+    expect(fetchMock).toHaveBeenCalledWith(`/api/tasks/REQ-1-T1/assign?project_id=${a}`,
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ assignee_id: author }) }))
+  })
+
+  it.each([
+    ['', 'project', a],
+    ['/wiki/DOC-1', 'wiki', 'DOC-1'],
+    ['/requirements/REQ-1?tab=body', 'requirements', 'REQ-1'],
+    ['/requirements/REQ-1?task=REQ-1-T1', 'tasks', 'REQ-1-T1'],
+  ])('links an existing library file by its ID and removes only the association at %s', async (path, kind, id) => {
+    const user = open(`/projects/${a}${path}`)
+    await user.click(await screen.findByRole('button', { name: '添加文件' }))
+    const picker = await screen.findByRole('dialog', { name: '添加文件' })
+    expect(within(picker).getByRole('button', { name: '从本机上传' })).toBeVisible()
+    await user.type(within(picker).getByRole('textbox', { name: '搜索项目文件' }), '橘猫')
+    await user.click(await within(picker).findByRole('button', { name: /橘猫.png/ }))
+    const usage = `/api/v2/projects/${a}/files/${attachment}/usage?target_kind=${kind}&target_id=${id}`
+    expect(fetchMock).toHaveBeenCalledWith(usage, expect.objectContaining({ method: 'PUT' }))
+    expect(await screen.findByRole('link', { name: '橘猫.png' })).toHaveAttribute('href', `/projects/${a}/files/${attachment}`)
+    await user.click(screen.getByRole('button', { name: '移除关联' }))
+    expect(fetchMock).toHaveBeenCalledWith(usage, expect.objectContaining({ method: 'DELETE' }))
+    await waitFor(() => expect(screen.queryByRole('link', { name: '橘猫.png' })).not.toBeInTheDocument())
+    expect(fetchMock.mock.calls.some(([url, opts]) => url.includes('/files') && opts?.method === 'POST')).toBe(false)
+  })
   it('keeps the project scope in requirement details, panels and navigation', async () => {
     const user = open(`/projects/${b}/requirements/REQ-1`)
     expect(await screen.findByRole('heading', { name: /同码需求 B/ })).toBeVisible()
-    expect(screen.getByRole('link', { name: '← 返回需求' })).toHaveAttribute('href', `/projects/${b}/requirements`)
+    expect(screen.getByRole('link', { name: '返回需求' })).toHaveAttribute('href', `/projects/${b}/requirements`)
     expect(screen.queryByRole('button', { name: '新建任务' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button',{name:'时间线'}))
     expect(fetchMock).toHaveBeenCalledWith(`/api/projects/${b}/requirements/REQ-1/timeline?limit=20`, expect.anything())
     expect(fetchMock.mock.calls.some(([path]) => path.includes('/comments') || path.includes('/activity'))).toBe(false)
     expect(screen.queryByRole('textbox', { name: '时间轴正文' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button',{name:'正文'}))
     expect(fetchMock).toHaveBeenCalledWith(
-      `/api/v2/projects/${b}/files/associations?target_kind=requirements&target_id=REQ-1`, expect.anything(),
+      `/api/v2/projects/${b}/files/associations?target_kind=requirements&target_id=REQ-1&include_body=true`, expect.anything(),
     )
     expect(fetchMock.mock.calls.some(([path]) => path.includes('/attachments'))).toBe(false)
     expect(localStorage.getItem('zeichen.currentProjectId')).toBe(a)
@@ -323,11 +396,18 @@ describe('canonical project routes', () => {
   })
 
   it('opens a task directly even when the requirement task page omits it', async () => {
-    open(`/projects/${b}/tasks/TASK-101`)
-    const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByText('独立读取任务 B')).toBeVisible()
+    const {router} = open(`/projects/${b}/tasks/TASK-101`)
+    expect(await screen.findByRole('heading',{name:/独立读取任务 B/})).toBeVisible()
+    expect(router.state.location.search).toBe('?task=REQ-1-T1')
     expect(fetchMock).toHaveBeenCalledWith(`/api/tasks/TASK-101?project_id=${b}`, expect.anything())
     expect(fetchMock.mock.calls.some(([path]) => path === '/api/tasks/TASK-101')).toBe(false)
+  })
+
+  it.each(['tasks/REQ-1-T1','requirements/REQ-8?task=TASK-101'])('resolves %s in the authorized project to the current owning requirement', async entry => {
+    const {router} = open(`/projects/${b}/${entry}`)
+    expect(await screen.findByRole('heading',{name:/独立读取任务 B/})).toBeVisible()
+    expect(router.state.location.pathname).toBe(`/projects/${b}/requirements/REQ-1`)
+    expect(router.state.location.search).toBe('?task=REQ-1-T1')
   })
 
   it('loads the exact Wiki even when the selected project has the same short code', async () => {
@@ -348,8 +428,9 @@ describe('canonical project routes', () => {
   })
 
   it('continues resolving legacy requirement links', async () => {
-    open('/requirements/REQ-1')
+    const user = open('/requirements/REQ-1')
     expect(await screen.findByRole('heading', { name: /同码需求 A/ })).toBeVisible()
+    await user.click(screen.getByRole('button',{name:'时间线'}))
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/requirements/REQ-1', expect.anything()))
     expect(fetchMock).toHaveBeenCalledWith(`/api/projects/${a}/requirements/REQ-1/timeline?limit=20`, expect.anything())
     expect(fetchMock.mock.calls.some(([path]) => path.includes('/comments'))).toBe(false)
@@ -364,7 +445,8 @@ describe('canonical project routes', () => {
     expect(fetchMock).toHaveBeenCalledWith(
       `/api/projects/${a}/completions?mode=people&q=%E6%A9%98`, expect.objectContaining({ signal: expect.any(AbortSignal) }),
     )
-    await user.keyboard('{Enter}{Alt>}{Shift>}K{/Shift}{/Alt}')
+    await user.keyboard('{Enter}')
+    await user.click(screen.getByRole('button', { name: '插入图片' }))
     const search = screen.getByRole('combobox', { name: '查找图片' })
     await user.type(search, '橘')
     expect(await screen.findByRole('option', { name: /橘猫.png 文件/ })).toBeVisible()
@@ -373,16 +455,22 @@ describe('canonical project routes', () => {
       `/api/v2/projects/${a}/files?query=%E6%A9%98&limit=20&images_only=true`, expect.anything(),
     )
     await user.keyboard('{Enter}')
-    expect(editor).toHaveValue(`正文 A [@橘猫](</projects/${a}/people/${author}>) ![橘猫.png](</projects/${a}/files/${attachment}>) `)
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => {
+      const save = fetchMock.mock.calls.find(([url, options]) => url.endsWith('/wiki/DOC-1') && options?.method === 'PATCH')
+      const body: string = JSON.parse(String(save?.[1]?.body)).patch.body
+      expect(body).toContain(`/projects/${a}/people/${author}`)
+      expect(body).toContain(`/projects/${a}/files/${attachment}`)
+      expect(body).toContain('![橘猫.png]')
+    })
   })
 
   it('uploads pasted file bytes to the project and reuses the request id on retry', async () => {
     const attempts = mockUploadRequests()
     const user = open(`/projects/${a}/wiki/DOC-1?mode=edit`)
-    const editor = await screen.findByRole<HTMLTextAreaElement>('textbox', { name: 'Markdown 正文' })
+    const editor = await screen.findByRole('textbox', { name: 'Markdown 正文' })
     await user.click(editor)
     await user.keyboard(' ')
-    editor.setSelectionRange(editor.value.length, editor.value.length)
     const file = new File(['image bytes'], '橘猫.png', { type: 'image/png' })
     fireEvent.paste(editor, { clipboardData: { files: [file] } })
     expect(await screen.findByRole('progressbar', { name: '上传进度' })).toHaveAttribute('value', '50')
@@ -394,24 +482,30 @@ describe('canonical project routes', () => {
     expect(attemptPath.searchParams.get('request_id')).toMatch(/^[a-f0-9-]{36}$/)
     await act(async () => attempts[0].finish(503))
     expect(await screen.findByRole('alert')).toHaveTextContent('请重试上传')
-    expect(editor).toHaveValue('正文 A ')
+    expect(editor).toHaveTextContent(/^正文 A$/)
     await user.click(screen.getByRole('button', { name: '重试上传' }))
     await waitFor(() => expect(attempts).toHaveLength(2))
     expect(attempts[1].url).toBe(attempts[0].url)
     await act(async () => attempts[1].finish(201))
     expect(editor).toHaveFocus()
-    expect(editor).toHaveValue(`正文 A ![橘猫.png](</projects/${a}/files/${attachment}>) `)
     expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '保存' })).toBeEnabled()
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => {
+      const save = fetchMock.mock.calls.find(([url, options]) => url.endsWith('/wiki/DOC-1') && options?.method === 'PATCH')
+      const body: string = JSON.parse(String(save?.[1]?.body)).patch.body
+      expect(body).toContain('![橘猫.png]')
+      expect(body).toContain(`/projects/${a}/files/${attachment}`)
+    })
   })
 
-  it('opens migrated TERM references and retains the old Wiki route during transition', async () => {
+  it('opens migrated TERM references and redirects an unambiguous old Wiki link to the canonical reader', async () => {
     const user = open(`/projects/${a}/wiki/TERM-8`)
     expect(await screen.findByRole('heading', { name: '迁移词条' })).toBeVisible()
     await user.click(screen.getByRole('link', { name: '旧版 Wiki' }))
-    expect(await screen.findByRole('heading', { name: '旧版 Wiki A' })).toBeVisible()
-    expect(screen.getByText('旧版正文 A')).toBeVisible()
-    expect(screen.queryByRole('button', { name: '编辑' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '同码 Wiki A' })).toBeVisible()
+    expect(screen.getByText('正文 A')).toBeVisible()
+    expect(screen.queryByText('旧版正文 A')).not.toBeInTheDocument()
   })
 
   it('sends a versioned, field-only Wiki patch and keeps the draft on conflict', async () => {
@@ -442,6 +536,58 @@ describe('canonical project routes', () => {
     })
   })
 
+  it('keeps child documents nested when the parent arrives on another page', async () => {
+    wikiDirectoryPaginated = true
+    const user = open(`/projects/${a}/wiki/DOC-4`)
+    const directory = within(await screen.findByRole('navigation', { name: 'Wiki 文档树' }))
+    const grandchild = await directory.findByRole('link', { name: '孙级 Wiki' })
+    const root = directory.getByRole('link', { name: '同码 Wiki A' })
+    const child = directory.getByRole('link', { name: '自身子 Wiki' })
+    expect(root.closest('li')).toContainElement(child)
+    expect(child.closest('li')).toContainElement(grandchild)
+    expect(grandchild).toHaveAttribute('aria-current', 'page')
+    expect(await screen.findByText('孙级正文')).toBeVisible()
+
+    await user.click(directory.getByRole('button', { name: '折叠同码 Wiki A' }))
+    expect(grandchild).not.toBeInTheDocument()
+    const filter = screen.getByRole('textbox', { name: '搜索 Wiki' })
+    await user.type(filter, '孙级')
+    expect(root.closest('li')).toContainElement(directory.getByRole('link', { name: '孙级 Wiki' }))
+    await user.click(root)
+    expect(await screen.findByRole('heading', { name: '同码 Wiki A' })).toBeVisible()
+    expect(filter).toHaveValue('孙级')
+  })
+
+  it('protects an unsaved Wiki draft when selecting another document in the sidebar', async () => {
+    const user = open(`/projects/${a}/wiki/DOC-1?mode=edit`)
+    const summary = await screen.findByRole('textbox', { name: '摘要' })
+    await user.type(summary, '有更改')
+    await user.click(await screen.findByRole('link', { name: '新上级 Wiki' }))
+    const dialog = within(await screen.findByRole('dialog'))
+    expect(dialog.getByText('离开此页会放弃尚未保存的更改。')).toBeVisible()
+    await user.click(dialog.getByRole('button', { name: '继续编辑' }))
+    expect(summary).toHaveValue('迁移摘要有更改')
+  })
+
+  it('can cancel and then confirm browser Back from a dirty Wiki editor', async () => {
+    const user = open(`/projects/${a}/wiki/DOC-1`)
+    await user.click(await screen.findByRole('link', { name: '编辑' }))
+    const title = await screen.findByRole('textbox', { name: '标题' })
+    await user.type(title, '草稿')
+
+    await act(() => user.router.navigate(-1))
+    let dialog = within(await screen.findByRole('dialog'))
+    await user.click(dialog.getByRole('button', { name: '继续编辑' }))
+    expect(title).toHaveValue('同码 Wiki A草稿')
+    expect(user.router.state.location.search).toBe('?mode=edit')
+
+    await act(() => user.router.navigate(-1))
+    dialog = within(await screen.findByRole('dialog'))
+    await user.click(dialog.getByRole('button', { name: '放弃修改' }))
+    expect(await screen.findByRole('heading', { name: '同码 Wiki A' })).toBeVisible()
+    expect(user.router.state.location.search).toBe('')
+  })
+
   it('does not revive a missing canonical document from the old Wiki service', async () => {
     open(`/projects/${a}/wiki/DOC-404`)
     expect(await screen.findByRole('alert')).toHaveTextContent('Wiki 不存在')
@@ -450,7 +596,8 @@ describe('canonical project routes', () => {
 
   it('loads bounded Wiki revision history and restores the selected snapshot', async () => {
     const user = open(`/projects/${a}/wiki/DOC-1`)
-    await user.click(await screen.findByRole('button', { name: '版本历史' }))
+    await user.click(await screen.findByRole('button', { name: '更多 Wiki 操作' }))
+    await user.click(await screen.findByRole('menuitem', { name: '版本历史' }))
     const dialog = within(await screen.findByRole('dialog'))
     expect(await dialog.findByText('版本 4 · 新标题')).toBeVisible()
     await user.click(dialog.getByRole('button', { name: '加载旧版本' }))
@@ -466,7 +613,8 @@ describe('canonical project routes', () => {
 
   it('moves Wiki to a selected parent without offering a visible descendant', async () => {
     const user = open(`/projects/${a}/wiki/DOC-1`)
-    await user.click(await screen.findByRole('button', { name: '移动' }))
+    await user.click(await screen.findByRole('button', { name: '更多 Wiki 操作' }))
+    await user.click(await screen.findByRole('menuitem', { name: '移动' }))
     const dialog = within(await screen.findByRole('dialog'))
     await user.click(await dialog.findByRole('button', { name: 'DOC-2 · 新上级 Wiki' }))
     expect(dialog.queryByRole('button', { name: /自身子 Wiki/ })).not.toBeInTheDocument()
@@ -478,7 +626,8 @@ describe('canonical project routes', () => {
 
   it('rechecks changed delete impact and restores the deleted Wiki through trash detail', async () => {
     const user = open(`/projects/${a}/wiki/DOC-1`)
-    await user.click(await screen.findByRole('button', { name: '删除' }))
+    await user.click(await screen.findByRole('button', { name: '更多 Wiki 操作' }))
+    await user.click(await screen.findByRole('menuitem', { name: '删除' }))
     const dialog = within(await screen.findByRole('dialog'))
     expect(await dialog.findByText(/会影响 2 篇 Wiki/)).toBeVisible()
     await user.click(dialog.getByRole('button', { name: '确认删除' }))
@@ -603,7 +752,7 @@ describe('canonical project routes', () => {
   })
 
   it('loads an older timeline page and jumps from a reply to its parent context', async () => {
-    const user = open(`/projects/${a}/requirements/REQ-1`)
+    const user = open(`/projects/${a}/requirements/REQ-1?tab=timeline`)
     expect(await screen.findByText('近期回复')).toBeVisible()
     await user.click(screen.getByRole('button', { name: '加载较早记录' }))
     expect(await screen.findByText('较早记录', { exact: true })).toBeVisible()
@@ -624,21 +773,56 @@ describe('canonical project routes', () => {
   })
 
   it('retains the reply and reuses its request id when an append is retried', async () => {
-    const user = open(`/projects/${a}/requirements/REQ-1`)
+    const user = open(`/projects/${a}/requirements/REQ-1?tab=timeline`)
     await user.click(await screen.findByRole('button', { name: '回复' }))
     const draft = screen.getByRole('textbox', { name: '时间轴正文' })
     expect(draft).toHaveFocus()
     await user.keyboard('重试仍保留的正文')
+    await user.selectOptions(within(draft.closest('form')!).getByRole('combobox', { name: '来源任务' }), 'REQ-1-T1')
     await user.click(screen.getByRole('button', { name: '发布回复' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('暂时无法保存，请重试')
-    expect(draft).toHaveValue('重试仍保留的正文')
+    expect(draft).toHaveTextContent('重试仍保留的正文')
     await user.click(screen.getByRole('button', { name: '发布回复' }))
     expect(await screen.findByText('发布后的完整正文')).toBeVisible()
-    expect(draft).toHaveValue('')
+    expect(draft).toHaveTextContent(/^$/)
     const posts = fetchMock.mock.calls.filter(([path, options]) => path.endsWith('/timeline') && options?.method === 'POST')
     expect(posts).toHaveLength(2)
     const payloads = posts.map(([, options]) => JSON.parse(String(options?.body)))
-    expect(payloads[0]).toEqual({ body: '重试仍保留的正文', reply_to: recent, request_id: expect.any(String) })
+    expect(payloads[0]).toEqual({ body: '重试仍保留的正文', source_task: 'REQ-1-T1', reply_to: recent, request_id: expect.any(String) })
     expect(payloads[1]).toEqual(payloads[0])
+  })
+
+  it('applies combined timeline filters and resets their cursor', async () => {
+    const user = open(`/projects/${a}/requirements/REQ-1?tab=timeline`)
+    await user.click(await screen.findByText('筛选记录'))
+    const form = within(screen.getByText('应用筛选').closest('form')!)
+    await user.type(form.getByLabelText('关键词'), '讨论')
+    await user.selectOptions(form.getByLabelText('记录类型'), 'manual')
+    await user.type(form.getByLabelText('操作者'), author)
+    await user.type(form.getByLabelText('来源任务'), 'REQ-1-T1')
+    fireEvent.change(form.getByLabelText('开始时间'), { target: { value: '2026-11-01T09:00' } })
+    fireEvent.change(form.getByLabelText('结束时间'), { target: { value: '2026-11-10T09:00' } })
+    await user.click(form.getByRole('button', { name: '应用筛选' }))
+    const params = new URLSearchParams({ limit: '20', keyword: '讨论', kind: 'manual', actor_id: author,
+      source_task: 'REQ-1-T1', from_at: new Date('2026-11-01T09:00').toISOString(), to_at: new Date('2026-11-10T09:00').toISOString() })
+    expect(fetchMock).toHaveBeenCalledWith(`/api/projects/${a}/requirements/REQ-1/timeline?${params}`, expect.anything())
+    await user.click(form.getByRole('button', { name: '清除筛选' }))
+    expect(screen.getByText('筛选记录')).toBeInTheDocument()
+  })
+
+  it('dismisses completions before dismissing a timeline revision dialog', async () => {
+    const user = open(`/projects/${a}/requirements/REQ-1?tab=timeline&entry=${older}`)
+    await user.click(await screen.findByRole('button', { name: '修订' }))
+    const dialog = await screen.findByRole('dialog')
+    const editor = await within(dialog).findByRole('textbox', { name: '修订正文' })
+    await user.type(editor, ' @橘')
+    expect(await within(dialog).findByRole('option', { name: /橘猫 Agent/ })).toBeVisible()
+    await user.keyboard('{Escape}')
+    expect(dialog).toBeVisible()
+    expect(editor).toHaveTextContent('较早记录的完整正文')
+    expect(editor).toHaveTextContent('@橘')
+    expect(within(dialog).queryByRole('listbox')).not.toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 })

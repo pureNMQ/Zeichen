@@ -6,9 +6,11 @@ const vditorMock = vi.hoisted(() => {
     destroy: vi.fn(),
     disabled: vi.fn(),
     enable: vi.fn(),
+    setTheme: vi.fn(),
     updateToolbarConfig: vi.fn(),
     getValue: vi.fn(() => ''),
     setValue: vi.fn(),
+    vditor: { wysiwyg: { composingLock: false } },
   }
   const constructor = vi.fn(function () { return instance })
   const preview = vi.fn((_target: HTMLElement, _markdown: string) => Promise.resolve())
@@ -19,18 +21,18 @@ const vditorMock = vi.hoisted(() => {
 vi.mock('vditor', () => ({ default: vditorMock.constructor }))
 vi.mock('vditor/dist/index.css', () => ({}))
 
-import { VditorIrEditor, VditorMarkdownViewer } from '@/components/vditor-ir-editor'
+import { WysiwygMarkdownEditor, VditorMarkdownViewer } from '@/components/vditor-ir-editor'
 
-describe('VditorIrEditor', () => {
+describe('WysiwygMarkdownEditor', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
-  it('creates one IR editor with the approved basic toolbar and disabled local cache', async () => {
+  it('creates a WYSIWYG editor with local resources, a selection toolbar and no local cache', async () => {
     const onChange = vi.fn()
     const onReady = vi.fn()
 
-    render(<VditorIrEditor initialMarkdown="# Title" onChange={onChange} onReady={onReady} />)
+    render(<WysiwygMarkdownEditor initialMarkdown="# Title" onChange={onChange} onReady={onReady} />)
 
     await waitFor(() => expect(vditorMock.constructor).toHaveBeenCalledTimes(1))
     const [, options] = vditorMock.constructor.mock.calls[0]! as unknown as [HTMLElement, {
@@ -44,9 +46,10 @@ describe('VditorIrEditor', () => {
       after: () => void
     }]
     expect(options).toMatchObject({
-      mode: 'ir',
+      mode: 'wysiwyg',
+      cdn: '/vendor/vditor',
       value: '# Title',
-      placeholder: '输入 / 添加内容，或直接开始写作',
+      placeholder: '输入正文',
       cache: { enable: false },
       toolbar: ['headings', 'bold', 'italic', 'strike', 'quote', 'line', 'list', 'ordered-list', 'link', 'inline-code', 'code', 'undo', 'redo'],
       toolbarConfig: { hide: true, pin: false },
@@ -60,7 +63,7 @@ describe('VditorIrEditor', () => {
   })
 
   it('destroys the Vditor instance when unmounted', async () => {
-    const { unmount } = render(<VditorIrEditor initialMarkdown="" onChange={vi.fn()} />)
+    const { unmount } = render(<WysiwygMarkdownEditor initialMarkdown="" onChange={vi.fn()} />)
 
     await waitFor(() => expect(vditorMock.constructor).toHaveBeenCalledTimes(1))
     const [, options] = vditorMock.constructor.mock.calls[0]! as unknown as [HTMLElement, { after: () => void }]
@@ -70,8 +73,43 @@ describe('VditorIrEditor', () => {
     expect(vditorMock.instance.destroy).toHaveBeenCalledTimes(1)
   })
 
+  it('reports native edits immediately, preserves the caret on parent echoes and applies external resets', async () => {
+    const onChange = vi.fn()
+    const onEditorReady = vi.fn()
+    const { rerender, unmount } = render(<WysiwygMarkdownEditor initialMarkdown="已有正文"
+      onChange={onChange} onEditorReady={onEditorReady} ariaLabel="任务正文" />)
+    const [mount, options] = vditorMock.constructor.mock.calls[0]! as unknown as [HTMLElement, { after: () => void }]
+    mount.innerHTML = '<div class="vditor-wysiwyg"><pre class="vditor-reset" contenteditable="true"></pre></div>'
+    vditorMock.instance.getValue.mockReturnValue('已有正文\n')
+    act(() => options.after())
+    const field = screen.getByRole('textbox', { name: '任务正文' })
+    fireEvent.focusOut(field)
+    expect(onChange).not.toHaveBeenCalled()
+
+    vditorMock.instance.getValue.mockReturnValue('最新正文\n')
+    fireEvent.input(field)
+    expect(onChange).toHaveBeenLastCalledWith('最新正文\n')
+    rerender(<WysiwygMarkdownEditor initialMarkdown={'最新正文\n'} onChange={onChange} onEditorReady={onEditorReady} />)
+    expect(vditorMock.instance.setValue).not.toHaveBeenCalled()
+    rerender(<WysiwygMarkdownEditor initialMarkdown="" onChange={onChange} onEditorReady={onEditorReady} />)
+    expect(vditorMock.instance.setValue).toHaveBeenCalledWith('', true)
+    unmount()
+    expect(onEditorReady).toHaveBeenLastCalledWith(null)
+  })
+
+  it('uses the authenticated image preview without replacing the Markdown image destination', () => {
+    const href = '/projects/11111111-1111-4111-8111-111111111111/files/22222222-2222-4222-8222-222222222222'
+    render(<WysiwygMarkdownEditor initialMarkdown="" onChange={vi.fn()} />)
+    const [mount, options] = vditorMock.constructor.mock.calls[0]! as unknown as [HTMLElement, { after: () => void }]
+    mount.innerHTML = `<div class="vditor-wysiwyg"><pre class="vditor-reset" contenteditable="true"><img alt="示例图" src="${href}"></pre></div>`
+    act(() => options.after())
+    const img = screen.getByRole('img', { name: '示例图' })
+    expect(img).toHaveAttribute('src', href)
+    expect(img).toHaveAttribute('srcset', `/api/v2${href}/content?inline=true`)
+  })
+
   it('does not call Vditor instance methods before asynchronous initialization completes', async () => {
-    const { unmount } = render(<VditorIrEditor initialMarkdown="" onChange={vi.fn()} />)
+    const { unmount } = render(<WysiwygMarkdownEditor initialMarkdown="" onChange={vi.fn()} />)
 
     await waitFor(() => expect(vditorMock.constructor).toHaveBeenCalledTimes(1))
     const [, options] = vditorMock.constructor.mock.calls[0]! as unknown as [HTMLElement, { after: () => void }]
@@ -87,7 +125,7 @@ describe('VditorIrEditor', () => {
   })
 
   it('reveals formatting tools only for a text selection inside the document canvas', async () => {
-    const { container } = render(<VditorIrEditor initialMarkdown="" onChange={vi.fn()} />)
+    const { container } = render(<WysiwygMarkdownEditor initialMarkdown="" onChange={vi.fn()} />)
 
     await waitFor(() => expect(vditorMock.constructor).toHaveBeenCalledTimes(1))
     const [, options] = vditorMock.constructor.mock.calls[0]! as unknown as [HTMLElement, { after: () => void }]
@@ -110,13 +148,13 @@ describe('VditorIrEditor', () => {
 })
 
 describe('VditorMarkdownViewer', () => {
-  it('renders Markdown through Vditor preview with the pinned CDN', async () => {
+  it('renders Markdown through Vditor preview with packaged local assets', async () => {
     render(<VditorMarkdownViewer markdown="**read me**" ariaLabel="正文预览" />)
 
     await waitFor(() => expect(vditorMock.preview).toHaveBeenCalledWith(
       expect.any(HTMLDivElement),
       '**read me**',
-      expect.objectContaining({ cdn: 'https://cdn.jsdelivr.net/npm/vditor@3.11.2' }),
+      expect.objectContaining({ cdn: '/vendor/vditor' }),
     ))
   })
 

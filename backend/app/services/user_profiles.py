@@ -1,5 +1,7 @@
 """User profile and avatar management."""
 
+import base64
+import binascii
 import uuid
 from pathlib import Path
 
@@ -75,30 +77,50 @@ def _attachment(db: Session, user: User) -> Attachment | None:
     )
 
 
-async def set_avatar(db: Session, actor: User, target_id: uuid.UUID, upload: UploadFile) -> User:
+def _avatar_target(db: Session, actor: User, target_id: uuid.UUID, content_type: str | None) -> User:
     target = get_user(db, target_id)
     if not _can_edit_profile(db, actor, target):
         raise permission_denied("只能修改自己的头像")
-    if upload.content_type not in ALLOWED_AVATAR_TYPES:
+    if content_type not in ALLOWED_AVATAR_TYPES:
         raise invalid_request("头像必须是 JPEG、PNG、GIF 或 WebP 图片")
+    return target
+
+
+async def set_avatar(db: Session, actor: User, target_id: uuid.UUID, upload: UploadFile) -> User:
+    target = _avatar_target(db, actor, target_id, upload.content_type)
     data = await upload.read(get_settings().attachment_max_bytes + 1)
+    return _save_avatar(db, actor, target, upload.filename, upload.content_type, data)
+
+
+def set_encoded_avatar(db: Session, actor: User, target_id: uuid.UUID, content_type: str, encoded: str) -> User:
+    target = _avatar_target(db, actor, target_id, content_type)
+    if len(encoded) > ((get_settings().attachment_max_bytes + 2) // 3) * 4:
+        raise invalid_request("头像文件超过大小上限")
+    try:
+        data = base64.b64decode(encoded, validate=True)
+    except (ValueError, binascii.Error):
+        raise invalid_request("头像必须使用有效的 Base64 编码") from None
+    return _save_avatar(db, actor, target, None, content_type, data)
+
+
+def _save_avatar(db: Session, actor: User, target: User, filename: str | None, content_type: str, data: bytes) -> User:
     if not data:
         raise invalid_request("头像文件不能为空")
     if len(data) > get_settings().attachment_max_bytes:
-        raise invalid_request("头像文件不能超过 20MB")
+        raise invalid_request("头像文件超过大小上限")
     signatures = {
         "image/jpeg": lambda value: value.startswith(b"\xff\xd8\xff"),
         "image/png": lambda value: value.startswith(b"\x89PNG\r\n\x1a\n"),
         "image/gif": lambda value: value.startswith((b"GIF87a", b"GIF89a")),
         "image/webp": lambda value: len(value) >= 12 and value.startswith(b"RIFF") and value[8:12] == b"WEBP",
     }
-    if not signatures[upload.content_type](data):
+    if not signatures[content_type](data):
         raise invalid_request("头像文件内容与图片类型不匹配")
 
-    root: Path = get_settings().attachment_storage_dir
+    root = Path(get_settings().attachment_storage_dir)
     root.mkdir(parents=True, exist_ok=True)
     attachment_id = uuid.uuid4()
-    suffix = {"image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif", "image/webp": ".webp"}[upload.content_type]
+    suffix = {"image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif", "image/webp": ".webp"}[content_type]
     path = root / f"{attachment_id}{suffix}"
     path.write_bytes(data)
 
@@ -107,7 +129,7 @@ async def set_avatar(db: Session, actor: User, target_id: uuid.UUID, upload: Upl
         old.deleted_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
     attachment = Attachment(
         id=attachment_id,
-        file_name=upload.filename or f"avatar{suffix}",
+        file_name=filename or f"avatar{suffix}",
         size=len(data),
         storage_path=str(path),
         created_by=actor.id,

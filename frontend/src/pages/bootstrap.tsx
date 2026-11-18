@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api, ApiError } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
+import { authReturnPath } from '@/lib/auth-return'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -9,6 +10,7 @@ import { ErrorNotification } from '@/components/ui/notification'
 
 export function BootstrapPage() {
   const navigate = useNavigate()
+  const [params] = useSearchParams()
   const { refresh } = useAuth()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -27,7 +29,7 @@ export function BootstrapPage() {
     try {
       await api.post('/auth/bootstrap', { username: username.trim(), password })
       await refresh()
-      navigate('/projects', { replace: true })
+      navigate(authReturnPath(params.get('from')), { replace: true })
     } catch (err) {
       setError(err instanceof ApiError ? err.message : '初始化失败,请重试')
     } finally {

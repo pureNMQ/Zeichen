@@ -21,16 +21,10 @@ def test_requirement_crud_and_status_loop(client: TestClient, world: dict):
     assert resp.json()["items"][0]["title"] == "做登录"
     assert resp.json()["next_cursor"] is None
 
-    resp = client.patch(f"/api/requirements/{rid}", json={"description": "加个说明"})
+    resp = client.patch(f"/api/requirements/{rid}", json={"description": "加个说明", "expected_version": 1})
     assert resp.status_code == 200
     assert resp.json()["description"] == "加个说明"
 
-    # 待确认需求不进入执行流,不能派生任务;确认后才可拆解。
-    resp = client.post(
-        f"/api/projects/{pid}/tasks", json={"title": "过早拆解", "requirement_id": rid}
-    )
-    assert resp.status_code == 400
-    assert resp.json()["code"] == "invalid_request"
     resp = client.post(f"/api/requirements/{rid}/status", json={"status": "backlog"})
     assert resp.status_code == 200
 
@@ -86,19 +80,15 @@ def test_requirement_crud_and_status_loop(client: TestClient, world: dict):
     assert len(client.get(f"/api/targets/requirement/{rid}/comments").json()["items"]) == 1
     cid = resp.json()["id"]
 
-    # 引用需求→任务
-    resp = client.post(
-        f"/api/targets/requirement/{rid}/references",
-        json={"from_type": "requirement", "from_id": rid, "to_type": "task", "to_id": tid, "type": "implements"},
-    )
-    assert resp.status_code == 201
-    refs = client.get(f"/api/targets/task/{tid}/references").json()["items"]
-    assert len(refs) == 1
-    ref_id = resp.json()["id"]
-
-    # 删除评论/引用
+    assert client.post(f"/api/targets/requirement/{rid}/references", json={}).status_code == 404
+    current = client.get(f"/api/requirements/{rid}").json()
+    body = f"[实现](/projects/{pid}/tasks/{tid})"
+    assert client.patch(f"/api/requirements/{rid}", json={
+        "expected_version": current["version"], "description": body,
+    }).status_code == 200
+    refs = client.get(f"/api/projects/{pid}/markdown/backlinks?target_kind=tasks&target_id={tid}").json()
+    assert [r["id"] for r in refs["items"]] == [rid]
     assert client.delete(f"/api/comments/{cid}").status_code == 200
-    assert client.delete(f"/api/references/{ref_id}").status_code == 200
 
     # 需求软删:已有任务,需二次确认
     resp = client.post(f"/api/requirements/{rid}/delete", json={})
@@ -108,34 +98,6 @@ def test_requirement_crud_and_status_loop(client: TestClient, world: dict):
     assert resp.status_code == 200
     assert client.get(f"/api/requirements/{rid}").status_code == 404
     assert client.post(f"/api/requirements/{rid}/restore").status_code == 200
-
-
-def test_requirement_and_task_descriptions_are_short_single_line(client: TestClient, world: dict):
-    login(client, "admin", "admin-pass-1")
-    pid = str(world["project"].id)
-    valid = "a" * 512
-    response = client.post(
-        f"/api/projects/{pid}/requirements", json={"title": "边界需求", "description": valid}
-    )
-    assert response.status_code == 201
-    assert response.json()["description"] == valid
-    for description in ("b" * 513, "第一行\n第二行"):
-        response = client.post(
-            f"/api/projects/{pid}/requirements",
-            json={"title": "非法需求", "description": description},
-        )
-        assert response.status_code == 400
-        assert response.json()["code"] == "invalid_request"
-
-    rid = client.post(f"/api/projects/{pid}/requirements", json={"title": "任务挂载需求"}).json()["id"]
-    client.post(f"/api/requirements/{rid}/status", json={"status": "backlog"})
-    for description in ("c" * 513, "第一行\r\n第二行"):
-        response = client.post(
-            f"/api/projects/{pid}/tasks",
-            json={"title": "非法任务", "description": description, "requirement_id": rid},
-        )
-        assert response.status_code == 400
-        assert response.json()["code"] == "invalid_request"
 
 
 def test_error_four_piece_shape(client: TestClient, world: dict, db):

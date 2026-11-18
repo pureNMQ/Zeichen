@@ -22,6 +22,8 @@ EntryKind = Literal["manual", "system"]
 class ReplySummary(BaseModel):
     entry_id: str
     actor_id: str | None
+    actor_name: str | None
+    revised: bool
     kind: EntryKind
     withdrawn: bool
     body_preview: str | None
@@ -63,6 +65,7 @@ class Revision(BaseModel):
     version: int
     kind: Literal["create", "revise", "withdraw"]
     actor_id: str | None
+    actor_name: str | None
     created_at: datetime
     reason: str | None
     body: str | None = None
@@ -82,7 +85,7 @@ class Receipt(BaseModel):
 class Candidate(BaseModel):
     id: str
     label: str
-    kind: Literal["member", "agent", "wiki", "requirement"]
+    kind: Literal["member", "agent", "wiki", "requirement", "task", "file"]
     href: str
     detail: str
 
@@ -182,10 +185,17 @@ def register_timeline_tools(mcp) -> None:
             request_id=parse_uuid(request_id, "request_id"), expected_version=expected_version, reason=reason,
         ))
 
+    @mcp.tool(name="tasks.assignees", annotations=_READ)
+    @sessioned
+    def task_assignees(project_id: str) -> dict:
+        """列出可指派任务的人类成员和附属 Agent，返回可传给 tasks.assign 的身份 ID。"""
+        db, actor = dbc()
+        return {"items": project_completion.list_assignees(db, actor, parse_uuid(project_id, "project_id"))}
+
     @mcp.tool(name="project.candidates", annotations=_READ)
     @sessioned
     def candidates(project_id: str, mode: Literal["people", "reference"], query: str = "") -> Candidates:
-        """在项目内按名称或编号发现可见成员、附属 Agent、需求或 Wiki，最多返回 20 个匹配候选。"""
+        """在项目内按名称或编号发现可见成员、附属 Agent、需求、任务、文件或 Wiki，最多返回 20 个匹配候选。"""
         if len(query) > 200 or "\x00" in query:
             raise invalid_request("query 最多包含 200 个有效字符")
         db, actor = dbc()

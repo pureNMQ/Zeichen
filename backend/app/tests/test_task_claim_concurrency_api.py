@@ -75,7 +75,7 @@ def test_two_editors_race_to_claim_and_only_one_wins(claim_engine, monkeypatch):
             db.add(ProjectMember(project_id=project_id, user_id=user.id, role="editor"))
         db.add(Requirement(project_id=project_id, code="REQ-1", title="Claim once", status="backlog"))
         db.flush()
-        db.add(Task(project_id=project_id, code="TASK-1", requirement_id="REQ-1", title="Unassigned task", status="backlog"))
+        db.add(Task(project_id=project_id, code="REQ-1-T1", requirement_id="REQ-1", title="Unassigned task", status="backlog"))
 
     def request_db():
         with Session(claim_engine) as db:
@@ -83,7 +83,7 @@ def test_two_editors_race_to_claim_and_only_one_wins(claim_engine, monkeypatch):
 
     monkeypatch.setitem(app.dependency_overrides, get_db, request_db)
     params = {"project_id": str(project_id)}
-    url = "/api/tasks/TASK-1"
+    url = "/api/tasks/REQ-1-T1"
     ready_to_write = Barrier(2, timeout=10)
     claim_connections = []
 
@@ -120,11 +120,11 @@ def test_two_editors_race_to_claim_and_only_one_wins(claim_engine, monkeypatch):
 
     with Session(claim_engine) as db:
         claim_activity = db.scalars(select(Activity.actor_id).where(
-            Activity.project_id == project_id, Activity.target_id == "TASK-1", Activity.action == "claim",
+            Activity.project_id == project_id, Activity.target_id == "REQ-1-T1", Activity.action == "claim",
         )).all()
         assert claim_activity == [winner_id]
         claim_events = db.scalars(select(TimelineEntry).where(
-            TimelineEntry.project_id == project_id, TimelineEntry.source_task_code == "TASK-1",
+            TimelineEntry.project_id == project_id, TimelineEntry.source_task_code == "REQ-1-T1",
             TimelineEntry.event_type == "task.claimed",
         )).all()
         assert len(claim_events) == 1 and claim_events[0].actor_id == winner_id

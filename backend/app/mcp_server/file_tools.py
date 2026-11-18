@@ -22,11 +22,42 @@ def register_file_tools(mcp) -> None:
     @mcp.tool(name="files.list", annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
     @sessioned
     def list_library(project_id: str, query: str = "", cursor: str | None = None,
-                     limit: StrictInt = 20, media_type: str | None = None) -> dict:
+                     limit: StrictInt = 20, media_type: str | None = None, uploader_id: str | None = None,
+                     images_only: bool = False) -> dict:
         """发现项目内有效文件及稳定引用地址。用 authorize_read 获取临时字节通道。"""
         db, actor = dbc()
         return files.list_files(db, actor.id, parse_uuid(project_id, "project_id"), query=query,
-                                cursor=cursor, limit=limit, media_type=media_type)
+                                cursor=cursor, limit=limit, media_type=media_type, images_only=images_only,
+                                uploader_id=parse_uuid(uploader_id, "uploader_id") if uploader_id is not None else None)
+
+    @mcp.tool(name="files.limits", annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
+    @sessioned
+    def limits(project_id: str) -> dict:
+        """查看项目文件库的单文件字节上限和项目总字节配额。"""
+        db, actor = dbc()
+        return files.library_limits(db, actor.id, parse_uuid(project_id, "project_id"))
+
+    @mcp.tool(name="files.related", annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
+    @sessioned
+    def related(project_id: str, target_kind: file_usage.TargetKind, target_id: str,
+                cursor: str | None = None, limit: StrictInt = 20) -> dict:
+        """分页读取目标的相关文件。attached 表示独立关联，referenced 表示当前正文引用，同一文件返回一次。"""
+        db, actor = dbc()
+        return file_usage.list_associated_files(db, actor.id, parse_uuid(project_id, "project_id"),
+                                                kind=target_kind, target_id=target_id, include_body=True,
+                                                cursor=cursor, limit=limit)
+
+    @mcp.tool(name="files.rename", annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False,
+    ))
+    @sessioned
+    def rename(project_id: str, file_id: str, name: str) -> dict:
+        """重命名文件，保留原始标识、字节和已有引用。"""
+        db, actor = dbc()
+        row = files.rename_file(db, actor.id, parse_uuid(project_id, "project_id"), parse_uuid(file_id, "file_id"), name)
+        result = files.file_summary(row)
+        db.commit()
+        return result
 
     @mcp.tool(name="files.get", annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
     @sessioned
@@ -51,11 +82,13 @@ def register_file_tools(mcp) -> None:
         readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False,
     ))
     @sessioned
-    def trash_list(project_id: str, query: str = "", cursor: str | None = None, limit: StrictInt = 20) -> dict:
+    def trash_list(project_id: str, query: str = "", cursor: str | None = None, limit: StrictInt = 20,
+                   media_type: str | None = None, uploader_id: str | None = None, images_only: bool = False) -> dict:
         """分页查找本项目已删除文件。需要项目编辑权限，不返回文件内容或访问凭据。"""
         db, actor = dbc()
         return files.list_files(db, actor.id, parse_uuid(project_id, "project_id"), query=query,
-                                cursor=cursor, limit=limit, state=files.FileState.DELETED)
+                                cursor=cursor, limit=limit, state=files.FileState.DELETED, media_type=media_type,
+                                images_only=images_only, uploader_id=parse_uuid(uploader_id, "uploader_id") if uploader_id is not None else None)
 
     @mcp.tool(name="files.trash_get", annotations=ToolAnnotations(
         readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False,

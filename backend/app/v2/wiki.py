@@ -65,6 +65,15 @@ def read_wiki(db: Session, actor_id: UUID, project_id: UUID, code: str) -> Wiki:
     return _active_wiki(db, project_id, code)
 
 
+def read_deleted_wiki(db: Session, actor_id: UUID, project_id: UUID, code: str) -> Wiki:
+    require_project_role(db, actor_id, project_id, min_level="editor")
+    ResourceRef(project_id, ResourceKind.WIKI, code)
+    wiki = db.get(Wiki, (project_id, code))
+    if wiki is None or wiki.deleted_at is None:
+        raise not_found("已删除的 Wiki 不存在")
+    return wiki
+
+
 def _version(db: Session, project_id: UUID, code: str, version_no: int) -> WikiVersion:
     if version_no < 1:
         raise invalid_request("版本号必须大于零")
@@ -99,10 +108,11 @@ def store_version_references(db: Session, version: WikiVersion) -> None:
 
 
 def _record_snapshot(
-    db: Session, actor_id: UUID, project_id: UUID, code: str, version_no: int, content: WikiContent,
+    db: Session, actor_id: UUID | None, project_id: UUID, code: str, version_no: int, content: WikiContent,
+    *, snapshot_id: UUID | None = None,
 ) -> None:
     version = WikiVersion(
-        project_id=project_id, wiki_code=code, version_no=version_no,
+        id=snapshot_id, project_id=project_id, wiki_code=code, version_no=version_no,
         created_by=actor_id, **content.model_dump(),
     )
     db.add(version)

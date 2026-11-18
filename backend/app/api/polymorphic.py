@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..models import User
-from ..schemas import CommentCreate, ReferenceCreate
+from ..schemas import CommentCreate
+from ..v2 import backlinks
 from ..services import notifications as notification_service
 from ..services import polymorphic as service
 from ..services.pagination import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
@@ -71,52 +72,11 @@ def list_activity(
     )
 
 
-@router.get("/targets/{target_type}/{target_id}/references")
-def list_references(
-    target_type: str,
-    target_id: str,
-    cursor: str | None = None,
-    limit: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
-    project_id: uuid.UUID | None = None,
-    user: User = Depends(current_user),
-    db: Session = Depends(get_db),
-) -> dict:
-    return service.list_references(
-        db, user, target_type, target_id, cursor, limit, project_id=project_id
-    )
-
-
-@router.post("/targets/{target_type}/{target_id}/references", status_code=201)
-def create_reference(
-    target_type: str,
-    target_id: str,
-    body: ReferenceCreate,
-    project_id: uuid.UUID | None = None,
-    user: User = Depends(current_user),
-    db: Session = Depends(get_db),
-) -> dict:
-    ref = service.create_reference(
-        db, user, body.from_type, body.from_id, body.to_type, body.to_id, body.type,
-        project_id=project_id,
-    )
-    return {
-        "id": str(ref.id),
-        "from_type": ref.from_type,
-        "from_id": str(ref.from_id),
-        "to_type": ref.to_type,
-        "to_id": str(ref.to_id),
-        "type": ref.type,
-    }
-
-
-@router.delete("/references/{ref_id}")
-def delete_reference(
-    ref_id: uuid.UUID,
-    user: User = Depends(current_user),
-    db: Session = Depends(get_db),
-) -> dict:
-    service.delete_reference(db, user, ref_id)
-    return {"ok": True}
+@router.get("/projects/{project_id}/markdown/backlinks")
+def markdown_backlinks(project_id: uuid.UUID, target_kind: backlinks.BodyKind, target_id: str,
+                       cursor: str | None = None, limit: int = Query(50, ge=1, le=100),
+                       user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+    return backlinks.list_backlinks(db, user, project_id, target_kind, target_id, cursor, limit)
 
 
 @router.get("/targets/{target_type}/{target_id}/watch")

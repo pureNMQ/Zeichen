@@ -147,12 +147,12 @@ export function RepositoriesPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [showDeleted, setShowDeleted] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const { data: repositories = [], error: loadError } = useQuery({
+  const { data: repositories = [], error: loadError, isLoading: repositoriesLoading, refetch } = useQuery({
     queryKey: ['repositories', projectId],
     queryFn: () => api.get<{ items: RepositoryRow[] }>(`/projects/${projectId}/repositories`).then((result) => result.items),
     enabled: Boolean(projectId),
   })
-  const { data: deletedRepositories = [], error: deletedLoadError } = useQuery({
+  const { data: deletedRepositories = [], error: deletedLoadError, isLoading: deletedLoading } = useQuery({
     queryKey: ['repositories', projectId, 'deleted'],
     queryFn: () => api.get<{ items: RepositoryRow[] }>(`/projects/${projectId}/repositories/deleted`).then((result) => result.items),
     enabled: Boolean(projectId) && canEdit && showDeleted,
@@ -208,13 +208,47 @@ export function RepositoriesPage() {
         <Button onClick={() => setCreateOpen(true)}><Plus className="mr-2 h-4 w-4" />登记仓库</Button>
       </div>}
     </div>
-    <div className="overflow-hidden rounded-lg border">
-      <table className="w-full text-left text-sm">
-        <thead className="bg-muted/60 text-muted-foreground"><tr><th className="px-4 py-3 font-medium">名称</th><th className="px-4 py-3 font-medium">类型</th><th className="px-4 py-3 font-medium">地址</th><th className="px-4 py-3 font-medium">默认分支</th><th className="px-4 py-3 font-medium">备注</th><th className="px-4 py-3 text-right font-medium">操作</th></tr></thead>
-        <tbody>{repositories.length === 0 ? <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">暂无代码仓库</td></tr> : repositories.map((repository) => <tr key={repository.id} className="border-t align-top"><td className="px-4 py-3 font-medium">{repository.name}</td><td className="px-4 py-3">{vcsLabel(repository)}</td><td className="max-w-xs px-4 py-3"><code className="block truncate text-xs" title={repository.url}>{repository.url}</code></td><td className="px-4 py-3">{repository.default_branch ?? '—'}</td><td className="max-w-xs px-4 py-3 text-muted-foreground">{repository.description ?? '—'}</td><td className="px-4 py-2 text-right"><div className="flex justify-end gap-1"><Button size="icon-sm" variant="ghost" onClick={() => void copy(repository.url)} aria-label={`复制 ${repository.name} 地址`}><Copy className="h-4 w-4" /></Button><Button size="icon-sm" variant="ghost" asChild><a href={repository.url} target="_blank" rel="noreferrer" aria-label={`打开 ${repository.name}`}><ExternalLink className="h-4 w-4" /></a></Button>{canEdit && <><Button size="icon-sm" variant="ghost" onClick={() => setEditing(repository)} aria-label={`编辑 ${repository.name}`}><Pencil className="h-4 w-4" /></Button><Button size="icon-sm" variant="ghost" onClick={() => void remove(repository)} aria-label={`删除 ${repository.name}`}><Trash2 className="h-4 w-4" /></Button></>}</div></td></tr>)}</tbody>
-      </table>
-    </div>
-    {showDeleted && canEdit && <section className="space-y-3"><h2 className="text-base font-semibold">已删除</h2><div className="space-y-2">{deletedRepositories.length === 0 ? <p className="text-sm text-muted-foreground">没有已删除记录。</p> : deletedRepositories.map((repository) => <div key={repository.id} className="flex items-center justify-between rounded-lg border px-4 py-3"><div><p className="font-medium">{repository.name}</p><p className="text-sm text-muted-foreground">{vcsLabel(repository)} · {repository.url}</p></div><Button variant="outline" size="sm" onClick={() => void restore(repository)}><RotateCcw className="mr-2 h-4 w-4" />恢复</Button></div>)}</div></section>}
+    {repositoriesLoading && <p role="status" className="text-sm text-muted-foreground">加载仓库…</p>}
+    {loadError && <Button size="sm" variant="outline" onClick={() => void refetch()}>重试加载</Button>}
+    {!repositoriesLoading && !loadError && !repositories.length && <p className="text-sm text-muted-foreground">暂无代码仓库</p>}
+    {repositories.length > 0 && <ul aria-label="代码仓库" className="divide-y rounded-lg border">
+      {repositories.map((repository) => (
+        <li id={`repository-${repository.id}`} key={repository.id} className="flex flex-col gap-2 p-3 sm:flex-row sm:items-start sm:justify-between sm:p-4">
+          <div className="min-w-0 space-y-1">
+            <h2 className="wrap-anywhere text-sm font-medium">{repository.name}</h2>
+            <p className="wrap-anywhere text-xs text-muted-foreground">
+              {vcsLabel(repository)}{repository.default_branch && <> · 默认分支 <code>{repository.default_branch}</code></>}
+            </p>
+            <code className="block wrap-anywhere text-xs text-muted-foreground">{repository.url}</code>
+            {repository.description && <p className="wrap-anywhere text-sm text-muted-foreground">{repository.description}</p>}
+          </div>
+          <div className="flex shrink-0 flex-wrap gap-1">
+            <Button size="icon-sm" variant="ghost" aria-label={`复制 ${repository.name} 地址`} title="复制地址" onClick={() => void copy(repository.url)}><Copy /></Button>
+            <Button size="icon-sm" variant="ghost" asChild>
+              <a href={repository.url} target="_blank" rel="noreferrer" aria-label={`打开 ${repository.name}`} title="打开仓库"><ExternalLink /></a>
+            </Button>
+            {canEdit && <>
+              <Button size="icon-sm" variant="ghost" aria-label={`编辑 ${repository.name}`} title="编辑" onClick={() => setEditing(repository)}><Pencil /></Button>
+              <Button size="icon-sm" variant="ghost" aria-label={`删除 ${repository.name}`} title="删除登记" onClick={() => void remove(repository)}><Trash2 /></Button>
+            </>}
+          </div>
+        </li>
+      ))}
+    </ul>}
+    {showDeleted && canEdit && <section className="space-y-3">
+      <h2 className="text-base font-semibold">已删除</h2>
+      {deletedLoading && <p role="status" className="text-sm text-muted-foreground">加载已删除仓库…</p>}
+      {!deletedLoading && !deletedLoadError && !deletedRepositories.length && <p className="text-sm text-muted-foreground">没有已删除记录。</p>}
+      {deletedRepositories.length > 0 && <ul className="divide-y rounded-lg border">
+        {deletedRepositories.map((repository) => <li key={repository.id} className="flex flex-wrap items-start justify-between gap-2 p-3">
+          <div className="min-w-0 flex-1">
+            <p className="wrap-anywhere text-sm font-medium">{repository.name}</p>
+            <p className="wrap-anywhere text-xs text-muted-foreground">{vcsLabel(repository)} · {repository.url}</p>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => void restore(repository)}><RotateCcw />恢复</Button>
+        </li>)}
+      </ul>}
+    </section>}
     <RepositoryDialog projectId={currentProject.id} repository={null} open={createOpen} onOpenChange={setCreateOpen} onSaved={invalidate} />
     <RepositoryDialog projectId={currentProject.id} repository={editing} open={editing !== null} onOpenChange={(open) => !open && setEditing(null)} onSaved={invalidate} />
     <ErrorNotification message={pageError} />

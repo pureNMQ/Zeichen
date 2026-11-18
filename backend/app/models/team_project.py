@@ -1,7 +1,7 @@
 """team(单例根)/ workspace_member / project / project_member。
 
 规格书 §2.2:team 为工作区根节点(单例,未来多团队 = 多行);
-project 为资源容器,授权的最小单位;人 + agent 共用 project_member。
+project 为资源容器。project_member 登记人类成员的项目角色，附属 Agent 随主人继承权限。
 """
 
 import uuid
@@ -51,6 +51,7 @@ class Project(IdMixin, TimestampMixin, SoftDeleteMixin, CreatedByMixin, Base):
     deleted_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("user.id", ondelete="SET NULL"), nullable=True
     )
+    description: Mapped[str] = mapped_column(String(1000), nullable=False, server_default="")
 
     team: Mapped[Team] = relationship(back_populates="projects")
     members: Mapped[list["ProjectMember"]] = relationship(back_populates="project")

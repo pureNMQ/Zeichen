@@ -1,44 +1,34 @@
-"""任务服务:CRUD + 四态状态机 + 指派/认领/改派(§3.2/§5.1;ADR 0003 收归需求;ADR 0002 短码寻址)。
-
-任务必须挂同项目已确认需求(requirement_id 存 REQ-n 短码);可改指向、禁止置空。
-主键 = (project_id, code);对外 id 一律 TASK-n;无项目上下文读取按可访问项目消歧。
-所有权规则(已指派任务):仅被指派者本人 / 工作区 admin / 项目 owner 可改状态/改派;
-未指派任务任何编辑权者可操作。状态流转走通用 set_task_status(任意目标态自由流转,
-无前置校验);任务状态变化不影响需求状态(自动流转已删除,需求状态全手动)。
-认领用条件 UPDATE 原子化,并发竞争败者得 conflict。
-"""
+"""Tasks have an immutable parent requirement and a project-scoped REQ-n-Tm code."""
 
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 
 from ..errors import conflict, invalid_request, not_found, permission_denied
 from ..models import Requirement, Task, User
 from ..v2.resource_refs import ResourceKind, ResourceRef
 from ..v2.timeline import record_system_event
-from . import task_blockers
+from .requirement_board import remember_assignees
 from .labels import STATUS_CN
 from .pagination import page_result
 from .permissions import get_accessible_project, get_project_role, is_admin, require_project_role
 from .polymorphic import record_activity
-from .short_text import normalize_short_description
+from ..v2 import work_content
 from .user_profiles import avatar_url, display_name
 from .workflow import TERMINAL, assert_status_valid
 
-# update_task 的 requirement_id / blocked_by 哨兵:未传 = 不变;None/[] = 显式解除/清空
-_UNSET = object()
 
-
-def _task_dict(db: Session, t: Task) -> dict:
+def _task_dict(db: Session, t: Task, *, excerpt: tuple[str | None, bool] | None = None) -> dict:
     assignee = db.get(User, t.assignee_id) if t.assignee_id else None
-    blocked_by = task_blockers.blocker_summaries(db, t)
     return {
         "id": t.code,
         "title": t.title,
-        "description": t.description,
+        "description": excerpt[0] if excerpt else t.description,
+        **({"description_truncated": excerpt[1]} if excerpt else {}),
+        "version": t.version,
         "status": t.status,
         "project_id": str(t.project_id),
         "requirement_id": t.requirement_id,
@@ -49,8 +39,6 @@ def _task_dict(db: Session, t: Task) -> dict:
         "created_by": str(t.created_by) if t.created_by else None,
         "created_at": t.created_at.isoformat(),
         "updated_at": t.updated_at.isoformat(),
-        "blocked": task_blockers.is_blocked([i["status"] for i in blocked_by]),
-        "blocked_by": blocked_by,
     }
 
 
@@ -94,7 +82,7 @@ def _check_assignee(db: Session, project_id: uuid.UUID, assignee_id: uuid.UUID) 
 
 
 def _check_requirement(db: Session, project_id: uuid.UUID, requirement_id: str) -> None:
-    """需求须存在(REQ-n)、已确认、未删除、且与任务同项目(跨项目拒绝)。"""
+    """需求须存在、未删除，且与任务同项目。"""
     from .requirements import get_requirement_in_project
     from .short_codes import require_valid_code
 
@@ -102,8 +90,6 @@ def _check_requirement(db: Session, project_id: uuid.UUID, requirement_id: str) 
     requirement = get_requirement_in_project(db, project_id, requirement_id)
     if requirement.project_id != project_id:  # pragma: no cover - 项目内查询已约束
         raise invalid_request("任务所属项目与需求不一致")
-    if requirement.status == "pending":
-        raise invalid_request("待确认需求不能创建或关联任务,请先确认需求")
 
 
 def create_task(
@@ -114,22 +100,20 @@ def create_task(
     description: str | None = None,
     requirement_id: str | None = None,
     assignee_id: uuid.UUID | None = None,
-    blocked_by: list[str] | None = None,
+    *, commit: bool = True,
 ) -> Task:
-    """创建任务:必须挂同项目已确认需求(REQ-n 短码;ADR 0003,无独立任务)。"""
+    """为指定需求分配下一个任务短码。"""
     from .short_codes import allocate_code
 
-    title = title.strip()
-    if not title:
-        raise invalid_request("标题不能为空")
+    title = work_content.document_title(title)
     if requirement_id is None:
         raise invalid_request("任务必须挂需求,请指定 requirement_id")
     require_project_role(db, actor.id, project_id, min_level="editor")
-    description = normalize_short_description(description)
+    description = work_content.markdown(description)
     _check_requirement(db, project_id, requirement_id)
     if assignee_id is not None:
         _check_assignee(db, project_id, assignee_id)
-    code = allocate_code(db, project_id, "task")
+    code = allocate_code(db, project_id, "task", requirement_code=requirement_id)
     task = Task(
         project_id=project_id,
         code=code,
@@ -141,10 +125,11 @@ def create_task(
     )
     db.add(task)
     db.flush()
-    if blocked_by:
-        task_blockers.set_blockers_core(db, actor, task, blocked_by)
+    work_content.snapshot(db, task, actor.id)
+    work_content.notify_body_mentions(db, task, actor.id)
     record_activity(db, project_id, actor.id, "task", code, "create", "创建任务")
-    db.commit()
+    if commit:
+        db.commit()
     return task
 
 
@@ -187,7 +172,8 @@ def list_tasks(
     from .pagination import decode_cursor
 
     offset = decode_cursor(filters, cursor)
-    stmt = select(Task).where(Task.project_id == project_id, Task.deleted_at.is_(None), Task.has_active_requirement())
+    stmt = select(Task, func.substr(Task.description, 1, 240),
+                  func.length(Task.description) > 240).options(defer(Task.description)).where(Task.project_id == project_id, Task.deleted_at.is_(None), Task.has_active_requirement())
     if requirement_id:
         from .short_codes import require_valid_code
 
@@ -203,10 +189,10 @@ def list_tasks(
     if keyword:
         like = f"%{keyword}%"
         stmt = stmt.where(or_(Task.title.ilike(like), Task.description.ilike(like)))
-    rows = db.scalars(
+    rows = db.execute(
         stmt.order_by(Task.updated_at.desc(), Task.code.desc()).offset(offset).limit(limit)
     ).all()
-    items = [_task_dict(db, t) for t in rows]
+    items = [_task_dict(db, t, excerpt=(body, bool(truncated))) for t, body, truncated in rows]
     return page_result(items, offset, limit, filters)
 
 
@@ -216,36 +202,13 @@ def update_task(
     task_id: str,
     title: str | None = None,
     description: str | None = None,
-    requirement_id: object = _UNSET,
-    blocked_by: object = _UNSET,
     project_id: uuid.UUID | None = None,
+    expected_version: int | None = None,
 ) -> Task:
-    """更新任务元数据;requirement_id 可换同项目其他需求但不可置空;blocked_by 可整体替换/清空。
-
-    requirement_id 权限与改状态同规则(已指派仅本人/工作区 admin/项目 owner,
-    未指派任意编辑权);校验需求同项目且未删除。blocked_by 整体替换前置集合。
-    """
+    """更新需求内任务；任务的归属不可变。"""
     task = _get_editable(db, actor, task_id, project_id)
-    if title is not None:
-        title = title.strip()
-        if not title:
-            raise invalid_request("标题不能为空")
-        task.title = title
-    if description is not None:
-        task.description = normalize_short_description(description)
-    summary = "更新任务"
-    if requirement_id is not _UNSET:
-        _require_owner(db, actor, task)
-        if requirement_id is None:
-            raise invalid_request("任务必须挂需求,不能解除关联")
-        rid = str(requirement_id)
-        if rid != task.requirement_id:
-            _check_requirement(db, task.project_id, rid)
-            task.requirement_id = rid
-            summary = "关联需求"
-    if blocked_by is not _UNSET:
-        task_blockers.set_blockers_core(db, actor, task, blocked_by)
-    record_activity(db, task.project_id, actor.id, "task", task.code, "update", summary)
+    if title is not None or description is not None:
+        work_content.revise(db, actor, task, title, description, expected_version)
     db.commit()
     return task
 
@@ -296,6 +259,7 @@ def assign_task(
     if task.assignee_id is not None:
         _require_owner(db, actor, task)
     assignee = _check_assignee(db, task.project_id, assignee_id)
+    remember_assignees(db, task, task.assignee_id, assignee_id)
     task.assignee_id = assignee_id
     record_activity(
         db, task.project_id, actor.id, "task", task.code, "assign", f"指派给 {display_name(assignee)}"
@@ -348,6 +312,7 @@ def unassign_task(
     if task.status in TERMINAL:
         raise conflict("任务已结束,无法解除指派")
     _require_owner(db, actor, task)
+    remember_assignees(db, task, task.assignee_id)
     task.assignee_id = None
     record_activity(db, task.project_id, actor.id, "task", task.code, "unassign", "解除指派")
     db.commit()

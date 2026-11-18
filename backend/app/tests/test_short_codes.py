@@ -61,9 +61,9 @@ class TestAllocation:
         p1, p2 = db.query(Project).order_by(Project.name).all()
         codes = [short_codes.allocate_code(db, p1.id, "requirement") for _ in range(3)]
         assert codes == ["REQ-1", "REQ-2", "REQ-3"]
-        # 跨项目独立计数;跨类型独立计数
         assert short_codes.allocate_code(db, p2.id, "requirement") == "REQ-1"
-        assert short_codes.allocate_code(db, p1.id, "task") == "TASK-1"
+        assert short_codes.allocate_code(db, p1.id, "task", requirement_code="REQ-1") == "REQ-1-T1"
+        assert short_codes.allocate_code(db, p1.id, "task", requirement_code="REQ-2") == "REQ-2-T1"
 
     def test_prefix_by_entity_type(self, db: Session):
         p = db.query(Project).first()
@@ -73,14 +73,9 @@ class TestAllocation:
 
     def test_sequence_never_reused(self, db: Session):
         p = db.query(Project).first()
-        assert short_codes.allocate_code(db, p.id, "task") == "TASK-1"
-        # 删除(取消等)后序号不复用:计数器只增
-        db.query(short_codes.ShortCodeCounter).filter_by(
-            project_id=p.id, entity_type="task"
-        ).delete()
+        assert short_codes.allocate_code(db, p.id, "task", requirement_code="REQ-1") == "REQ-1-T1"
         db.commit()
-        # 计数器行被异常删除时从 1 重新开始属于运维异常场景;正常路径只验证递增
-        assert short_codes.allocate_code(db, p.id, "task") in ("TASK-1", "TASK-2")
+        assert short_codes.allocate_code(db, p.id, "task", requirement_code="REQ-1") == "REQ-1-T2"
 
     def test_concurrent_allocation_no_duplicates(self, tmp_path):
         """并发分配不重号:多线程争抢同一计数器行,所得序号两两不同。"""

@@ -1,7 +1,9 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api, ApiError } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
+import { authReturnPath } from '@/lib/auth-return'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -12,39 +14,30 @@ export function SetPasswordPage() {
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const setupToken = params.get('token')
-  const [setupUsername, setSetupUsername] = useState<string | null>(null)
-  const [checkingSetupToken, setCheckingSetupToken] = useState(Boolean(setupToken))
-  const [setupTokenInvalid, setSetupTokenInvalid] = useState(false)
+  const setup = useQuery({
+    queryKey: ['password-setup', setupToken],
+    queryFn: ({ signal }) => api.get<{ username: string }>(`/auth/password-setup?token=${encodeURIComponent(setupToken!)}`, signal),
+    enabled: Boolean(setupToken),
+    retry: false,
+    gcTime: 0,
+  })
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
-  useEffect(() => {
-    if (!setupToken) return
-    let cancelled = false
-    void api
-      .get<{ username: string }>(`/auth/password-setup?token=${encodeURIComponent(setupToken)}`)
-      .then(({ username }) => {
-        if (!cancelled) setSetupUsername(username)
-      })
-      .catch(() => {
-        if (!cancelled) setSetupTokenInvalid(true)
-      })
-      .finally(() => {
-        if (!cancelled) setCheckingSetupToken(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [setupToken])
-
-  if (setupTokenInvalid) {
+  if (setupToken && setup.isError) {
+    const invalid = setup.error instanceof ApiError && [401, 404, 422].includes(setup.error.status)
     return (
       <div className="flex min-h-screen items-center justify-center bg-muted/30">
-        <section className="w-full max-w-sm rounded-lg border bg-card p-8 shadow-sm">
-          <h1 className="text-xl font-semibold">设密链接已失效或不存在</h1>
-          <p className="mt-1 text-sm text-muted-foreground">该链接可能已被使用、已过期，或对应账号不存在。请联系管理员重新生成链接。</p>
+        <section className="w-full max-w-sm space-y-3 rounded-lg border bg-card p-8 shadow-sm">
+          <h1 className="text-xl font-semibold">{invalid ? '设密链接已失效或不存在' : '设置密码'}</h1>
+          {invalid ? <p className="text-sm text-muted-foreground">请联系管理员重新生成设密链接。</p> : <>
+            <ErrorNotification message="暂时无法验证设密链接，请重试。" />
+            <Button disabled={setup.isFetching} onClick={() => void setup.refetch()}>
+              {setup.isFetching ? '验证中…' : '重试验证'}
+            </Button>
+          </>}
         </section>
       </div>
     )
@@ -65,7 +58,7 @@ export function SetPasswordPage() {
         await api.post('/auth/set-password', { password })
       }
       await refresh()
-      navigate('/projects', { replace: true })
+      navigate(authReturnPath(params.get('from')), { replace: true })
     } catch (err) {
       setError(err instanceof ApiError ? err.message : '设置密码失败,请重试')
     } finally {
@@ -82,9 +75,9 @@ export function SetPasswordPage() {
         <h1 className="text-xl font-semibold">设置密码</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           {setupToken
-            ? checkingSetupToken
+            ? setup.isLoading
               ? '正在验证设密链接…'
-              : `为账号 ${setupUsername} 设置首次密码`
+              : `为账号 ${setup.data?.username} 设置首次密码`
             : `欢迎${params.get('user') ? `,${params.get('user')}` : ''} · 首次登录请设置你的密码`}
         </p>
         <div className="mt-6 space-y-4">
@@ -113,7 +106,7 @@ export function SetPasswordPage() {
             />
           </div>
           <ErrorNotification message={error} />
-          <Button type="submit" className="w-full" disabled={submitting || checkingSetupToken || (setupToken !== null && setupUsername === null)}>
+          <Button type="submit" className="w-full" disabled={submitting || (!!setupToken && !setup.data)}>
             {submitting ? '保存中…' : '保存并进入'}
           </Button>
         </div>

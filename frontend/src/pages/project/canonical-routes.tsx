@@ -24,7 +24,7 @@ export function CanonicalProjectRoute() {
 
 export function CanonicalTaskRoute() {
   const { id = '' } = useParams()
-  const { hash } = useLocation()
+  const { hash, search } = useLocation()
   const { projectId } = useCurrentProject()
   const { data: task, error, isLoading, isError } = useQuery({
     queryKey: ['task', id, projectId],
@@ -34,11 +34,13 @@ export function CanonicalTaskRoute() {
   })
 
   if (isLoading) return <p role="status" className="text-sm text-muted-foreground">加载任务…</p>
-  if (isError || !projectId || !task?.requirement_id || task.project_id !== projectId || task.id !== id) {
+  if (isError || !projectId || !task?.requirement_id || task.project_id !== projectId || (task.id !== id && !/^TASK-[1-9]\d*$/.test(id))) {
     return <ErrorNotification message={error instanceof Error ? error.message : '任务不存在或无访问权限'} />
   }
   const path = projectResourceHref(projectId, 'requirements', task.requirement_id)
-  return <Navigate replace to={`${path}?task=${encodeURIComponent(task.id)}${hash}`} />
+  const params = new URLSearchParams(search)
+  params.set('task', task.id)
+  return <Navigate replace to={`${path}?${params}${hash}`} />
 }
 
 export function CanonicalPersonRoute() {

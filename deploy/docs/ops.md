@@ -1,16 +1,18 @@
-# 贼船 Zeichen — 日常运维手册
+# 贼船 Zeichen — 历史 v1 单机运维手册
+
+本文件归档旧版本的备份、恢复和维护流程，使用旧栈当时的源码、镜像和配置。已切换的 v2 实例使用 [v2 运维说明](../README.md) 中的发布流程和维护定时器。
 
 > 所有命令默认在 `/srv/zeichen` 下执行;以下用 `zc` 表示:
-> `docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml`
-> 建议在服务器 `~/.bashrc` 加 `alias zc='docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml'`。
+> `docker compose --profile legacy-only -f docker-compose.yml -f deploy/docker-compose.prod.yml`
+> 建议在服务器 `~/.bashrc` 加 `alias zc='docker compose --profile legacy-only -f docker-compose.yml -f deploy/docker-compose.prod.yml'`。
 
 ## 1. 日常巡检
 
 ```bash
-zc ps                                   # 六服务状态(Exit/OOM 一目了然)
+zc ps                                   # 查看旧栈服务状态
 docker stats --no-stream                # 内存/CPU 实况(上限见 compose deploy.limits)
 df -h /var/lib/docker /srv/zeichen      # 卷与备份磁盘占用
-zc logs -f --tail=100 api               # 看某个服务日志(worker 见 memory improve 日志)
+zc logs -f --tail=100 api               # 看某个服务日志
 free -h                                 # swap 占用(异常高说明内存吃紧)
 ```
 
@@ -43,7 +45,7 @@ zc ps; curl -fsS https://<域名>/api/health
 - 基础镜像一律固定 tag(不追 `latest`/滚动 tag)
   后 `zc up -d --build`。
 - api 容器启动时自动跑 Alembic 迁移(mcp/worker 不迁移,只读共享库)。
-- 升级后务必做一次真实 recall(验证记忆链路)+ 附件下载。
+- 升级后务必做验证项目访问和附件下载。
 
 ### 回滚
 
@@ -94,17 +96,17 @@ BACKUP_ROOT=/tmp/zeichen-drill/backups \
   docker compose -p zeichen-drill -f docker-compose.yml -f deploy/docker-compose.prod.yml \
   exec -T api true   # 先确认环境起来
 BACKUP_ROOT=/tmp/zeichen-drill/backups deploy/restore.sh --yes <日期>
-# 验证:api 健康 + 登录 + 一次记忆 recall + 附件列表
+# 验证:api 健康 + 登录 + 项目资源 + 附件列表
 ```
 
-> 演练通过的标准:恢复后的实例能登录、能看到恢复的数据、recall 有结果。
+> 演练通过的标准:恢复后的实例能登录、能看到恢复的项目数据与附件。
 > 演练环境用完 `docker compose -p zeichen-drill down -v` 清理。
 
 ## 4. 证书续期
 
 | 方式 | 续期动作 | 频率 |
 |---|---|---|
-| 云厂商免费证书 | 控制台 SSL 证书重新申请 → 下载 Nginx 格式 → 覆盖 `/srv/zeichen/certs/` 两个文件 → `docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml exec web nginx -s reload`(或 `zc restart web`) | 每年 |
+| 云厂商免费证书 | 控制台 SSL 证书重新申请 → 下载 Nginx 格式 → 覆盖 `/srv/zeichen/certs/` 两个文件 → `docker compose --profile legacy-only -f docker-compose.yml -f deploy/docker-compose.prod.yml exec web nginx -s reload`(或 `zc restart web`) | 每年 |
 | certbot | `sudo certbot renew`(standalone 方式需先 `zc stop web`;想免停机则改用 webroot 模式并把 `/.well-known/acme-challenge/` 挂载到 web 容器,见 deploy/nginx.conf 预留的 location) → 复制证书后 reload nginx | 每 60 天自动 |
 
 建议在日历上标注免费证书到期前 2 周(证书过期后 HTTPS 立即报错,跳转 301 会把用户困在错误页)。

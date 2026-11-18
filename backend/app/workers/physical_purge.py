@@ -7,6 +7,8 @@
 
 import time
 
+from sqlalchemy import inspect
+
 from ..config import get_settings
 from ..db import SessionLocal
 from ..services import physical_purge
@@ -14,6 +16,8 @@ from ..services import physical_purge
 
 def run_once() -> dict[str, int]:
     with SessionLocal() as db:
+        if inspect(db.connection()).has_table("v2_wiki"):
+            raise RuntimeError("Legacy physical purge cannot run on a v2 database")
         return physical_purge.purge_soft_deleted(db)
 
 

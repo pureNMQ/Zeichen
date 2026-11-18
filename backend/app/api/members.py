@@ -11,19 +11,10 @@ from ..models import User
 from ..schemas import MemberCreate, MemberUpdate
 from ..services import agents as agents_service
 from ..services import members as members_service
-from ..services.user_profiles import payload as profile_payload
+from ..services.members import member_summary
 from .deps import current_admin, current_user
 
 router = APIRouter(prefix="/api/members", tags=["members"])
-
-
-def _payload(user: User) -> dict:
-    return {
-        **profile_payload(user),
-        "created_at": user.created_at.isoformat(),
-        "is_bootstrap": user.is_bootstrap,
-        "has_password": bool(user.password_hash),
-    }
 
 
 def _password_setup_url(token: str) -> str:
@@ -32,27 +23,7 @@ def _password_setup_url(token: str) -> str:
 
 @router.get("")
 def list_members(user: User = Depends(current_user), db: Session = Depends(get_db)) -> list[dict]:
-    owned = agents_service.owned_agents_map(db)
-    result = []
-    for u, role in members_service.list_members(db):
-        item = {**_payload(u), "role": role, "is_self": u.id == user.id, "agent": None}
-        agent = owned.get(u.id)
-        if agent is not None:
-            keys = agents_service.agent_detail(db, agent)
-            item["agent"] = {
-                "id": agent.id,
-                "username": agent.username,
-                "nickname": agent.nickname,
-                "display_name": agent_detail_display(agent),
-                "created_at": agent.created_at.isoformat(),
-                "active_keys": keys["active_keys"],
-            }
-        result.append(item)
-    return result
-
-
-def agent_detail_display(agent) -> str:
-    return agent.nickname or agent.username
+    return members_service.workspace_roster(db, user)
 
 
 @router.post("", status_code=201)
@@ -63,7 +34,7 @@ def create_member(
 ) -> dict:
     user, token = members_service.create_member(db, admin, body.username.strip(), body.role)
     return {
-        **_payload(user),
+        **member_summary(user),
         "role": body.role,
         "password_setup_url": _password_setup_url(token),
     }
@@ -83,10 +54,7 @@ def regenerate_password_setup_link(
 def list_inactive_members(
     admin: User = Depends(current_admin), db: Session = Depends(get_db),
 ) -> list[dict]:
-    return [
-        {**_payload(user), "deactivated_at": user.deleted_at.isoformat()}
-        for user in members_service.list_inactive_members(db)
-    ]
+    return members_service.inactive_roster(db, admin)
 
 
 @router.post("/inactive/{user_id}/reactivate")
@@ -94,7 +62,7 @@ def reactivate_member(
     user_id: uuid.UUID, admin: User = Depends(current_admin), db: Session = Depends(get_db),
 ) -> dict:
     user, token = members_service.reactivate_member(db, admin, user_id)
-    return {**_payload(user), "role": "member", "password_setup_url": _password_setup_url(token) if token else None}
+    return {**member_summary(user), "role": "member", "password_setup_url": _password_setup_url(token) if token else None}
 
 
 @router.patch("/{user_id}")
@@ -105,7 +73,7 @@ def update_member(
     db: Session = Depends(get_db),
 ) -> dict:
     user = members_service.update_role(db, admin, user_id, body.role)
-    return {**_payload(user), "role": body.role}
+    return {**member_summary(user), "role": body.role}
 
 
 @router.delete("/{user_id}")

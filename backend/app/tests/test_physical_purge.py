@@ -116,7 +116,7 @@ def _seed_soft_deleted_all(db, project, admin, *, now: datetime, age_days: int) 
     db.flush()
     t = Task(
         project_id=project.id,
-        code="TASK-1",
+        code=f"{r.code}-T1",
         title="到期任务",
         status="backlog",
         deleted_at=deleted_at,
@@ -189,7 +189,7 @@ def _make_soft_deleted(db, project, admin, kind: str, *, now: datetime, age_days
         db.flush()
         entity = Task(
             project_id=project.id,
-            code="TASK-9",
+            code=f"{_r.code}-T9",
             title="待清理任务",
             status="backlog",
             deleted_at=deleted_at,
@@ -446,7 +446,7 @@ def test_live_entities_never_purged(db, world, now):
     r2 = Requirement(project_id=project.id, code="REQ-2", title="活跃任务挂载", status="backlog")
     db.add(r2)
     db.flush()
-    t = Task(project_id=project.id, code="TASK-2", title="活跃任务", status="backlog", requirement_id=r2.code)
+    t = Task(project_id=project.id, code=f"{r2.code}-T2", title="活跃任务", status="backlog", requirement_id=r2.code)
     d = Document(project_id=project.id, code="DOC-2", title="活跃文档", doc_type="wiki")
     c = Comment(
         project_id=project.id,

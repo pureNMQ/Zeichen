@@ -12,6 +12,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
 from ..config import get_settings
+from .import_legacy_references import migrate_references
 from .import_legacy_files import import_files
 from .import_legacy_timeline import import_timeline
 from .import_legacy_wiki import import_wiki
@@ -42,12 +43,15 @@ def main() -> None:
                 file_counts, file_exceptions = import_files(db, legacy_storage)
                 timeline_counts, timeline_exceptions = import_timeline(db)
                 wiki_counts, wiki_exceptions = import_wiki(db)
+                ref_counts, ref_exceptions = migrate_references(db)
             json.dump({
                 "target": args.target,
+                "references": ref_counts,
                 "timeline": timeline_counts,
                 "wiki": wiki_counts,
                 "files": file_counts,
                 "exceptions": {
+                    "references": ref_exceptions,
                     "timeline": [asdict(exception) for exception in timeline_exceptions],
                     "wiki": wiki_exceptions,
                     "files": file_exceptions,

@@ -1,4 +1,6 @@
-# 贼船 Zeichen — 首次部署(单机 Docker Compose 全栈)
+# 贼船 Zeichen — 历史 v1 单机首次部署
+
+本文件归档 v1 的独立单机栈，构建和启动使用与原库匹配的 v1 提交。新建 v2 测试环境见[仓库 README](../../README.md)，迁移和发布见 [v2 运维说明](../README.md)。
 
 目标:单机 Docker Compose 全栈(nginx → web/api/mcp/worker/postgres),
 唯一公网入口 80/443(TLS),数据全部在命名卷,每日备份到异地对象存储。
@@ -120,14 +122,14 @@ openssl rand -hex 24    # POSTGRES_PASSWORD
 
 ```bash
 cd /srv/zeichen
-docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d --build
-docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml ps   # 五个服务
+docker compose --profile legacy-only -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d --build
+docker compose --profile legacy-only -f docker-compose.yml -f deploy/docker-compose.prod.yml ps   # 五个服务
 ```
 
 要点:
 
 - api 容器会自动跑 `alembic upgrade head` 建表。
-- 之后统一别名:`alias zc='docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml'`。
+- 之后统一别名:`alias zc='docker compose --profile legacy-only -f docker-compose.yml -f deploy/docker-compose.prod.yml'`。
 
 ## 8. 首用户引导与验收
 

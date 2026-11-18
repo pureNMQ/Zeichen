@@ -197,7 +197,7 @@ def test_mcp_requires_explicit_shared_acknowledgement(db, world, scope, monkeypa
     handlers = {}
 
     class Tools:
-        def tool(self, *, name):
+        def tool(self, *, name, annotations=None):
             def register(function):
                 handlers[name] = function
                 return function
@@ -205,10 +205,12 @@ def test_mcp_requires_explicit_shared_acknowledgement(db, world, scope, monkeypa
 
     tools._register_all(Tools())
     [shared] = handlers["notifications.list"](unread_only=True)["items"]
+    assert handlers["notifications.unread_count"]() == {"count": 1}
     assert handlers["notifications.get"](shared["id"])["read_at"] is None
     with pytest.raises(ToolError, match="not_found"):
         handlers["notifications.mark_read"](owner_only["id"])
     acknowledged = handlers["notifications.mark_read"](shared["id"])
     assert acknowledged["read_by_id"] == str(agent.id)
     assert not handlers["notifications.list"](unread_only=True)["items"]
+    assert handlers["notifications.unread_count"]() == {"count": 0}
     assert notifications.unread_count(db, owner) == 1

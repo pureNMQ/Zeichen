@@ -1,5 +1,5 @@
 # 贼船 Zeichen — 本地全链路编排(规格书 §1.1 / §8)。
-# `docker compose up -d` 一键可起:nginx 唯一入口,api/mcp/worker 不发布宿主端口。
+# `docker compose up -d` 一键可起:nginx 唯一入口，默认启动 web、api、mcp 和 postgres。
 # 宿主直连的旧开发模式(start-all.ps1)仍依赖 postgres:5432 的宿主发布。
 name: zeichen
 
@@ -68,6 +68,7 @@ services:
     # 不发布宿主端口(§8.1);MCP 经 nginx /mcp 访问
 
   worker:
+    profiles: ["legacy-only"]
     build:
       context: .
       dockerfile: Dockerfile.backend

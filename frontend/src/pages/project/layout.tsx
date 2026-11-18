@@ -2,9 +2,10 @@ import { useState, type FormEvent } from 'react'
 import { useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Pencil, Plus, Trash2 } from 'lucide-react'
-import { api, ApiError, type ProjectMemberRow, type ProjectRole } from '@/lib/api'
+import { api, ApiError, type ProjectMemberCandidate, type ProjectMemberRow, type ProjectRole, type ProjectRow } from '@/lib/api'
+import { useAuth } from '@/lib/auth'
 import { MemberAccountLabel } from '@/components/user-avatar'
-import { WorkTrash } from '@/components/work-trash'
+import { RelatedFiles } from '@/components/attachment-list'
 import { identityName } from '@/lib/user-identity'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -18,6 +19,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { ErrorNotification } from '@/components/ui/notification'
 import {
@@ -27,39 +29,31 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 
-function AddMemberDialog({ projectId, open, onOpenChange }: { projectId: string; open: boolean; onOpenChange: (v: boolean) => void }) {
+function AddMemberDialog({ projectId, onClose }: { projectId: string; onClose: () => void }) {
   const qc = useQueryClient()
-  const { data: candidates = [] } = useQuery({
+  const candidates = useQuery({
     queryKey: ['project-candidates', projectId],
-    queryFn: () => api.get<ProjectMemberRow[]>(`/projects/${projectId}/member_candidates`),
-    enabled: open,
+    queryFn: () => api.get<ProjectMemberCandidate[]>(`/projects/${projectId}/member_candidates`),
+    gcTime: 0,
   })
   const [userId, setUserId] = useState<string>('')
   const [role, setRole] = useState<ProjectRole>('viewer')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const selected = candidates.isSuccess ? candidates.data.find((person) => person.id === userId) : undefined
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
-    if (!userId) return
+    if (!selected || submitting) return
     setError(null)
     setSubmitting(true)
     try {
       await api.post(`/projects/${projectId}/members`, { user_id: userId, role })
-      setUserId('')
-      setRole('viewer')
-      onOpenChange(false)
+      onClose()
       await qc.invalidateQueries({ queryKey: ['project-members', projectId] })
       await qc.invalidateQueries({ queryKey: ['project-candidates', projectId] })
+      await qc.invalidateQueries({ queryKey: ['projects'] })
     } catch (err) {
       setError(err instanceof ApiError ? err.message : '添加失败,请重试')
     } finally {
@@ -68,33 +62,35 @@ function AddMemberDialog({ projectId, open, onOpenChange }: { projectId: string;
   }
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(v) => {
-        onOpenChange(v)
-        if (!v) setError(null)
-      }}
-    >
+    <Dialog open onOpenChange={(next) => { if (!next) onClose() }}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>添加项目成员</DialogTitle>
-          <DialogDescription>可从工作区成员与 Agent 中选择，按项目授权 editor/viewer。Owner 请通过转让流程指定。</DialogDescription>
+          <DialogDescription>选择要加入此项目的人类成员。附属 Agent 自动继承主人的项目权限。</DialogDescription>
         </DialogHeader>
         <form onSubmit={onSubmit} className="space-y-4">
           <div className="space-y-1.5">
-            <Label>人选</Label>
-            {candidates.length === 0 ? (
-              <p className="text-sm text-muted-foreground">没有可添加的人选(工作区成员与 Agent 均已加入)</p>
+            <Label htmlFor="project-member-candidate">工作区成员</Label>
+            {candidates.isPending ? (
+              <p role="status" className="text-sm text-muted-foreground">正在加载可添加的成员…</p>
+            ) : candidates.isError ? (
+              <div className="space-y-2">
+                <p role="alert" className="text-sm text-destructive">候选成员加载失败</p>
+                <Button type="button" variant="outline" size="sm" disabled={candidates.isFetching}
+                  onClick={() => void candidates.refetch()}>重新加载成员</Button>
+              </div>
+            ) : candidates.data.length === 0 ? (
+              <p role="status" className="text-sm text-muted-foreground">没有可添加的人类成员。</p>
             ) : (
               <Select value={userId || undefined} onValueChange={setUserId}>
-                <SelectTrigger className="w-full">
+                <SelectTrigger id="project-member-candidate" className="w-full">
                   <SelectValue placeholder="选择账号" />
                 </SelectTrigger>
                 <SelectContent>
-                  {candidates.map((c) => (
+                  {candidates.data.map((c) => (
                     <SelectItem key={c.id} value={c.id}>
                       {identityName(c)}
-                      {c.is_agent && ' (Agent)'}
+                      {c.workspace_role === 'admin' && '（工作区管理员）'}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -102,9 +98,9 @@ function AddMemberDialog({ projectId, open, onOpenChange }: { projectId: string;
             )}
           </div>
           <div className="space-y-1.5">
-            <Label>角色</Label>
-            <Select value={role} onValueChange={(v) => setRole(v as ProjectRole)}>
-              <SelectTrigger className="w-full">
+            <Label htmlFor="project-member-role">项目角色</Label>
+            <Select value={role} disabled={!selected} onValueChange={(v) => setRole(v as ProjectRole)}>
+              <SelectTrigger id="project-member-role" className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -112,10 +108,13 @@ function AddMemberDialog({ projectId, open, onOpenChange }: { projectId: string;
                 <SelectItem value="viewer">viewer</SelectItem>
               </SelectContent>
             </Select>
+            {selected?.workspace_role === 'admin' && (
+              <p className="text-sm text-muted-foreground">此角色登记在成员名册中。工作区管理员始终拥有项目管理权限。</p>
+            )}
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
           <DialogFooter>
-            <Button type="submit" disabled={submitting || !userId}>
+            <Button type="submit" disabled={submitting || !selected}>
               {submitting ? '添加中…' : '添加'}
             </Button>
           </DialogFooter>
@@ -128,22 +127,27 @@ function AddMemberDialog({ projectId, open, onOpenChange }: { projectId: string;
 function MemberRoleSelect({ projectId, member }: { projectId: string; member: ProjectMemberRow }) {
   const qc = useQueryClient()
   const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
 
   async function changeRole(role: ProjectRole) {
+    if (saving || role === member.role) return
     setError(null)
+    setSaving(true)
     try {
       await api.patch(`/projects/${projectId}/members/${member.id}`, { role })
       await qc.invalidateQueries({ queryKey: ['project-members', projectId] })
       await qc.invalidateQueries({ queryKey: ['projects'] })
     } catch (err) {
       setError(err instanceof ApiError ? err.message : '修改失败')
+    } finally {
+      setSaving(false)
     }
   }
 
   return (
     <div className="flex items-center gap-2">
-      <Select value={member.role} onValueChange={changeRole} disabled={error !== null}>
-        <SelectTrigger className="w-28">
+      <Select value={member.role} onValueChange={changeRole} disabled={saving}>
+        <SelectTrigger aria-label={`${identityName(member)} 的项目角色`} className="w-24">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -213,7 +217,8 @@ function TransferOwnerDialog({
         <DialogHeader>
           <DialogTitle>转让 Owner</DialogTitle>
           <DialogDescription>
-            转让后你将变为 editor。只能选择已加入项目的成员，并需要验证你的当前密码。
+            请选择已加入项目的成员，并用当前密码确认。转让后，你在名册中的项目角色将变为 editor。
+            {owner.workspace_role === 'admin' && '你仍可凭工作区管理员身份管理项目。'}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={onSubmit} className="space-y-4">
@@ -229,7 +234,7 @@ function TransferOwnerDialog({
                 <SelectContent>
                   {targets.map((target) => (
                     <SelectItem key={target.id} value={target.id}>
-                      {identityName(target)}{target.is_agent && ' (Agent)'}
+                      {identityName(target)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -259,19 +264,10 @@ function TransferOwnerDialog({
   )
 }
 
-function RenameProjectDialog({
-  projectId,
-  name,
-  open,
-  onOpenChange,
-}: {
-  projectId: string
-  name: string
-  open: boolean
-  onOpenChange: (v: boolean) => void
-}) {
+function EditProjectDialog({ project, onClose }: { project: ProjectRow; onClose: () => void }) {
   const qc = useQueryClient()
-  const [value, setValue] = useState(name)
+  const [value, setValue] = useState(project.name)
+  const [description, setDescription] = useState(project.description ?? '')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
@@ -280,29 +276,28 @@ function RenameProjectDialog({
     setError(null)
     setSubmitting(true)
     try {
-      await api.patch(`/projects/${projectId}`, { name: value.trim() })
-      onOpenChange(false)
-      await qc.invalidateQueries({ queryKey: ['project', projectId] })
-      await qc.invalidateQueries({ queryKey: ['projects'] })
+      const patch: { name?: string; description?: string } = {}
+      if (value.trim() !== project.name) patch.name = value.trim()
+      if (description.trim() !== (project.description ?? '')) patch.description = description.trim()
+      await api.patch(`/projects/${project.id}`, patch)
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['project', project.id] }),
+        qc.invalidateQueries({ queryKey: ['projects'] }),
+      ])
+      onClose()
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : '重命名失败,请重试')
+      setError(err instanceof ApiError ? err.message : '项目信息保存失败，请重试')
     } finally {
       setSubmitting(false)
     }
   }
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(v) => {
-        onOpenChange(v)
-        if (!v) setError(null)
-      }}
-    >
+    <Dialog open onOpenChange={(v) => { if (!v && !submitting) onClose() }}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>重命名项目</DialogTitle>
-          <DialogDescription>项目名在列表与侧边栏切换器同步更新</DialogDescription>
+          <DialogTitle>编辑项目信息</DialogTitle>
+          <DialogDescription>名称和描述会显示在项目卡片上。</DialogDescription>
         </DialogHeader>
         <form onSubmit={onSubmit} className="space-y-4">
           <div className="space-y-1.5">
@@ -316,9 +311,15 @@ function RenameProjectDialog({
               required
             />
           </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="project-description">项目描述</Label>
+            <Textarea id="project-description" autoComplete="off" maxLength={1000} rows={4}
+              value={description} onChange={(e) => setDescription(e.target.value)} />
+          </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
           <DialogFooter>
-            <Button type="submit" disabled={submitting || value.trim() === ''}>
+            <Button type="button" variant="outline" disabled={submitting} onClick={onClose}>取消</Button>
+            <Button type="submit" disabled={submitting || !value.trim() || (value.trim() === project.name && description.trim() === (project.description ?? ''))}>
               {submitting ? '保存中…' : '保存'}
             </Button>
           </DialogFooter>
@@ -330,18 +331,19 @@ function RenameProjectDialog({
 
 export function ProjectLayout() {
   const { projectId = '' } = useParams()
+  const { user } = useAuth()
   const qc = useQueryClient()
   const [addOpen, setAddOpen] = useState(false)
-  const [renameOpen, setRenameOpen] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
   const [transferOwner, setTransferOwner] = useState<ProjectMemberRow | null>(null)
   const [removeError, setRemoveError] = useState<string | null>(null)
 
   const { data: project, isLoading } = useQuery({
     queryKey: ['project', projectId],
-    queryFn: () => api.get<{ id: string; name: string; created_at: string; my_role: string }>(`/projects/${projectId}`),
+    queryFn: () => api.get<ProjectRow>(`/projects/${projectId}`),
   })
 
-  const isOwner = project?.my_role === 'owner'
+  const canManageProject = project?.my_role === 'owner'
 
   const { data: members = [], isLoading: membersLoading, error: membersError } = useQuery({
     queryKey: ['project-members', projectId],
@@ -350,11 +352,13 @@ export function ProjectLayout() {
   })
 
   async function remove(member: ProjectMemberRow) {
-    if (!window.confirm(`将 ${identityName(member)} 移出项目?其项目内授权将清除`)) return
+    const impact = member.workspace_role === 'admin' ? '该成员仍可凭工作区管理员身份管理项目。' : '其项目授权将被解除。'
+    if (!window.confirm(`将 ${identityName(member)} 移出项目名册？${impact}`)) return
     setRemoveError(null)
     try {
       await api.delete(`/projects/${projectId}/members/${member.id}`)
       await qc.invalidateQueries({ queryKey: ['project-members', projectId] })
+      await qc.invalidateQueries({ queryKey: ['project-candidates', projectId] })
       await qc.invalidateQueries({ queryKey: ['projects'] })
     } catch (err) {
       setRemoveError(err instanceof ApiError ? err.message : '移除失败')
@@ -366,57 +370,53 @@ export function ProjectLayout() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3">
-        <h1 className="text-xl font-semibold">{project.name}</h1>
-        {project.my_role !== 'viewer' && <WorkTrash key={projectId} projectId={projectId} />}
-        {isOwner && (
-          <Button variant="ghost" size="sm" onClick={() => setRenameOpen(true)}>
-            <Pencil className="h-3.5 w-3.5" />
-            <span className="sr-only">重命名</span>
-          </Button>
-        )}
-        <Badge variant="outline">我的角色:{project.my_role}</Badge>
-      </div>
-      <p className="text-sm text-muted-foreground">创建于 {new Date(project.created_at).toLocaleDateString()}</p>
+      <header className="space-y-1">
+        <div className="flex items-center gap-1">
+          <h1 className="min-w-0 text-xl font-semibold [overflow-wrap:anywhere]">{project.name}</h1>
+          {canManageProject && (
+            <Button variant="ghost" size="icon" className="shrink-0" title="编辑项目信息" aria-label="编辑项目信息" onClick={() => setEditOpen(true)}>
+              <Pencil className="h-4 w-4" />
+            </Button>
+          )}
+        </div>
+        {project.description && <p className="max-w-prose whitespace-pre-wrap text-sm leading-relaxed [overflow-wrap:anywhere]">{project.description}</p>}
+        <p className="text-sm text-muted-foreground">创建于 {new Date(project.created_at).toLocaleDateString()}</p>
+      </header>
 
       <Card>
           <CardHeader>
             <CardTitle className="text-base">项目成员</CardTitle>
-            <CardDescription>共 {members.length} 人 · 项目资源按成员角色授权(owner/editor/viewer)，Owner 仅可转让</CardDescription>
+            {!membersLoading && !membersError && <CardDescription>名册中共 {members.length} 人</CardDescription>}
           </CardHeader>
           <CardContent className="space-y-3">
             <ErrorNotification message={membersError ? (membersError as Error).message : null} />
             <ErrorNotification message={removeError} />
+            {user?.workspace_role === 'admin' && !membersLoading && !membersError && !members.some((m) => m.is_current_user) && (
+              <p className="text-sm text-muted-foreground">你以工作区管理员身份管理此项目。如需加入名册，可在“添加成员”中选择自己。</p>
+            )}
             {membersLoading ? (
               <p className="text-sm text-muted-foreground">加载中…</p>
-            ) : members.length === 0 ? (
+            ) : membersError ? null : members.length === 0 ? (
               <p className="text-sm text-muted-foreground">暂无成员</p>
             ) : (
-              <Table>
-                <TableHeader>
-                    <TableRow>
-                      <TableHead>账号</TableHead>
-                      <TableHead>角色</TableHead>
-                    {isOwner && <TableHead className="text-right">操作</TableHead>}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {members.map((m) => (
-                    <TableRow key={m.id}>
-                      <TableCell className="font-medium">
-                        <MemberAccountLabel user={m} isAgent={m.is_agent} />
-                      </TableCell>
-                      <TableCell>
-                        {isOwner && m.role === 'owner' ? (
+              <ul aria-label="项目成员" className="divide-y">
+                {members.map((m) => (
+                  <li key={m.id} className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 py-2.5">
+                    <div className="min-w-0 grow basis-full text-sm font-medium sm:basis-36">
+                      <MemberAccountLabel user={m} isAgent={m.is_agent} />
+                      {m.workspace_role === 'admin' && m.role !== 'owner' && (
+                        <p className="mt-1 text-xs font-normal text-muted-foreground">工作区管理员 · 拥有项目管理权限</p>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                        {canManageProject && m.role === 'owner' ? (
                           <Select value="owner" disabled>
-                            <SelectTrigger className="w-28">
+                            <SelectTrigger aria-label={`${identityName(m)} 的项目角色`} className="w-24">
                               <SelectValue>owner</SelectValue>
                             </SelectTrigger>
                           </Select>
-                        ) : isOwner ? <MemberRoleSelect projectId={projectId} member={m} /> : <Badge variant="outline">{m.role}</Badge>}
-                      </TableCell>
-                      {isOwner && <TableCell className="text-right">
-                        {m.role === 'owner' ? (
+                        ) : canManageProject ? <MemberRoleSelect projectId={projectId} member={m} /> : <Badge variant="outline">{m.role}</Badge>}
+                        {canManageProject && (m.role === 'owner' ? (
                           m.is_current_user && (
                             <Button variant="outline" size="sm" onClick={() => setTransferOwner(m)}>
                               转让 Owner
@@ -425,16 +425,16 @@ export function ProjectLayout() {
                         ) : (
                           <Button variant="ghost" size="sm" onClick={() => void remove(m)}>
                             <Trash2 className="h-4 w-4" />
+                            <span aria-hidden="true">移除</span>
                             <span className="sr-only">移除 {m.username}</span>
                           </Button>
-                        )}
-                      </TableCell>}
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                        ))}
+                    </div>
+                  </li>
+                ))}
+              </ul>
             )}
-            {isOwner && (
+            {canManageProject && (
               <Button onClick={() => setAddOpen(true)}>
                 <Plus className="mr-2 h-4 w-4" />
                 添加成员
@@ -443,13 +443,10 @@ export function ProjectLayout() {
           </CardContent>
         </Card>
 
-      <RenameProjectDialog
-        projectId={projectId}
-        name={project.name}
-        open={renameOpen}
-        onOpenChange={setRenameOpen}
-      />
-      {isOwner && <AddMemberDialog projectId={projectId} open={addOpen} onOpenChange={setAddOpen} />}
+      <RelatedFiles key={`files:${projectId}`} projectId={projectId} targetKind="project" targetId={projectId}
+        canEdit={canManageProject || project.my_role === 'editor'} />
+      {canManageProject && editOpen && <EditProjectDialog key={project.id} project={project} onClose={() => setEditOpen(false)} />}
+      {canManageProject && addOpen && <AddMemberDialog key={projectId} projectId={projectId} onClose={() => setAddOpen(false)} />}
       {transferOwner && (
         <TransferOwnerDialog
           projectId={projectId}

@@ -1,72 +1,28 @@
+import { MarkdownBacklinks } from '@/components/markdown-backlinks'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { ListTree, MoreHorizontal } from 'lucide-react'
+import { Link, useBlocker, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import { MarkdownComposer } from '@/components/markdown-composer'
 import { VditorMarkdownViewer } from '@/components/vditor-ir-editor'
+import { RelatedFiles } from '@/components/attachment-list'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ErrorNotification } from '@/components/ui/notification'
 import { Textarea } from '@/components/ui/textarea'
 import { ApiError, api } from '@/lib/api'
 import { useCurrentProject } from '@/lib/current-project'
-import { useDocumentNavigation } from '@/lib/document-navigation'
 import { useProjectCompletion } from '@/lib/project-completion'
 import { projectFileUpload } from '@/lib/project-files'
 import { projectResourceHref } from '@/lib/project-links'
-import { orderWikiTree, useWikiList, type WikiDocument, type WikiReceipt, type WikiScope, type WikiSummary } from '@/lib/project-wiki'
+import type { WikiDocument, WikiReceipt, WikiScope } from '@/lib/project-wiki'
+import { cn } from '@/lib/utils'
+import { WikiDirectory } from '@/pages/project/wiki-directory'
 import { WikiLifecycle, WikiTrash, type WikiAction } from '@/pages/project/wiki-lifecycle'
-
-function WikiIndex({ projectId, url, canWrite }: WikiScope) {
-  const [input, setInput] = useState('')
-  const [query, setQuery] = useState('')
-  const index = useWikiList<WikiSummary>(projectId, url, query)
-  const documents = orderWikiTree(index.documents)
-
-  return (
-    <section className="mx-auto max-w-4xl space-y-5">
-      <header className="flex items-start justify-between gap-2">
-        <h1 className="text-xl font-semibold">Wiki</h1>
-        {canWrite && <div className="flex flex-wrap gap-2">
-          <Button asChild size="sm" variant="outline"><Link to="?mode=trash">回收站</Link></Button>
-          <Button asChild size="sm"><Link to="?mode=new">新建 Wiki</Link></Button>
-        </div>}
-      </header>
-      <form className="flex max-w-md items-center gap-2" onSubmit={(event) => { event.preventDefault(); setQuery(input.trim()) }}>
-        <Input autoComplete="off" aria-label="搜索 Wiki" placeholder="搜索标题" maxLength={256} value={input}
-          onChange={(event) => setInput(event.currentTarget.value)} />
-        <Button type="submit" size="sm" variant="outline">搜索</Button>
-      </form>
-      <ErrorNotification message={index.error?.message} />
-      {index.isLoading && <p role="status" className="text-sm text-muted-foreground">加载 Wiki…</p>}
-      {!index.isLoading && !index.isError && documents.length === 0 && (
-        <p className="text-sm text-muted-foreground">{query ? '没有符合条件的 Wiki' : '暂无 Wiki'}</p>
-      )}
-      {index.isError && !index.isFetchNextPageError && (
-        <Button type="button" size="sm" variant="outline" onClick={() => void index.refetch()}>重试加载</Button>
-      )}
-      {documents.length > 0 && <ul className="divide-y rounded-lg border">
-        {documents.map(({ document: wiki, depth }) => (
-          <li key={wiki.id} className="space-y-1 p-3" style={{ paddingInlineStart: `${0.75 + Math.min(depth, 4) * 1.25}rem` }}>
-            <Link to={projectResourceHref(projectId, 'wiki', wiki.id)} className="font-medium hover:underline">
-              <span className="me-2 rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">{wiki.id}</span>
-              {wiki.title}
-            </Link>
-            {wiki.summary && <p className="line-clamp-2 text-sm text-muted-foreground">{wiki.summary}</p>}
-            {wiki.parent_id && !depth && <Link to={projectResourceHref(projectId, 'wiki', wiki.parent_id)}
-              className="block text-xs text-muted-foreground hover:underline">上级 {wiki.parent_id}</Link>}
-          </li>
-        ))}
-      </ul>}
-      {index.hasNextPage && <Button type="button" size="sm" variant="outline" disabled={index.isFetchingNextPage}
-        onClick={() => void index.fetchNextPage()}>
-        {index.isFetchingNextPage ? '加载中…' : index.isFetchNextPageError ? '重试下一页' : '加载更多'}
-      </Button>}
-    </section>
-  )
-}
 
 function WikiEditor({ projectId, url, document, parentId }: WikiScope & {
   document?: WikiDocument
@@ -84,27 +40,31 @@ function WikiEditor({ projectId, url, document, parentId }: WikiScope & {
   const [busy, setBusy] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [pendingUrl, setPendingUrl] = useState<string | null>(null)
   const createAttempt = useRef<{ key: string; requestId: string } | null>(null)
+  const saved = useRef(false)
   const navigation = useNavigate()
-  const { registerBlocker } = useDocumentNavigation()
   const qc = useQueryClient()
   const lookup = useProjectCompletion(projectId)
   const indexHref = projectResourceHref(projectId, 'wiki')
   const cancelHref = document ? projectResourceHref(projectId, 'wiki', document.id) : indexHref
   const dirty = draft.title !== initial.title || draft.summary !== initial.summary || draft.category !== initial.category
     || draft.tags !== initial.tags || draft.body !== initial.body
+  const blocker = useBlocker(({ currentLocation, nextLocation, historyAction }) => !saved.current && dirty && (
+    historyAction === 'POP' || currentLocation.pathname !== nextLocation.pathname || currentLocation.search !== nextLocation.search
+  ))
 
   useEffect(() => {
     if (!dirty) return
-    registerBlocker((href) => { setPendingUrl(href); return true })
-    function beforeUnload(event: BeforeUnloadEvent) { event.preventDefault() }
+    function beforeUnload(event: BeforeUnloadEvent) {
+      if (saved.current) return
+      event.preventDefault()
+      event.returnValue = true
+    }
     window.addEventListener('beforeunload', beforeUnload)
     return () => {
-      registerBlocker(null)
       window.removeEventListener('beforeunload', beforeUnload)
     }
-  }, [dirty, registerBlocker])
+  }, [dirty])
 
   async function save(event: FormEvent) {
     event.preventDefault()
@@ -141,6 +101,7 @@ function WikiEditor({ projectId, url, document, parentId }: WikiScope & {
       if (receipt.project_id !== projectId || (document && receipt.id !== document.id)) {
         throw new Error('返回的 Wiki 与正在编辑的页面不一致。')
       }
+      saved.current = true
       void qc.invalidateQueries({ queryKey: ['wiki-v2', projectId] })
       navigation(projectResourceHref(projectId, 'wiki', receipt.id), { replace: true })
     } catch (failure) {
@@ -164,7 +125,7 @@ function WikiEditor({ projectId, url, document, parentId }: WikiScope & {
         <div className="flex gap-1">
           {document && error && <a href={cancelHref} target="_blank" rel="noopener noreferrer" className="self-center px-2 text-sm hover:underline">查看当前版本</a>}
           <Button type="button" size="sm" variant="outline" disabled={busy || uploading}
-            onClick={() => dirty ? setPendingUrl(cancelHref) : navigation(cancelHref)}>取消</Button>
+            onClick={() => navigation(cancelHref)}>取消</Button>
           <Button type="submit" size="sm" disabled={busy || uploading || !draft.title.trim() || (!!document && !dirty)}>
             {busy ? '保存中…' : '保存'}
           </Button>
@@ -192,17 +153,17 @@ function WikiEditor({ projectId, url, document, parentId }: WikiScope & {
         <Textarea id="wiki-v2-summary" autoComplete="off" disabled={busy}
           value={draft.summary} onChange={(event) => change('summary', event.currentTarget.value)} />
       </div>
-      <MarkdownComposer value={draft.body} onChange={(body) => change('body', body)} lookup={lookup} disabled={busy}
+      <MarkdownComposer className="[--writing-height:18rem]" value={draft.body} onChange={(body) => change('body', body)} lookup={lookup} disabled={busy}
         upload={projectFileUpload(projectId)} onUploadPending={setUploading} />
-      <Dialog open={pendingUrl !== null} onOpenChange={(open) => { if (!open) setPendingUrl(null) }}>
+      <Dialog open={blocker.state === 'blocked'} onOpenChange={(open) => { if (!open) blocker.reset?.() }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>保留草稿？</DialogTitle>
             <DialogDescription>离开此页会放弃尚未保存的更改。</DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setPendingUrl(null)}>继续编辑</Button>
-            <Button type="button" variant="destructive" onClick={() => { if (pendingUrl) navigation(pendingUrl) }}>放弃修改</Button>
+            <Button type="button" variant="outline" onClick={() => blocker.reset?.()}>继续编辑</Button>
+            <Button type="button" variant="destructive" disabled={busy || uploading} onClick={() => blocker.proceed?.()}>放弃修改</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -212,6 +173,8 @@ function WikiEditor({ projectId, url, document, parentId }: WikiScope & {
 
 function WikiReader({ projectId, url, canWrite, id, editing }: WikiScope & { id: string; editing: boolean }) {
   const [action, setAction] = useState<WikiAction | null>(null)
+  const location = useLocation()
+  const heading = useRef<HTMLHeadingElement>(null)
   const [params, setParams] = useSearchParams()
   const rawVersion = params.get('version') ?? ''
   const version = /^[1-9][0-9]{0,9}$/u.test(rawVersion) && Number(rawVersion) <= 2_147_483_647
@@ -223,12 +186,21 @@ function WikiReader({ projectId, url, canWrite, id, editing }: WikiScope & { id:
     retry: false,
   })
   const document = detail.data?.project_id === projectId && detail.data.id === id ? detail.data : null
+  const documentId = document?.id
   const base = projectResourceHref(projectId, 'wiki')
+  useEffect(() => {
+    if (documentId && !editing && location.state?.focusWikiHeading && window.matchMedia?.('(width < 48rem)').matches) {
+      heading.current?.focus({ preventScroll: true })
+    }
+  }, [documentId, editing, location.key, location.state])
 
   if (detail.isLoading) return <p role="status" className="text-sm text-muted-foreground">加载 Wiki…</p>
   if (detail.isError || !document) {
     return <>
-      <Link to={base} className="text-sm text-primary hover:underline">返回 Wiki</Link>
+      <div className="flex items-center gap-3">
+        <Link to={base} className="text-sm text-primary hover:underline">返回 Wiki</Link>
+        {detail.isError && <Button variant="outline" size="sm" onClick={() => void detail.refetch()} disabled={detail.isFetching}>重试加载</Button>}
+      </div>
       <ErrorNotification message={detail.error?.message ?? 'Wiki 不存在或无访问权限'} />
     </>
   }
@@ -237,20 +209,27 @@ function WikiReader({ projectId, url, canWrite, id, editing }: WikiScope & { id:
   }
   return (
     <article className="mx-auto max-w-4xl space-y-5">
-      <Link to={base} className="text-sm text-primary hover:underline">返回 Wiki</Link>
       <header className="space-y-2">
         <div className="flex flex-wrap items-start justify-between gap-2">
-          <h1 className="min-w-0 break-words text-2xl font-semibold">{document.title}</h1>
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" onClick={() => setAction('history')}>版本历史</Button>
-            {canWrite && <>
-              <Button asChild size="sm" variant="outline">
-                <Link to={`${base}?mode=new&container_id=${encodeURIComponent(document.id)}`}>新建子 Wiki</Link>
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => setAction('move')}>移动</Button>
-              <Button size="sm" variant="outline" onClick={() => setAction('delete')}>删除</Button>
+          <h1 ref={heading} tabIndex={-1} className="min-w-0 wrap-anywhere text-2xl font-semibold focus:outline-none">{document.title}</h1>
+          <div className="flex shrink-0 gap-2">
+            {canWrite ? <>
               <Button asChild size="sm"><Link to="?mode=edit">编辑</Link></Button>
-            </>}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="icon-sm" aria-label="更多 Wiki 操作"><MoreHorizontal /></Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onSelect={() => setAction('history')}>版本历史</DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link to={`${base}?mode=new&container_id=${encodeURIComponent(document.id)}`}>新建子 Wiki</Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => setAction('move')}>移动</DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem variant="destructive" onSelect={() => setAction('delete')}>删除</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </> : <Button size="sm" variant="outline" onClick={() => setAction('history')}>版本历史</Button>}
           </div>
         </div>
         <div className="flex flex-wrap gap-2 text-sm text-muted-foreground">
@@ -263,6 +242,8 @@ function WikiReader({ projectId, url, canWrite, id, editing }: WikiScope & { id:
         {document.summary && <p className="whitespace-pre-wrap text-sm text-muted-foreground">{document.summary}</p>}
       </header>
       <VditorMarkdownViewer markdown={document.body} />
+      <MarkdownBacklinks projectId={projectId} kind="wiki" id={document.id} />
+      <RelatedFiles key={`${projectId}:${document.id}`} projectId={projectId} targetKind="wiki" targetId={document.id} canEdit={canWrite} />
       {visibleAction && <WikiLifecycle key={version ?? visibleAction} action={visibleAction} projectId={projectId} url={url}
         canWrite={canWrite} document={document} initialVersion={version} onClose={() => {
           setAction(null)
@@ -278,8 +259,10 @@ function WikiReader({ projectId, url, canWrite, id, editing }: WikiScope & { id:
 
 export function ProjectWikiPage() {
   const { id } = useParams()
+  const { key: locationKey } = useLocation()
   const { routeProjectId, role } = useCurrentProject()
   const [params] = useSearchParams()
+  const [mobileDirectory, setMobileDirectory] = useState<string | null>(null)
   if (!routeProjectId) return null
   const mode = params.get('mode')
   const scope: WikiScope = {
@@ -287,10 +270,31 @@ export function ProjectWikiPage() {
     url: `/v2${projectResourceHref(routeProjectId, 'wiki')}`,
     canWrite: role === 'owner' || role === 'editor',
   }
-  if (id) return <WikiReader key={id} {...scope} id={id} editing={mode === 'edit'} />
-  if (mode === 'trash') return scope.canWrite
+  const parentId = params.get('container_id')
+  const creating = mode === 'new' && scope.canWrite
+  const index = !id && !creating && mode !== 'trash'
+  const showDirectory = index || mobileDirectory === locationKey
+  let content
+  if (id) content = <WikiReader {...scope} id={id} editing={mode === 'edit'} />
+  else if (mode === 'trash') content = scope.canWrite
     ? <WikiTrash {...scope} selected={params.get('code')} />
     : <ErrorNotification message="没有权限访问 Wiki 回收站" />
-  if (mode === 'new' && scope.canWrite) return <WikiEditor {...scope} parentId={params.get('container_id')} />
-  return <WikiIndex {...scope} />
+  else if (creating) content = <WikiEditor key={parentId} {...scope} parentId={parentId} />
+
+  return (
+    <div className="flex h-full min-h-0 min-w-0 flex-col md:flex-row">
+      {!index && <div className="shrink-0 border-b px-3 py-1 md:hidden">
+        <Button type="button" size="sm" variant="ghost" aria-controls="wiki-directory" aria-expanded={showDirectory}
+          onClick={() => setMobileDirectory(showDirectory ? null : locationKey)}>
+          <ListTree aria-hidden="true" />Wiki 目录
+        </Button>
+      </div>}
+      <WikiDirectory {...scope} selectedId={id} visibleOnMobile={showDirectory}
+        className={cn('md:flex md:max-h-none md:w-60 md:shrink-0 md:border-e lg:w-72',
+          showDirectory ? 'flex' : 'hidden', index ? 'flex-1 md:flex-none' : 'max-h-[45dvh] shrink-0 border-b md:border-b-0')} />
+      <div key={id ?? mode} className={cn('min-h-0 min-w-0 flex-1 overflow-auto p-3 sm:p-6', index && 'hidden md:block')}>
+        {content}
+      </div>
+    </div>
+  )
 }

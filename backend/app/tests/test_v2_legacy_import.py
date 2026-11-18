@@ -64,10 +64,10 @@ def test_import_history_preserves_source_and_does_not_guess_reparented_task(db, 
     body = f"retained text [file](/projects/{pid}/files/{file_id})"
     db.add(Requirement(project_id=pid, code="REQ-1", title="Requirement"))
     db.flush()
-    db.add(Task(project_id=pid, code="TASK-1", requirement_id="REQ-1", title="Moved Task"))
+    db.add(Task(project_id=pid, code="REQ-1-T1", requirement_id="REQ-1", title="Moved Task"))
     comment = Comment(project_id=pid, target_type="requirement", target_id="REQ-1",
                       author_id=actor, body=body, deleted_at=timestamp)
-    moved = Activity(project_id=pid, target_type="task", target_id="TASK-1", action="update", summary="关联需求")
+    moved = Activity(project_id=pid, target_type="task", target_id="REQ-1-T1", action="update", summary="关联需求")
     original = Activity(project_id=pid, target_type="requirement", target_id="REQ-1",
                         actor_id=actor, action="status", summary="old event", created_at=timestamp)
     db.add_all([comment, moved, original])

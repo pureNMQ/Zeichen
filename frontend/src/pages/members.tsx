@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bot, Copy, KeyRound, Plus, ShieldAlert, Trash2, UserRound } from 'lucide-react'
 import { api, ApiError, type MemberCreateResponse, type MemberRow, type MyAgentDetail, type PasswordSetupLinkResponse, type Role } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
+import { identityName } from '@/lib/user-identity'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -134,6 +135,7 @@ function PasswordSetupLinkDialog({ setupUrl, onOpenChange }: { setupUrl: string 
 function RoleSelect({ member }: { member: MemberRow }) {
   const qc = useQueryClient()
   const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
   const lockedReason = member.is_self
     ? '不能修改自己的角色'
     : member.is_bootstrap
@@ -142,18 +144,21 @@ function RoleSelect({ member }: { member: MemberRow }) {
 
   async function changeRole(role: Role) {
     setError(null)
+    setSaving(true)
     try {
       await api.patch(`/members/${member.id}`, { role })
       await qc.invalidateQueries({ queryKey: ['members'] })
     } catch (err) {
       setError(err instanceof ApiError ? err.message : '修改失败')
+    } finally {
+      setSaving(false)
     }
   }
 
   return (
     <div className="space-y-2">
-      <Select value={member.role} onValueChange={changeRole} disabled={error !== null || lockedReason !== null}>
-        <SelectTrigger className="w-full">
+      <Select value={member.role} onValueChange={changeRole} disabled={saving || lockedReason !== null}>
+        <SelectTrigger className="w-full" aria-label={`${identityName(member)} 的工作区角色`}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -554,7 +559,7 @@ export function MembersPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">成员管理</h1>
           <p className="text-sm text-muted-foreground">
@@ -562,17 +567,39 @@ export function MembersPage() {
           </p>
         </div>
         {isAdmin && (
-          <Button onClick={() => setAddOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            添加成员
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" aria-expanded={showInactive} aria-controls="inactive-members"
+              onClick={() => setShowInactive(!showInactive)}>
+              {showInactive ? '收起已停用成员' : '查看已停用成员'}
+            </Button>
+            <Button onClick={() => setAddOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              添加成员
+            </Button>
+          </div>
         )}
-      </div>
+      </header>
 
       {isLoading && <p className="text-sm text-muted-foreground">加载中…</p>}
       <ErrorNotification message={error ? (error as Error).message : null} />
       <ErrorNotification message={removeError} />
-      <ErrorNotification message={inactive.error?.message} />
+      {isAdmin && (
+        <section id="inactive-members" hidden={!showInactive} className="space-y-2" aria-labelledby="inactive-members-title">
+          <h2 id="inactive-members-title" className="text-base font-medium">已停用成员</h2>
+          <p className="text-sm text-muted-foreground">以普通成员身份重新启用，项目权限需要重新授予。</p>
+          <ErrorNotification message={showInactive ? inactive.error?.message : null} />
+          {inactive.isLoading && <p role="status">加载中…</p>}
+          {inactive.isError && <Button variant="outline" onClick={() => void inactive.refetch()}>重试</Button>}
+          {inactive.data?.length === 0 && <p className="text-sm text-muted-foreground">暂无已停用成员。</p>}
+          {inactive.data?.map((member) => (
+            <div key={member.id} className="flex items-center justify-between gap-2 rounded-md border p-3">
+              <span className="min-w-0 text-sm [overflow-wrap:anywhere]">{member.display_name ?? member.username}</span>
+              <Button size="sm" variant="outline" disabled={reactivating !== null}
+                onClick={() => void reactivate(member.id)}>重新启用</Button>
+            </div>
+          ))}
+        </section>
+      )}
       {!isLoading && members?.length === 0 && (
         <Card>
           <CardContent className="flex flex-col items-center gap-2 py-12 text-muted-foreground">
@@ -664,24 +691,6 @@ export function MembersPage() {
 
       {isAdmin && (
         <>
-          <Button variant="outline" aria-expanded={showInactive} onClick={() => setShowInactive(!showInactive)}>
-            {showInactive ? '收起已停用成员' : '查看已停用成员'}
-          </Button>
-          {showInactive && (
-            <section className="space-y-2" aria-label="已停用成员">
-              <p className="text-sm text-muted-foreground">以普通成员身份重新启用，项目权限需要重新授予。</p>
-              {inactive.isLoading && <p role="status">加载中…</p>}
-              {inactive.isError && <Button variant="outline" onClick={() => void inactive.refetch()}>重试</Button>}
-              {inactive.data?.length === 0 && <p className="text-sm text-muted-foreground">暂无已停用成员。</p>}
-              {inactive.data?.map((member) => (
-                <div key={member.id} className="flex items-center justify-between rounded-md border p-3">
-                  <span className="text-sm">{member.display_name ?? member.username}</span>
-                  <Button size="sm" variant="outline" disabled={reactivating !== null}
-                    onClick={() => void reactivate(member.id)}>重新启用</Button>
-                </div>
-              ))}
-            </section>
-          )}
           <AddMemberDialog open={addOpen} onOpenChange={setAddOpen} onCreated={setSetupUrl} />
           <PasswordSetupLinkDialog setupUrl={setupUrl} onOpenChange={(open) => { if (!open) setSetupUrl(null) }} />
         </>

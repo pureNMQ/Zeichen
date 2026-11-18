@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from ..errors import conflict, invalid_request, not_found, permission_denied
 from ..models import Requirement, Task, User
 from ..services.permissions import require_project_role
+from ..services.user_profiles import avatar_url
 from .commands import execute_once
 from .notifications import emit_markdown_notifications
 from .page_cursor import as_utc as _utc
@@ -69,7 +70,7 @@ def _source_task(db: Session, scope: ResourceRef, source_task: str | None) -> st
     source = ResourceRef(scope.project_id, ResourceKind.TASK, source_task)
     task_code = db.scalar(
         select(Task.code).where(
-            Task.project_id == source.project_id, Task.code == source.identifier,
+            Task.project_id == source.project_id, Task.matches_code(source.identifier),
             Task.requirement_id == scope.identifier, Task.deleted_at.is_(None),
         )
     )
@@ -97,6 +98,27 @@ def _receipt(entry_id: UUID, version: int) -> dict[str, Any]:
     return {"entry_id": str(entry_id), "version": version, "warnings": []}
 
 
+def record_manual_entry(
+    db: Session, actor: User, scope: ResourceRef, *,
+    body: str, source_task: str | None = None, reply_to: UUID | None = None,
+) -> dict[str, Any]:
+    """Write an entry inside an authorized, retry-safe command."""
+    replied_to = _entry(db, scope, reply_to) if reply_to is not None else None
+    entry = _E(
+        project_id=scope.project_id, requirement_code=scope.identifier,
+        occurred_at=datetime.now(UTC), actor_id=actor.id, kind="manual", latest_version=1,
+        source_task_code=_source_task(db, scope, source_task), reply_to_id=reply_to,
+    )
+    db.add(entry)
+    db.flush()
+    append_revision(db, _new_revision(entry, actor, 1, "create", body))
+    emit_markdown_notifications(
+        db, actor.id, source=scope, source_version=1, body=body, timeline_entry_id=entry.id,
+        reply_author_id=replied_to.actor_id if replied_to else None,
+    )
+    return _receipt(entry.id, 1)
+
+
 def append_entry(
     db: Session, actor: User, scope: ResourceRef, *, request_id: UUID,
     body: str, source_task: str | None = None, reply_to: UUID | None = None,
@@ -107,24 +129,11 @@ def append_entry(
     payload = {"requirement": scope.identifier, "body": body, "source_task": source_task,
                "reply_to": str(reply_to) if reply_to is not None else None}
 
-    def apply() -> dict[str, Any]:
-        replied_to = _entry(db, scope, reply_to) if reply_to is not None else None
-        entry = _E(
-            project_id=scope.project_id, requirement_code=scope.identifier,
-            occurred_at=datetime.now(UTC), actor_id=actor.id, kind="manual", latest_version=1,
-            source_task_code=_source_task(db, scope, source_task), reply_to_id=reply_to,
-        )
-        db.add(entry)
-        db.flush()
-        append_revision(db, _new_revision(entry, actor, 1, "create", body))
-        emit_markdown_notifications(
-            db, actor.id, source=scope, source_version=1, body=body, timeline_entry_id=entry.id,
-            reply_author_id=replied_to.actor_id if replied_to else None,
-        )
-        return _receipt(entry.id, 1)
-
-    return execute_once(db, project_id=scope.project_id, actor_id=actor.id,
-                        operation="timeline.append", request_id=request_id, payload=payload, apply=apply)
+    return execute_once(
+        db, project_id=scope.project_id, actor_id=actor.id, operation="timeline.append",
+        request_id=request_id, payload=payload,
+        apply=lambda: record_manual_entry(db, actor, scope, body=body, source_task=source_task, reply_to=reply_to),
+    )
 
 
 def record_system_event(
@@ -244,11 +253,16 @@ def _reply_lookup(db: Session, scope: ResourceRef, items) -> dict[UUID, dict[str
     ids = {entry.reply_to_id for entry, _ in items if entry.reply_to_id is not None}
     if not ids:
         return {}
+    originals = db.execute(_current(scope).where(_E.id.in_(ids))).all()
+    actors = _recorded_actors(db, originals)
     return {
         entry.id: {"entry_id": str(entry.id), "actor_id": str(entry.actor_id) if entry.actor_id else None,
+                   "actor_name": (actors[entry.actor_id].nickname or actors[entry.actor_id].username)
+                                 if entry.actor_id in actors else None,
+                   "revised": bool(revision and revision.version > 1),
                    "kind": entry.kind, "withdrawn": bool(revision and revision.kind == "withdraw"),
                    "body_preview": _preview(revision), "event_type": entry.event_type}
-        for entry, revision in db.execute(_current(scope).where(_E.id.in_(ids)))
+        for entry, revision in originals
     }
 
 
@@ -267,6 +281,7 @@ def _entry_data(entry: TimelineEntry, revision: TimelineRevision | None,
         "id": str(entry.id), "project_id": str(entry.project_id), "requirement_id": entry.requirement_code,
         "kind": entry.kind, "actor_id": str(entry.actor_id) if entry.actor_id else None,
         "actor_name": (author.nickname or author.username) if author else None,
+        "actor_avatar": avatar_url(author) if author and author.deleted_at is None else None,
         "actor_is_agent": bool(author and author.is_agent),
         "occurred_at": _utc(entry.occurred_at).isoformat(), "source_task": entry.source_task_code,
         "reply_to": replies.get(entry.reply_to_id), "version": entry.latest_version,
@@ -310,9 +325,17 @@ def list_entries(
     if actor_id is not None:
         statement = statement.where(_E.actor_id == actor_id)
     if source_task is not None:
-        statement = statement.where(_E.source_task_code == source_task)
+        if source_task.startswith("TASK-"):
+            resolved = select(Task.code).where(Task.project_id == scope.project_id, Task.matches_code(source_task))
+            statement = statement.where(_E.source_task_code.in_(resolved))
+        else:
+            statement = statement.where(_E.source_task_code == source_task)
     if keyword is not None:
-        statement = statement.where(_R.body.icontains(keyword, autoescape=True))
+        statement = statement.where(or_(
+            _R.body.icontains(keyword, autoescape=True),
+            _E.event_data["summary"].as_string().icontains(keyword, autoescape=True),
+            _E.event_type.icontains(keyword, autoescape=True),
+        ))
     if start is not None:
         statement = statement.where(_E.occurred_at >= start)
     if end is not None:
@@ -369,10 +392,11 @@ def get_context(db: Session, actor: User, scope: ResourceRef, entry_id: UUID,
     ]}
 
 
-def _revision_data(row: TimelineRevision) -> dict[str, Any]:
+def _revision_data(row: TimelineRevision, author: User | None) -> dict[str, Any]:
     return {
         "version": row.version, "kind": row.kind, "body": row.body, "reason": row.reason,
         "actor_id": str(row.actor_id) if row.actor_id else None,
+        "actor_name": (author.nickname or author.username) if author else None,
         "created_at": _utc(row.created_at).isoformat(),
     }
 
@@ -381,10 +405,11 @@ def get_revision(db: Session, actor: User, scope: ResourceRef, entry_id: UUID, v
     _authorize(db, actor, scope, "viewer")
     if not 1 <= version <= MAX_VERSION:
         raise invalid_request("无效的时间轴修订版本")
-    row = db.scalar(select(_R).where(*_revisions(scope), _R.entry_id == entry_id, _R.version == version))
+    row = db.execute(select(_R, User).outerjoin(User, _R.actor_id == User.id)
+                     .where(*_revisions(scope), _R.entry_id == entry_id, _R.version == version)).one_or_none()
     if row is None:
         raise not_found("时间轴修订不存在")
-    return _revision_data(row)
+    return _revision_data(*row)
 
 
 def list_revisions(
@@ -395,15 +420,15 @@ def list_revisions(
     _entry(db, scope, entry_id)
     _limit(limit)
     cursor_scope = _list_scope("revisions", actor, scope, [str(entry_id)])
-    statement = select(_R).where(*_revisions(scope), _R.entry_id == entry_id)
+    statement = select(_R, User).outerjoin(User, _R.actor_id == User.id).where(*_revisions(scope), _R.entry_id == entry_id)
     position = _decode(cursor_scope, cursor)
     if position is not None:
         if len(position) != 1 or type(position[0]) is not int or not 1 <= position[0] <= MAX_VERSION:
             raise invalid_request("无效的时间轴修订游标")
         statement = statement.where(_R.version < position[0])
-    rows = db.scalars(statement.order_by(_R.version.desc()).limit(limit + 1)).all()
+    rows = db.execute(statement.order_by(_R.version.desc()).limit(limit + 1)).all()
     items = rows[:limit]
     return {
-        "items": [_revision_data(row) for row in items],
-        "next_cursor": _encode(cursor_scope, [items[-1].version]) if len(rows) > limit else None,
+        "items": [_revision_data(revision, author) for revision, author in items],
+        "next_cursor": _encode(cursor_scope, [items[-1][0].version]) if len(rows) > limit else None,
     }

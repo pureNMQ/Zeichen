@@ -162,10 +162,8 @@ def test_uvicorn_file_grant_access_log_excludes_query():
     assert "temporary" not in record.getMessage()
 
 
-def test_mcp_file_grants_transfer_bytes_outside_tool_arguments(mcp_server, storage, monkeypatch):
-    client = RawMcpClient(mcp_server["url"], mcp_server["token"])
-    client.initialize()
-    project_id = mcp_server["project_id"]
+@pytest.fixture
+def shared_file_database(mcp_server, monkeypatch):
     monkeypatch.setattr(get_settings(), "attachment_storage_dir", mcp_server["storage"])
     db_path = mcp_server["log_file"].parent / "e2e.db"
     engine = create_engine(f"sqlite:///{db_path.as_posix()}", connect_args={"check_same_thread": False})
@@ -176,34 +174,108 @@ def test_mcp_file_grants_transfer_bytes_outside_tool_arguments(mcp_server, stora
 
     monkeypatch.setitem(app.dependency_overrides, get_db, transfer_db)
     try:
-        upload = client.call("files.prepare_upload", project_id=project_id, name="image.png", size=len(PNG))
-        assert upload["method"] == "PUT" and upload["content_length"] == len(PNG)
-        assert mcp_server["token"] not in upload["upload_url"]
-        with TestClient(app) as no_cookie:
-            upload_url = _local_url(upload["upload_url"])
-            assert no_cookie.put(upload_url, content=PNG[:-1]).status_code == 400
-            assert no_cookie.put(upload_url, content=PNG + b"x").status_code == 409
-            uploaded = no_cookie.put(upload_url, content=iter((PNG[:8], PNG[8:])))
-            assert uploaded.status_code == 201, uploaded.text
-            row = uploaded.json()
-            assert no_cookie.put(upload_url, content=PNG).json() == row
-            assert no_cookie.put(upload_url, content=PNG[:-1] + b"x").status_code == 409
-            grant = client.call("files.authorize_read", project_id=project_id, file_id=row["id"])
-            assert grant["id"] == row["id"]
-            assert "expires_at" in grant and "?grant=" in grant["access_url"]
-            assert "content" not in grant and mcp_server["token"] not in grant["access_url"]
-            assert no_cookie.get(_local_url(grant["access_url"])).content == PNG
-            assert any(item["id"] == row["id"] for item in client.call("files.list", project_id=project_id)["items"])
-            address = {"project_id": project_id, "file_id": row["id"]}
-            assert client.call("files.get", **address)["sha256"] == hashlib.sha256(PNG).hexdigest()
-            assert client.call("files.delete", **address)["deleted"] is True
-            assert no_cookie.get(_local_url(grant["access_url"])).status_code == 404
-            trashed = client.call("files.trash_list", project_id=project_id, query="image")["items"]
-            assert [item["id"] for item in trashed] == [row["id"]]
-            assert client.call("files.trash_get", **address)["deleted_by"] == mcp_server["agent_id"]
-            assert client.call("files.restore", **address)["id"] == row["id"]
-            assert no_cookie.get(_local_url(grant["access_url"])).status_code == 404
-            reissued = client.call("files.authorize_read", **address)
-            assert no_cookie.get(_local_url(reissued["access_url"])).content == PNG
+        yield
     finally:
         engine.dispose()
+
+
+def test_mcp_file_grants_transfer_bytes_outside_tool_arguments(mcp_server, shared_file_database):
+    client = RawMcpClient(mcp_server["url"], mcp_server["token"])
+    client.initialize()
+    project_id = mcp_server["project_id"]
+    upload = client.call("files.prepare_upload", project_id=project_id, name="image.png", size=len(PNG))
+    assert upload["method"] == "PUT" and upload["content_length"] == len(PNG)
+    assert mcp_server["token"] not in upload["upload_url"]
+    with TestClient(app) as no_cookie:
+        upload_url = _local_url(upload["upload_url"])
+        assert no_cookie.put(upload_url, content=PNG[:-1]).status_code == 400
+        assert no_cookie.put(upload_url, content=PNG + b"x").status_code == 409
+        uploaded = no_cookie.put(upload_url, content=iter((PNG[:8], PNG[8:])))
+        assert uploaded.status_code == 201, uploaded.text
+        row = uploaded.json()
+        assert no_cookie.put(upload_url, content=PNG).json() == row
+        assert no_cookie.put(upload_url, content=PNG[:-1] + b"x").status_code == 409
+        grant = client.call("files.authorize_read", project_id=project_id, file_id=row["id"])
+        assert grant["id"] == row["id"]
+        assert "expires_at" in grant and "?grant=" in grant["access_url"]
+        assert "content" not in grant and mcp_server["token"] not in grant["access_url"]
+        assert no_cookie.get(_local_url(grant["access_url"])).content == PNG
+        assert any(item["id"] == row["id"] for item in client.call("files.list", project_id=project_id)["items"])
+        address = {"project_id": project_id, "file_id": row["id"]}
+        assert client.call("files.get", **address)["sha256"] == hashlib.sha256(PNG).hexdigest()
+        assert client.call("files.delete", **address)["deleted"] is True
+        assert no_cookie.get(_local_url(grant["access_url"])).status_code == 404
+        trashed = client.call("files.trash_list", project_id=project_id, query="image")["items"]
+        assert [item["id"] for item in trashed] == [row["id"]]
+        assert client.call("files.trash_get", **address)["deleted_by"] == mcp_server["agent_id"]
+        assert client.call("files.restore", **address)["id"] == row["id"]
+        assert no_cookie.get(_local_url(grant["access_url"])).status_code == 404
+        reissued = client.call("files.authorize_read", **address)
+        assert no_cookie.get(_local_url(reissued["access_url"])).content == PNG
+
+
+def test_related_files_and_deleted_wiki_round_trip_between_web_and_mcp(mcp_server, shared_file_database):
+    agent = RawMcpClient(mcp_server["url"], mcp_server["token"])
+    agent.initialize()
+    pid = mcp_server["project_id"]
+    scope = {"project_id": pid}
+    base = f"/api/v2/projects/{pid}"
+    library = f"{base}/files"
+    with TestClient(app) as web:
+        login(web, "admin", "admin-pass-1")
+        assert web.get(f"{library}/limits").json() == agent.call("files.limits", **scope)
+        upload = _upload(web, library, "file-parity.png", PNG)
+        assert upload.status_code == 201, upload.text
+        file = upload.json()
+        address = {**scope, "file_id": file["id"]}
+        row = agent.call("files.rename", **address, name="renamed.png")
+        assert row["id"] == file["id"] and row["name"] == "renamed.png"
+        assert web.get(f"{library}/{file['id']}").json()["name"] == row["name"]
+        assert web.patch(f"{library}/{file['id']}", json={"name": "final.png"}).status_code == 200
+        assert agent.call("files.get", **address)["name"] == "final.png"
+        assert web.get(file["download_href"]).content == PNG
+        filters = {"query": "final.png", "images_only": True, "uploader_id": web.get("/api/auth/me").json()["id"]}
+        assert agent.call("files.list", **scope, **filters) == web.get(library, params=filters).json()
+        assert agent.call("files.list", **scope, **{**filters, "uploader_id": mcp_server["agent_id"]})["items"] == []
+
+        body = f"# File\n[material]({file['href']})"
+        req = agent.call("requirements.create", **scope, title="File links", description=body)
+        agent.call("requirements.set_status", **scope, id=req["id"], status="backlog")
+        task = agent.call("tasks.create", **scope, requirement_id=req["id"], title="File task", description=body)
+        doc = agent.call("wiki.create", **scope, request_id=str(uuid4()), content={"title": "File wiki", "body": body})
+        for kind, target_id in [("project", pid), ("requirements", req["id"]), ("tasks", task["id"]), ("wiki", doc["id"])]:
+            target = {"target_kind": kind, "target_id": target_id}
+            usage = f"{library}/{file['id']}/usage"
+            assert web.put(usage, params=target).json()["changed"] is True
+            listed = agent.call("files.related", **scope, **target)
+            assert [(item["id"], item["attached"], item["referenced"]) for item in listed["items"]] == [
+                (file["id"], True, kind != "project")]
+            assert agent.call("files.unlink", **address, **target)["changed"] is True
+            reduced = web.get(f"{library}/associations", params={**target, "include_body": True}).json()["items"]
+            assert [(item["id"], item["attached"], item["referenced"]) for item in reduced] == (
+                [] if kind == "project" else [(file["id"], False, True)])
+            assert agent.call("files.link", **address, **target)["changed"] is True
+            assert web.delete(usage, params=target).json()["changed"] is True
+
+        canonical = f"/projects/{pid}/tasks/{task['id']}"
+        actual = f"/projects/{pid}/requirements/{req['id']}?tab=tasks&task={task['id']}"
+        for href in [actual, canonical, get_settings().web_base_url + actual]:
+            found = agent.call("search.project", **scope, domains=["file"], filters={"file_used_at": href})
+            assert [item["id"] for item in found["domains"]["file"]["items"]] == [file["id"]]
+            response = web.get(f"{base}/search", params={"domain": "file", "file_used_at": href})
+            assert response.json()["domains"]["file"]["items"] == found["domains"]["file"]["items"]
+        for bad in [actual.replace(f"/{req['id']}?", "/REQ-999999?"), "https://another.invalid" + actual]:
+            assert web.get(f"{base}/search", params={"domain": "file", "file_used_at": bad}).status_code == 400
+
+        wiki = f"{base}/wiki"
+        assert web.delete(f"{wiki}/{doc['id']}", params={"confirmed_count": 1}).status_code == 200
+        read = agent.call("wiki.trash_read", **scope, id=doc["id"], start_line=2, end_line=2)
+        assert read["body"] == body.splitlines()[1]
+        assert web.get(f"{wiki}/trash/{doc['id']}").json()["body"] == body
+        assert agent.call("wiki.restore", **scope, id=doc["id"])["restored"]
+        assert web.get(f"{wiki}/{doc['id']}").json()["body"] == body
+        assert "not_found:" in agent.call("wiki.trash_read", **scope, id=doc["id"])["error"]
+        assert web.delete(f"{library}/{file['id']}").status_code == 200
+        trashed = agent.call("files.trash_list", **scope, **filters)
+        assert [item["id"] for item in trashed["items"]] == [file["id"]]
+        assert trashed == web.get(library, params={**filters, "state": "deleted"}).json()

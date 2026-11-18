@@ -146,10 +146,12 @@ class TestRestDisambiguation:
         assert resp.json()["assignee_username"] == "admin"
 
     def test_requirement_update_scoped(self, client: TestClient, logged_in: dict):
+        scope = {"project_id": str(logged_in["p2"].id)}
+        old = client.get(f"/api/requirements/{logged_in['req']}", params=scope).json()
         resp = client.patch(
             f"/api/requirements/{logged_in['req']}",
-            json={"title": "改名"},
-            params={"project_id": str(logged_in["p2"].id)},
+            json={"title": "改名", "expected_version": old["version"]},
+            params=scope,
         )
         assert resp.status_code == 200, resp.text
         assert resp.json()["title"] == "改名"
@@ -371,7 +373,7 @@ class TestMcpDisambiguation:
     def test_requirement_update_scoped(self, mcp_two_projects: dict, same_codes: dict):
         mcp = mcp_two_projects["client"]
         updated = mcp.call(
-            "requirements.update", id=same_codes["req"], title="改名",
+            "requirements.update", id=same_codes["req"], title="改名", expected_version=1,
             project_id=mcp_two_projects["pb"],
         )
         assert "error" not in updated, updated

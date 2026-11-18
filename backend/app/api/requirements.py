@@ -6,16 +6,21 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from ..db import get_db
+from ..errors import invalid_request
+from ..services.requirement_board import set_blockers
 from ..models import User
+from ..v2 import work_content
 from ..schemas import (
     RequirementCreate,
     RequirementDeleteBody,
+    RequirementRejectBody,
     RequirementUpdate,
     StatusBody,
 )
 from ..services import requirements as service
 from ..services.pagination import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from .deps import current_user
+from .v2_transport import commit_command
 
 router = APIRouter(prefix="/api", tags=["requirements"])
 
@@ -26,6 +31,7 @@ def list_requirements(
     status: list[str] | None = Query(None),
     updated_within_days: str | None = None,
     keyword: str | None = None,
+    participated_by_me: bool = False,
     cursor: str | None = None,
     limit: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     user: User = Depends(current_user),
@@ -33,7 +39,7 @@ def list_requirements(
 ) -> dict:
     return service.list_requirements(
         db, user, project_id, status, cursor, limit,
-        updated_within_days=updated_within_days, keyword=keyword,
+        updated_within_days=updated_within_days, keyword=keyword, participated_by_me=participated_by_me,
     )
 
 
@@ -44,10 +50,7 @@ def create_requirement(
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    requirement = service.create_requirement(
-        db, user, project_id, body.title, body.description
-    )
-    return service._requirement_dict(db, requirement)
+    return work_content.create(db, user, project_id, "requirements", body.title, body.description, body.request_id)
 
 
 @router.get("/projects/{project_id}/requirements/{requirement_id}")
@@ -74,6 +77,16 @@ def set_status_in_project(
     return service._requirement_dict(db, requirement)
 
 
+@router.post("/projects/{project_id}/requirements/{requirement_id}/reject")
+def reject_requirement(
+    project_id: uuid.UUID, requirement_id: str, body: RequirementRejectBody,
+    user: User = Depends(current_user), db: Session = Depends(get_db),
+) -> dict:
+    return commit_command(db, lambda: service.reject_requirement(
+        db, user, project_id, requirement_id, body.reason, body.request_id,
+    ))
+
+
 @router.get("/requirements/{requirement_id}")
 def get_requirement(
     requirement_id: str,
@@ -94,8 +107,13 @@ def update_requirement(
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
+    if body.model_fields_set & {"blocked_by", "expected_blocked_by"}:
+        if body.model_fields_set - {"blocked_by", "expected_blocked_by"} or body.blocked_by is None:
+            raise invalid_request("请单独提交前置需求编号列表")
+        return service._requirement_dict(db, set_blockers(
+            db, user, requirement_id, project_id, body.blocked_by, body.expected_blocked_by))
     requirement = service.update_requirement(
-        db, user, requirement_id, body.title, body.description, project_id=project_id
+        db, user, requirement_id, body.title, body.description, project_id=project_id, expected_version=body.expected_version
     )
     return service._requirement_dict(db, requirement)
 

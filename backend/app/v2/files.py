@@ -63,6 +63,13 @@ def require_file_access(db: Session, actor_id: UUID, project_id: UUID, *, edit: 
     return actor
 
 
+def library_limits(db: Session, actor_id: UUID, project_id: UUID) -> dict:
+    require_file_access(db, actor_id, project_id)
+    settings = get_settings()
+    return {"max_file_bytes": settings.file_library_max_file_bytes,
+            "project_quota_bytes": settings.file_library_project_quota_bytes}
+
+
 def _active_key(db: Session, actor_id: UUID, key_id: UUID) -> bool:
     return db.scalar(select(ApiKey.id).where(
         ApiKey.user_id == actor_id, ApiKey.id == key_id, ApiKey.revoked_at.is_(None),

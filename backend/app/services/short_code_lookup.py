@@ -32,7 +32,7 @@ def resolve_by_code(db: Session, user: User, entity_type: str, code: str, projec
     require_valid_code(entity_type, code)
     model = _TARGET_MODELS[entity_type]
     from sqlalchemy import select
-    base = select(model).where(model.code == code, model.deleted_at.is_(None))
+    base = select(model).where(Task.matches_code(code) if model is Task else model.code == code, model.deleted_at.is_(None))
     if model is Task:
         base = base.where(Task.has_active_requirement())
 

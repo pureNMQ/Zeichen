@@ -49,6 +49,7 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  onEscapeKeyDown,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
@@ -63,6 +64,15 @@ function DialogContent({
           className
         )}
         {...props}
+        onEscapeKeyDown={(event) => {
+          onEscapeKeyDown?.(event)
+          // Radix handles Escape on document capture, before an editor can dismiss its suggestions.
+          const field = event.target instanceof Element ? event.target.closest('[aria-autocomplete="list"]') : null
+          const popupId = field?.getAttribute('aria-controls')
+          if (event.isComposing || event.keyCode === 229 || (popupId && field?.ownerDocument.getElementById(popupId)?.getAttribute('role') === 'listbox')) {
+            event.preventDefault()
+          }
+        }}
       >
         {children}
         {showCloseButton && (

@@ -22,7 +22,7 @@ def _seed(db: Session, actor: User, project_id: UUID) -> dict[str, set[str]]:
             for i in (1, 2)]
     db.add_all(reqs)
     db.flush()
-    db.add(Task(project_id=project_id, code="TASK-1", requirement_id="REQ-1", title="Done task", status="done"))
+    db.add(Task(project_id=project_id, code="REQ-1-T1", requirement_id="REQ-1", title="Done task", status="done"))
     requirement_ref = ResourceRef(project_id, ResourceKind.REQUIREMENT, "REQ-1")
 
     def note(text):
@@ -179,11 +179,11 @@ def test_search_filters_current_domain_metadata_time_and_file_usage(client, db, 
     requirement = Requirement(project_id=project, code="REQ-1", title="Search target", status="done", updated_at=now)
     db.add(requirement)
     db.flush()
-    db.add(Task(project_id=project, code="TASK-1", requirement_id="REQ-1", title="Link", status="done"))
+    db.add(Task(project_id=project, code="REQ-1-T1", requirement_id="REQ-1", title="Link", status="done"))
     db.flush()
     scope = ResourceRef(project, ResourceKind.REQUIREMENT, "REQ-1")
     event = record_system_event(db, actor.id, scope, event_type="task.closed",
-                                event_data={"summary": "Automated task completion"}, source_task="TASK-1")
+                                event_data={"summary": "Automated task completion"}, source_task="REQ-1-T1")
     file_id = uuid4()
     unused_id = uuid4()
     for item in (file_id, unused_id):
@@ -208,7 +208,7 @@ def test_search_filters_current_domain_metadata_time_and_file_usage(client, db, 
     assert [item["id"] for item in search("requirement", requirement_status="done", **bounded)] == ["REQ-1"]
     assert search("requirement", requirement_status="done", to_at=now.isoformat()) == []
     assert [item["id"] for item in search("timeline", q="Automated", timeline_actor_id=str(actor.id),
-                                          timeline_kind="system", timeline_source_task="TASK-1")] == [str(event.id)]
+                                          timeline_kind="system", timeline_source_task="REQ-1-T1")] == [str(event.id)]
     assert search("timeline", q="Automated", timeline_kind="manual") == []
     assert [item["id"] for item in search("wiki", wiki_category="Design", wiki_tag="release-v2")] == [wiki["id"]]
     assert search("wiki", wiki_category="Design", wiki_tag="release") == []

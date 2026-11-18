@@ -6,6 +6,7 @@
 
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
 
 from app.config import get_settings
@@ -14,7 +15,20 @@ from .auth import ApiKeyTokenVerifier
 
 settings = get_settings()
 
-mcp = FastMCP(
+
+class ZeichenMCP(FastMCP):
+    async def call_tool(self, name, arguments):
+        # FastMCP drops unknown input keys. Reject retired write fields so an
+        # old client cannot receive false success for a move or dependency.
+        if arguments and name in {"tasks.create", "tasks.update"}:
+            if "blocked_by" in arguments:
+                raise ToolError("invalid_request: 阻塞仅适用于需求")
+            if name == "tasks.update" and "requirement_id" in arguments:
+                raise ToolError("invalid_request: 任务所属需求不可更改")
+        return await super().call_tool(name, arguments)
+
+
+mcp = ZeichenMCP(
     "zeichen",
     instructions=(
         "贼船 Zeichen 项目协同 MCP 服务。认证:Bearer API key(仅 agent 签发)。"

@@ -61,10 +61,7 @@ def list_library(
 
 @router.get(_LIBRARY + "/limits")
 def file_limits(project_id: UUID, actor: Annotated[User, Depends(current_user)], db: Annotated[Session, Depends(get_db)]) -> dict:
-    files.require_file_access(db, actor.id, project_id)
-    settings = get_settings()
-    return {"max_file_bytes": settings.file_library_max_file_bytes,
-            "project_quota_bytes": settings.file_library_project_quota_bytes}
+    return files.library_limits(db, actor.id, project_id)
 
 
 def _save_upload(db: Session, save: Callable[[StagedFile], dict], staged: StagedFile) -> dict:
@@ -115,10 +112,10 @@ async def upload_file(
 def associated_files(
     project_id: UUID, target_kind: file_usage.TargetKind, target_id: str,
     actor: Annotated[User, Depends(current_user)], db: Annotated[Session, Depends(get_db)],
-    cursor: Annotated[str | None, Query(max_length=256)] = None, limit: int = 20,
+    cursor: Annotated[str | None, Query(max_length=256)] = None, limit: int = 20, include_body: bool = False,
 ) -> dict:
     return file_usage.list_associated_files(
-        db, actor.id, project_id, kind=target_kind, target_id=target_id, cursor=cursor, limit=limit,
+        db, actor.id, project_id, kind=target_kind, target_id=target_id, cursor=cursor, limit=limit, include_body=include_body,
     )
 
 

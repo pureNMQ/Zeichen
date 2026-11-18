@@ -21,7 +21,7 @@ python3 dispatch.py status   ──►     dispatch.py next ──出工单─�
   文件锁（`~/.local/state/zeichen-idle-runner/lock`）防并发；`state.json` 记录已处理需求
   （dispatched/done/failed），防止重复准入；工单落在 `tickets/`。
 - `WORKER_PROMPT.md`：派生子代理时注入的执行协议（状态核实→实施→回写→mark）。
-- 子代理安全边界：不 push、不部署；任务完成只置 verifying；证据必须回写 Zeichen 评论。
+- 子代理安全边界：不 push、不部署；完成任务后可置 done，证据写入关联需求时间轴，并传入任务短码。
 
 ## 用法
 

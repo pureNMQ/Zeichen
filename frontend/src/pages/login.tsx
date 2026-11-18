@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ApiError } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
+import { authReturnPath } from '@/lib/auth-return'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -22,10 +23,13 @@ export function LoginPage() {
     setSubmitting(true)
     try {
       const res = await login(username.trim(), password)
+      const from = authReturnPath(params.get('from'))
       if (res.needs_password) {
-        navigate(`/set-password?user=${encodeURIComponent(username.trim())}`)
+        const setupParams = new URLSearchParams({ user: username.trim() })
+        if (params.has('from')) setupParams.set('from', from)
+        navigate(`/set-password?${setupParams}`, { replace: true })
       } else {
-        navigate(params.get('from') ?? '/projects', { replace: true })
+        navigate(from, { replace: true })
       }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : '登录失败,请重试')

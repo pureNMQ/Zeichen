@@ -202,13 +202,3 @@ def rollback_document(
     )
     return service._document_dict(db, saved, warning=link_warning, with_links=True)
 
-
-@router.get("/documents/{module}/{document_id}/references")
-def document_references(
-    module: str,
-    document_id: str,
-    project_id: uuid.UUID | None = None,
-    user: User = Depends(current_user),
-    db: Session = Depends(get_db),
-) -> dict:
-    return service.document_references(db, user, document_id, module, project_id=project_id)

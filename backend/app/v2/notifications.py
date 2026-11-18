@@ -11,7 +11,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from ..errors import invalid_request, not_found, permission_denied
-from ..models import Project, ProjectMember, Requirement, User
+from ..models import Project, ProjectMember, Requirement, Task, User
 from ..services.permissions import get_project_role, get_workspace_member, is_admin
 from .markdown_refs import extract_markdown_refs
 from .notification_models import Notification
@@ -19,6 +19,14 @@ from .page_cursor import as_utc, decode_time_position, encode_position, scope_ke
 from .resource_refs import ResourceKind, ResourceRef
 from .timeline_models import TimelineEntry
 from .wiki_models import visible_wiki_tree
+
+
+_BODY_KINDS = {
+    ResourceKind.WIKI: "wiki",
+    ResourceKind.REQUIREMENT: "requirement",
+    ResourceKind.TASK: "task",
+}
+_SOURCE_RESOURCES = {name: kind for kind, name in _BODY_KINDS.items()} | {"timeline": ResourceKind.REQUIREMENT}
 
 
 @dataclass
@@ -58,10 +66,10 @@ def emit_markdown_notifications(
     """
     if source.kind == ResourceKind.REQUIREMENT and timeline_entry_id is not None:
         source_kind, source_key = "timeline", str(timeline_entry_id)
-    elif source.kind == ResourceKind.WIKI and timeline_entry_id is None and reply_author_id is None:
-        source_kind, source_key = "wiki", source.identifier
+    elif source.kind in _BODY_KINDS and timeline_entry_id is None and reply_author_id is None:
+        source_kind, source_key = _BODY_KINDS[source.kind], source.identifier
     else:
-        raise ValueError("Notification source must be a Wiki or a scoped timeline entry")
+        raise ValueError("Unsupported Markdown notification source")
     mentioned = _mentions(body, source.project_id) - _mentions(previous_body, source.project_id)
     recipients = mentioned | ({reply_author_id} if reply_author_id else set())
     recipients.discard(actor_id)
@@ -115,6 +123,14 @@ def _visibility(db: Session, actor: User):
     wiki_visible = select(tree.c.code).where(
         tree.c.project_id == Notification.project_id, tree.c.code == Notification.source_code,
     ).exists()
+    requirement_visible = select(Requirement.code).where(
+        Requirement.project_id == Notification.project_id, Requirement.code == Notification.source_code,
+        Requirement.deleted_at.is_(None),
+    ).exists()
+    task_visible = select(Task.code).where(
+        Task.project_id == Notification.project_id, Task.code == Notification.source_code,
+        Task.deleted_at.is_(None), Task.has_active_requirement(),
+    ).exists()
     active_project = select(Project.id).where(Project.deleted_at.is_(None))
     if not is_admin(db, owner_id):
         active_project = active_project.join(ProjectMember, ProjectMember.project_id == Project.id).where(
@@ -123,7 +139,9 @@ def _visibility(db: Session, actor: User):
     query = select(Notification).where(
         Notification.owner_id == owner_id, Notification.project_id.in_(active_project),
         or_(and_(Notification.source_kind == "timeline", timeline_visible),
-            and_(Notification.source_kind == "wiki", wiki_visible)),
+            and_(Notification.source_kind == "wiki", wiki_visible),
+            and_(Notification.source_kind == "requirement", requirement_visible),
+            and_(Notification.source_kind == "task", task_visible)),
     )
     if actor.is_agent:
         query = query.where(Notification.visibility == "shared")
@@ -131,10 +149,12 @@ def _visibility(db: Session, actor: User):
 
 
 def _data(item: Notification) -> dict[str, Any]:
-    kind = ResourceKind.REQUIREMENT if item.source_kind == "timeline" else ResourceKind.WIKI
+    kind = _SOURCE_RESOURCES[item.source_kind]
     path = ResourceRef(item.project_id, kind, item.source_code).path
     if item.entry_id is not None:
         path += f"#timeline-{item.entry_id}"
+    elif item.source_kind == "requirement":
+        path += "?tab=body"
     return {
         "id": str(item.id), "project_id": str(item.project_id), "actor_id": str(item.actor_id),
         "visibility": item.visibility, "source_kind": item.source_kind, "source_path": path,

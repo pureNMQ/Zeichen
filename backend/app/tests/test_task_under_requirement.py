@@ -51,15 +51,15 @@ def test_create_task_cross_project_requirement_rejected(client: TestClient, worl
     assert resp.json()["code"] == "not_found"
 
 
-def test_create_task_pending_requirement_rejected(client: TestClient, world: dict):
+def test_task_can_be_added_to_pending_requirement(client: TestClient, world: dict):
     login(client, "admin", "admin-pass-1")
     pid = str(world["project"].id)
     r = _req(client, pid, "待确认需求", status="pending")
     resp = client.post(
         f"/api/projects/{pid}/tasks", json={"title": "过早拆解", "requirement_id": r["id"]}
     )
-    assert resp.status_code == 400
-    assert resp.json()["code"] == "invalid_request"
+    assert resp.status_code == 201
+    assert resp.json()["id"] == r["id"] + "-T1"
 
 
 def test_update_cannot_clear_requirement(client: TestClient, world: dict):
@@ -74,15 +74,9 @@ def test_update_cannot_clear_requirement(client: TestClient, world: dict):
     tid = resp.json()["id"]
     assert resp.json()["requirement_id"] == r1["id"]
 
-    # 置空解除 → invalid_request
-    resp = client.patch(f"/api/tasks/{tid}", json={"requirement_id": None})
-    assert resp.status_code == 400
-    assert resp.json()["code"] == "invalid_request"
-
-    # 改指向同项目其他需求 → OK
-    resp = client.patch(f"/api/tasks/{tid}", json={"requirement_id": r2["id"]})
-    assert resp.status_code == 200
-    assert resp.json()["requirement_id"] == r2["id"]
+    for parent in (None, r2["id"]):
+        assert client.patch(f"/api/tasks/{tid}", json={"requirement_id": parent}).status_code == 422
+    assert client.get(f"/api/tasks/{tid}").json()["requirement_id"] == r1["id"]
 
 
 def test_task_four_states_no_verifying(client: TestClient, world: dict):

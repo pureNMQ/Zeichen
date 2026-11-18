@@ -2,7 +2,6 @@
 #
 # 用途:在服务器上直接改代码、秒级生效,无需每次打包同步:
 #   * api / mcp:挂载 backend 源码 + uvicorn --reload,改 Python 代码即重载
-#   * worker:挂载源码(无 reload,改代码后 `docker compose restart worker`)
 #   * web:开发态不用静态镜像,改用 frontend-dev 容器跑 vite dev(HMR)
 #   * postgres:保持现有生产实例(同库热更新,注意误操作风险)
 #
@@ -11,7 +10,7 @@
 #   # 前端 HMR 地址:http://<IP>:5173(首次启动容器内 npm install 需几分钟)
 #
 # 新增 Python 依赖(backend/pyproject.toml 变更)时需重新构建镜像:
-#   docker compose -f docker-compose.yml -f deploy/docker-compose.ip.yml -f deploy/docker-compose.dev.yml up -d --build api mcp worker
+#   docker compose -f docker-compose.yml -f deploy/docker-compose.ip.yml -f deploy/docker-compose.dev.yml up -d --build api mcp
 name: zeichen
 
 services:

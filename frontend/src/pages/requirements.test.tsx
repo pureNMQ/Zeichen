@@ -1,7 +1,13 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
+
+vi.mock('@/components/vditor-ir-editor', async () => ({
+  WysiwygMarkdownEditor: (await import('@/test/fake-wysiwyg-editor')).FakeWysiwygMarkdownEditor,
+}))
+
+vi.mock('@/lib/auth', () => ({ useAuth: () => ({user:{id:'u1'}}) }))
 
 vi.mock('@/lib/api', () => {
   class ApiError extends Error {
@@ -36,6 +42,7 @@ vi.mock('@/lib/api', () => {
 import { api, ApiError, type ProjectRow, type RequirementRow } from '@/lib/api'
 import { CurrentProjectProvider } from '@/lib/current-project'
 import { NotificationProvider } from '@/components/ui/notification'
+import { WorkEditorPage } from '@/pages/project/work-editor'
 import { moveRequirement, RequirementsPage } from '@/pages/requirements'
 
 const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -161,6 +168,7 @@ function renderRequirements(projectList: ProjectRow[] = projects, opts: RenderOp
         <MemoryRouter initialEntries={['/requirements']}>
           <Routes>
             <Route path="/requirements" element={<RequirementsPage />} />
+            <Route path="/projects/:projectId/requirements/new" element={<WorkEditorPage kind="requirements" creating />} />
           </Routes>
         </MemoryRouter>
       </CurrentProjectProvider>
@@ -176,13 +184,13 @@ describe('需求列表页(当前项目)', () => {
     localStorage.clear()
   })
 
-  it('新建需求描述为单行且最多 512 字符', async () => {
+  it('新建需求在独立编辑页使用多行 Markdown 正文', async () => {
     renderRequirements([projects[1]])
     const user = (await import('@testing-library/user-event')).default
-    await user.click(await screen.findByRole('button', { name: /新建需求/ }))
-    const description = screen.getByLabelText('描述')
-    expect(description.tagName).toBe('INPUT')
-    expect(description).toHaveAttribute('maxlength', '512')
+    await user.click(await screen.findByRole('button', {name:'新建需求'}))
+    expect(await screen.findByRole('textbox', {name:'正文'})).not.toHaveAttribute('maxlength','512')
+    expect(screen.getByRole('textbox', {name:'正文'})).toHaveAttribute('contenteditable','true')
+    expect(screen.queryByRole('dialog')).toBeNull()
   })
 
   it('默认选中「近期活跃」:取第一个可见项目,首次加载带 updated_within_days=3 且以看板展示', async () => {
@@ -206,20 +214,11 @@ describe('需求列表页(当前项目)', () => {
     expect(api.get).toHaveBeenCalledWith('/projects/p1/filter-views?entity_type=requirement')
   })
 
-  it('新建需求表单草稿:输入自动暂存,清空草稿重置(REQ ff7a0aa2;重开恢复由任务对话框用例覆盖)', async () => {
+  it('按需求筛选我参与的工作', async () => {
+    renderRequirements()
     const user = (await import('@testing-library/user-event')).default
-    renderRequirements([projects[1]])
-    await user.click(await screen.findByRole('button', { name: /新建需求/ }))
-    await user.type(screen.getByLabelText('标题'), '未提交的需求草稿')
-    await user.type(screen.getByLabelText('描述'), '草稿描述')
-    await waitFor(() => {
-      expect(JSON.parse(localStorage.getItem('zeichen.draft.requirement:p2')!)).toEqual({ title: '未提交的需求草稿', description: '草稿描述' })
-    })
-
-    // 清空草稿:存储清除 + 表单重置
-    await user.click(screen.getByRole('button', { name: '清空草稿' }))
-    expect(localStorage.getItem('zeichen.draft.requirement:p2')).toBeNull()
-    expect(screen.getByLabelText('标题')).toHaveValue('')
+    await user.click(await screen.findByRole('button', {name:'我参与的'}))
+    expect(requirementParams().get('participated_by_me')).toBe('true')
   })
 
   it('viewer 不可见新建/删除按钮', async () => {
@@ -584,21 +583,19 @@ describe('看板验收中卡片打回(REQ-47/TASK-116)', () => {
     vi.mocked(api.post).mockResolvedValue({})
   })
 
-  it('验收中卡片显示打回按钮,确认后理由进评论区且状态回待办', async () => {
+  it('一次提交打回验收，将理由记入需求时间轴', async () => {
     const user = (await import('@testing-library/user-event')).default
     renderRequirements([projects[1]], { items: [verifyingReq] })
     await user.click(await screen.findByRole('button', { name: '打回' }))
-    expect(await screen.findByRole('dialog')).toHaveTextContent('打回需求')
+    expect(await screen.findByRole('dialog')).toHaveTextContent('打回理由会记入需求时间轴')
     await user.type(screen.getByLabelText('打回理由'), '验收不通过,缺少边界用例')
     await user.click(screen.getByRole('button', { name: '确认打回' }))
     await waitFor(() =>
-      expect(api.post).toHaveBeenCalledWith('/targets/requirement/rv/comments', {
-        body: '打回：验收不通过,缺少边界用例',
+      expect(api.post).toHaveBeenCalledWith('/projects/p2/requirements/rv/reject', {
+        reason: '验收不通过,缺少边界用例', request_id: expect.any(String),
       }),
     )
-    await waitFor(() =>
-      expect(api.post).toHaveBeenCalledWith('/requirements/rv/status', { status: 'backlog' }),
-    )
+    expect(api.post).toHaveBeenCalledTimes(1)
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
 
@@ -611,17 +608,34 @@ describe('看板验收中卡片打回(REQ-47/TASK-116)', () => {
     expect(screen.getByRole('button', { name: '确认打回' })).toBeEnabled()
   })
 
-  it('评论发布失败时不改状态,错误显示在弹窗内', async () => {
-    vi.mocked(api.post).mockImplementation((path: string) =>
-      path.includes('/comments') ? Promise.reject(new ApiError(500, '评论服务不可用')) : Promise.resolve({}),
-    )
+  it('保留超长打回草稿，并在缩短后重新允许提交', async () => {
+    const user = (await import('@testing-library/user-event')).default
+    renderRequirements([projects[1]], { items: [verifyingReq] })
+    await user.click(await screen.findByRole('button', { name: '打回' }))
+    const editor = screen.getByRole('textbox', { name: '打回理由' })
+    editor.textContent = '补'.repeat(2001)
+    fireEvent.input(editor)
+    expect(screen.getByRole('alert')).toHaveTextContent('2000')
+    expect(screen.getByRole('button', { name: '确认打回' })).toBeDisabled()
+    editor.textContent = '补'.repeat(2000)
+    fireEvent.input(editor)
+    expect(screen.getByRole('button', { name: '确认打回' })).toBeEnabled()
+  })
+
+  it('打回请求失败后保留理由并用同一个请求标识重试', async () => {
+    vi.mocked(api.post).mockRejectedValueOnce(new ApiError(503, '暂时无法确认打回结果'))
     const user = (await import('@testing-library/user-event')).default
     renderRequirements([projects[1]], { items: [verifyingReq] })
     await user.click(await screen.findByRole('button', { name: '打回' }))
     await user.type(await screen.findByLabelText('打回理由'), '理由')
     await user.click(screen.getByRole('button', { name: '确认打回' }))
-    expect(await screen.findByRole('dialog')).toHaveTextContent('评论服务不可用')
-    expect(api.post).not.toHaveBeenCalledWith('/requirements/rv/status', { status: 'backlog' })
+    expect(await screen.findByText('暂时无法确认打回结果')).toBeInTheDocument()
+    expect(screen.getByLabelText('打回理由')).toHaveTextContent('理由')
+    await user.click(screen.getByRole('button', { name: '确认打回' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    const calls = vi.mocked(api.post).mock.calls
+    expect(calls).toHaveLength(2)
+    expect(calls[1]).toEqual(calls[0])
   })
 
   it('非验收中卡片与列表视图不显示打回按钮', async () => {

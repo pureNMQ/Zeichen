@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session, load_only
 from ..config import get_settings
 from ..errors import invalid_request, not_found
 from ..services.pagination import MAX_PAGE_SIZE
-from ..services.permissions import get_accessible_project, require_project_role
+from ..services.permissions import get_accessible_project
 from ..v2 import wiki as service
 from ..v2.resource_refs import ResourceKind, ResourceRef
 from ..v2.wiki_models import Wiki, WikiVersion
@@ -189,12 +189,7 @@ def list_trash(db: Session, actor_id: UUID, project_id: UUID, *, query: str,
 
 
 def read_trash(db: Session, actor_id: UUID, project_id: UUID, code: str) -> TrashedWiki:
-    require_project_role(db, actor_id, project_id)
-    ResourceRef(project_id, ResourceKind.WIKI, code)
-    entry = db.get(Wiki, (project_id, code))
-    if entry is None or entry.deleted_at is None:
-        raise not_found("已删除的 Wiki 不存在")
-    return trashed_summary(entry)
+    return trashed_summary(service.read_deleted_wiki(db, actor_id, project_id, code))
 
 
 def version_list(db: Session, actor_id: UUID, project_id: UUID, code: str, *, limit: int,

@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import type { FormEvent } from 'react'
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
@@ -14,6 +14,13 @@ type Page = { items: Result[]; next_cursor: string | null }
 type SearchResult = { domains: Partial<Record<Domain, Page>> }
 
 const allDomains = Object.keys(labels) as Domain[]
+function localLocationLink(value: string) {
+  try {
+    const url = new URL(value)
+    if (url.origin === window.location.origin) return url.pathname + url.search + url.hash
+  } catch { /* Relative project links are already in the API format. */ }
+  return value
+}
 const filters = [
   { name: 'requirement_status', label: '需求状态', options: STATUS_LABEL },
   { name: 'timeline_kind', label: '时间轴类型', options: { manual: '人工条目', system: '系统事件' } },
@@ -62,7 +69,6 @@ function Results({ domain, projectId, scope, page, names }: {
     <section className="space-y-2" aria-label={labels[domain]}>
       <h2 className="text-base font-semibold">{labels[domain]}</h2>
       <ErrorNotification message={results.error?.message} />
-      {items.length === 0 && <p className="text-sm text-muted-foreground">没有匹配结果。</p>}
       {items.map((item) => (
         <article key={`${item.project_id}:${item.id}`} className="rounded-md border p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -99,13 +105,22 @@ export function ProjectSearchPage() {
   for (const [name, value] of filterValues) request.set(name, value)
   const scope = request.toString()
   const projectNames = included.length ? new Map(projects.map(({ id, name }) => [id, name])) : undefined
-  const [filter, setFilter] = useState<Domain | 'all'>('all')
+  const filter = allDomains.find((domain) => domain === params.get('domain')) ?? 'all'
+  function setFilter(domain: Domain | 'all') {
+    const next = new URLSearchParams(params)
+    if (domain === 'all') next.delete('domain')
+    else next.set('domain', domain)
+    setParams(next)
+  }
   const search = useQuery({
     queryKey: ['project-search', projectId, scope],
     queryFn: () => api.get<SearchResult>(searchPath(projectId, scope)),
     enabled: !!projectId && active,
   })
-  const domains = filter === 'all' ? allDomains : [filter]
+  const domains = (filter === 'all' ? allDomains : [filter]).filter((domain) => {
+    const page = search.data?.domains[domain]
+    return !!(page?.items.length || page?.next_cursor)
+  })
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const data = new FormData(event.currentTarget)
@@ -114,9 +129,9 @@ export function ProjectSearchPage() {
     for (const id of data.getAll('include_project')) next.append('include_project', String(id))
     for (const field of filters) {
       const value = String(data.get(field.name) ?? '').trim()
-      if (value) next.set(field.name, 'type' in field ? new Date(value).toISOString() : value)
+      if (value) next.set(field.name, 'type' in field ? new Date(value).toISOString()
+        : field.name === 'file_used_at' ? localLocationLink(value) : value)
     }
-    setFilter('all')
     setParams(next)
   }
   return (
@@ -173,6 +188,9 @@ export function ProjectSearchPage() {
       <ErrorNotification message={search.error?.message} />
       {search.isFetching && <p className="text-sm text-muted-foreground" role="status">搜索中…</p>}
       {search.isError && <Button variant="outline" onClick={() => void search.refetch()}>重试</Button>}
+      {search.isSuccess && !search.isFetching && !domains.length && (
+        <p role="status" className="text-sm text-muted-foreground">没有匹配结果。</p>
+      )}
       {domains.map((domain) => {
         const page = search.data?.domains[domain]
         return page ? <Results key={`${projectId}:${scope}:${domain}`} domain={domain}

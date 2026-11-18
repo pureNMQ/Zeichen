@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..models import User
+from ..v2 import work_content
 from ..schemas import (
     StatusBody,
     TaskAssignBody,
@@ -46,17 +47,8 @@ def create_task(
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    task = service.create_task(
-        db,
-        user,
-        project_id,
-        body.title,
-        body.description,
-        body.requirement_id,
-        body.assignee_id,
-        body.blocked_by,
-    )
-    return service._task_dict(db, task)
+    return work_content.create(db, user, project_id, "tasks", body.title, body.description, body.request_id,
+        requirement_id=body.requirement_id, assignee_id=body.assignee_id)
 
 
 @router.get("/tasks/{task_id}")
@@ -77,14 +69,11 @@ def update_task(
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    fields = body.model_fields_set
-    requirement_id = body.requirement_id if "requirement_id" in fields else service._UNSET
-    blocked_by = body.blocked_by if "blocked_by" in fields else service._UNSET
     return service._task_dict(
         db,
         service.update_task(
-            db, user, task_id, body.title, body.description, requirement_id, blocked_by,
-            project_id=project_id,
+            db, user, task_id, body.title, body.description,
+            project_id=project_id, expected_version=body.expected_version,
         ),
     )
 

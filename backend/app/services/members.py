@@ -13,7 +13,9 @@ from sqlalchemy.orm import Session
 from ..errors import conflict, invalid_request, not_found, permission_denied
 from ..models import ApiKey, PasswordSetupToken, ProjectMember, User, WorkspaceMember
 from ..security import generate_password_setup_token, token_digest
-from .permissions import get_team
+from . import agents
+from .permissions import effective_user_id, get_team, get_workspace_member, require_workspace_admin
+from .user_profiles import display_name, payload as profile_payload
 
 WORKSPACE_ROLES = ("admin", "member")
 PASSWORD_SETUP_LINK_TTL = timedelta(hours=24)
@@ -34,6 +36,37 @@ def list_members(db: Session) -> list[tuple[User, str]]:
     return [(u, role) for u, role in rows]
 
 
+def member_summary(user: User) -> dict:
+    return {
+        **profile_payload(user), "created_at": user.created_at.isoformat(),
+        "is_bootstrap": user.is_bootstrap, "has_password": bool(user.password_hash),
+    }
+
+
+def workspace_roster(db: Session, actor: User) -> list[dict]:
+    if get_workspace_member(db, actor.id) is None:
+        raise permission_denied("仅工作区成员可查看名册")
+    principal_id = effective_user_id(db, actor.id)
+    owned = agents.owned_agents_map(db)
+    items = []
+    for user, role in list_members(db):
+        agent = owned.get(user.id)
+        agent_info = None
+        if agent is not None:
+            agent_info = {
+                "id": str(agent.id), "username": agent.username, "nickname": agent.nickname,
+                "display_name": display_name(agent), "created_at": agent.created_at.isoformat(),
+                "active_keys": agents.agent_detail(db, agent)["active_keys"],
+            }
+        items.append({**member_summary(user), "role": role, "is_self": user.id == principal_id, "agent": agent_info})
+    return items
+
+
+def inactive_roster(db: Session, actor: User) -> list[dict]:
+    require_workspace_admin(db, actor.id)
+    return [{**member_summary(user), "deactivated_at": user.deleted_at.isoformat()} for user in list_inactive_members(db)]
+
+
 def _get_active_user(db: Session, user_id: uuid.UUID) -> User:
     user = db.get(User, user_id)
     if user is None or user.deleted_at is not None:
@@ -41,10 +74,10 @@ def _get_active_user(db: Session, user_id: uuid.UUID) -> User:
     return user
 
 
-def _issue_password_setup_token(db: Session, user: User) -> str:
-    """Create or replace a 24-hour setup credential; only its digest is stored."""
+def _issue_password_setup_token(db: Session, user: User, ttl: timedelta = PASSWORD_SETUP_LINK_TTL) -> str:
+    """Store only the digest. A zero TTL reserves setup for a human administrator."""
     raw_token = generate_password_setup_token()
-    expires_at = datetime.now(timezone.utc) + PASSWORD_SETUP_LINK_TTL
+    expires_at = datetime.now(timezone.utc) + ttl
     setup = db.scalar(select(PasswordSetupToken).where(PasswordSetupToken.user_id == user.id))
     if setup is None:
         db.add(
@@ -59,7 +92,20 @@ def _issue_password_setup_token(db: Session, user: User) -> str:
     return raw_token
 
 
-def create_member(db: Session, actor: User, username: str, role: str) -> tuple[User, str]:
+def _prepare_password_setup(db: Session, user: User, actor: User) -> str | None:
+    if actor.is_agent:
+        # Even before a human issues a link, this account must require link-based
+        # setup. No setup row would identify it as a legacy first-login account.
+        _issue_password_setup_token(db, user, ttl=timedelta(0))
+        return None
+    return _issue_password_setup_token(db, user)
+
+
+def create_member(db: Session, actor: User, username: str, role: str) -> tuple[User, str | None]:
+    require_workspace_admin(db, actor.id)
+    username = username.strip()
+    if not username or len(username) > 64:
+        raise invalid_request("用户名须为 1 至 64 个字符")
     if role not in WORKSPACE_ROLES:
         raise invalid_request("角色不合法")
     exists = db.scalar(select(User).where(User.username == username))
@@ -72,7 +118,7 @@ def create_member(db: Session, actor: User, username: str, role: str) -> tuple[U
     db.add(
         WorkspaceMember(team_id=team.id, user_id=user.id, role=role, created_by=actor.id)
     )
-    raw_token = _issue_password_setup_token(db, user)
+    raw_token = _prepare_password_setup(db, user, actor)
     db.commit()
     return user, raw_token
 
@@ -89,6 +135,7 @@ def regenerate_password_setup_link(db: Session, user_id: uuid.UUID) -> str:
 
 
 def update_role(db: Session, actor: User, user_id: uuid.UUID, role: str) -> User:
+    require_workspace_admin(db, actor.id)
     if role not in WORKSPACE_ROLES:
         raise invalid_request("角色不合法")
     user = _get_active_user(db, user_id)
@@ -102,7 +149,7 @@ def update_role(db: Session, actor: User, user_id: uuid.UUID, role: str) -> User
     )
     if membership is None:
         raise not_found("成员不存在")
-    if user.id == actor.id:
+    if user.id == effective_user_id(db, actor.id):
         raise conflict("不能修改自己的角色")
     if user.is_bootstrap:
         raise conflict("首用户的角色已锁定")
@@ -112,6 +159,7 @@ def update_role(db: Session, actor: User, user_id: uuid.UUID, role: str) -> User
 
 
 def remove_member(db: Session, actor: User, user_id: uuid.UUID) -> None:
+    require_workspace_admin(db, actor.id)
     user = db.scalar(select(User).where(User.id == user_id, User.deleted_at.is_(None)).with_for_update())
     if user is None:
         raise not_found("成员不存在")
@@ -123,7 +171,7 @@ def remove_member(db: Session, actor: User, user_id: uuid.UUID) -> None:
     )
     if membership is None:
         raise not_found("成员不存在")
-    if user.id == actor.id:
+    if user.id == effective_user_id(db, actor.id):
         raise conflict("不能移除自己")
     if user.is_bootstrap:
         raise conflict("首用户不能被移除")
@@ -152,6 +200,7 @@ def list_inactive_members(db: Session) -> list[User]:
 
 
 def reactivate_member(db: Session, actor: User, user_id: uuid.UUID) -> tuple[User, str | None]:
+    require_workspace_admin(db, actor.id)
     user = db.scalar(select(User).where(User.id == user_id, User.is_agent.is_(False)).with_for_update())
     if user is None or user.deleted_at is None:
         raise not_found("已停用的成员不存在")
@@ -162,6 +211,6 @@ def reactivate_member(db: Session, actor: User, user_id: uuid.UUID) -> tuple[Use
     db.add(WorkspaceMember(team_id=team.id, user_id=user.id, role="member", created_by=actor.id))
     user.deleted_at = None
     user.session_epoch += 1
-    setup = _issue_password_setup_token(db, user) if not user.password_hash else None
+    setup = None if user.password_hash else _prepare_password_setup(db, user, actor)
     db.commit()
     return user, setup

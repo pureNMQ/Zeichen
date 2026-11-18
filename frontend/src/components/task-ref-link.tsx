@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 
 import { api, type TaskRow } from '@/lib/api'
 
-// 任务引用链接:任务无独立页面(ADR 0003),解析所属需求后跳需求详情并定位任务弹窗。
+// 旧关联记录通过任务读取入口解析所属需求，打开需求内的任务阅读页。
 // 解析失败(任务已删/不可见)退化为纯文本。
 
 export function TaskRefLink({ taskId, children }: { taskId: string; children: ReactNode }) {
@@ -15,7 +15,7 @@ export function TaskRefLink({ taskId, children }: { taskId: string; children: Re
       .get<TaskRow>(`/tasks/${taskId}`)
       .then((t) => {
         if (!cancelled && t.requirement_id) {
-          setHref(`/requirements/${t.requirement_id}?task=${taskId}`)
+          setHref(`/projects/${t.project_id}/requirements/${t.requirement_id}?task=${t.id}`)
         }
       })
       .catch(() => {

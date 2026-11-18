@@ -11,7 +11,7 @@ description: Audit Zeichen during feature development, bug fixes, refactors, rev
 
 ### 1. 确定检查范围
 
-- 读取仓库根部 `AGENTS.md`、`CONTEXT.md`，以及与变更相关的 `docs/` 规格；以当前用户请求和这些文件为准。
+- 读取仓库根部 `AGENTS.md` 与 Zeichen 项目 Wiki 中 DOC-41 的相关章节。
 - 检查 `git status` 和相关 diff，将新增或修改代码作为最低检查范围，并检查其直接调用方、被调用方及共享契约。
 - 若仓库根存在 `.codegraph/`，按 `AGENTS.md` 先用 CodeGraph 定位和理解代码；不存在时再使用 `rg` 和定向读取。
 - 用户要求全量审计时，按功能切片检查；否则不要把局部改动无边界扩展成全仓重审。
@@ -43,11 +43,11 @@ description: Audit Zeichen during feature development, bug fixes, refactors, rev
 ### 4. 在 Zeichen 中查重
 
 1. 调用 `project.list`，选择名称精确为 `Zeichen` 的项目；若不存在或出现多个同名项目，停止发布并向用户说明。
-2. 用 `search.query` 搜索问题的核心行为、错误信息和领域名词，限定或重点检查 `requirement` 域。
-3. 用 `requirements.list` 检查该项目的待办、实现中、已完成和已取消需求；遵循 cursor 直到无下一页。状态不同不代表不是重复项。
+2. 用 `search.project` 传入 `project_id`、`query` 和 `domains=["requirement"]` 搜索问题的核心行为或错误信息。
+3. 用 `requirements.list` 检查该项目的各状态的需求；遵循 cursor 直到无下一页。状态不同不代表不是重复项。
 4. 对疑似重复项调用 `requirements.get` 比较范围和验收标准。
 
-若已有需求完整覆盖问题，不新建需求；报告现有需求 ID 和标题。只有新增证据会实质改变该需求的复现、影响或验收方式时，才用 `comment.create` 在现有需求下补充证据，并明确说明已追加评论。
+若已有需求完整覆盖问题，不新建需求；报告现有需求 ID 和标题。只有新增证据会实质改变该需求的复现、影响或验收方式时，才用 `timeline.append` 在现有需求的时间轴补充证据，传 `project_id`、`requirement_id`、本次 `request_id` 和 `body`。
 
 ### 5. 发布需求
 
@@ -86,7 +86,7 @@ description: Audit Zeichen during feature development, bug fixes, refactors, rev
 最终按以下三组简要汇报：
 
 - 已发布：需求 ID、标题、关键证据。
-- 已去重：现有需求 ID、标题，以及是否补充了评论。
+- 已去重：现有需求 ID、标题，以及是否补充了时间轴证据。
 - 未发布：候选问题和未达到发布门槛的原因。
 
 若没有确认缺陷，明确说明“未发现达到提需门槛的问题”并列出实际执行的验证。若 ZeichenMCP 不可用、没有写权限或发布失败，不得回退到 `.scratch` 或其他本地 issue 文件；保留需求草稿并向用户报告阻塞原因。

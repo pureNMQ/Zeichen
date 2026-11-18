@@ -3,13 +3,15 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select, update
+from sqlalchemy import case, func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..errors import conflict, invalid_request, not_found, permission_denied
 from ..models import Attachment, Document, Project, ProjectMember, Repository, Requirement, Task, User, WorkspaceMember
 from .pagination import decode_cursor, encode_cursor
 from .permissions import effective_user_id, get_accessible_project, get_project_role, get_team, is_admin, require_workspace_admin
+from .user_profiles import payload as profile_payload
 from ..security import verify_password
 
 PROJECT_ROLES = ("owner", "editor", "viewer")
@@ -41,14 +43,46 @@ def list_projects(db: Session, user: User) -> list[tuple[Project, str]]:
     return [(p, role) for p, role in rows]
 
 
-def create_project(db: Session, actor: User, name: str, members: list[dict]) -> Project:
+def project_roster_summaries(db: Session, project_ids: list[uuid.UUID]) -> dict:
+    owner = case((ProjectMember.role == "owner", func.coalesce(func.nullif(func.trim(User.nickname), ""), User.username)))
+    rows = db.execute(
+        select(ProjectMember.project_id, func.count(User.id), func.max(owner))
+        .join(User, User.id == ProjectMember.user_id)
+        .join(Project, Project.id == ProjectMember.project_id)
+        .join(WorkspaceMember, (WorkspaceMember.user_id == User.id) & (WorkspaceMember.team_id == Project.team_id))
+        .where(ProjectMember.project_id.in_(project_ids), User.deleted_at.is_(None), User.is_agent.is_(False))
+        .group_by(ProjectMember.project_id)
+    )
+    return {project_id: (count, owner_name) for project_id, count, owner_name in rows}
+
+
+def project_summary(project: Project, role: str) -> dict:
+    return {"id": str(project.id), "name": project.name, "description": project.description,
+            "created_at": project.created_at.isoformat(), "my_role": role}
+
+
+def project_directory(db: Session, actor: User) -> list[dict]:
+    projects = list_projects(db, actor)
+    rosters = project_roster_summaries(db, [project.id for project, _ in projects])
+    items = []
+    for project, role in projects:
+        member_count, owner_name = rosters.get(project.id, (0, None))
+        items.append({**project_summary(project, role), "member_count": member_count, "owner_name": owner_name})
+    return items
+
+
+def create_project(db: Session, actor: User, name: str, members: list[dict], description: str = "") -> Project:
     """admin 建项目,自动 owner;members 为额外项目成员授权。"""
     require_workspace_admin(db, actor.id)
     team = get_team(db)
-    project = Project(team_id=team.id, name=name, created_by=actor.id)
+    if not name.strip():
+        raise invalid_request("项目名不能为空")
+    project = Project(team_id=team.id, name=name.strip(), description=description.strip(), created_by=actor.id)
     db.add(project)
     db.flush()
-    db.add(ProjectMember(project_id=project.id, user_id=actor.id, role="owner", created_by=actor.id))
+    # The human owns the project; preserve the acting identity in the audit fields.
+    db.add(ProjectMember(project_id=project.id, user_id=effective_user_id(db, actor.id),
+                         role="owner", created_by=actor.id))
     for m in members:
         _add_member_row(db, project, m["user_id"], m["role"], actor)
     db.commit()
@@ -60,65 +94,78 @@ def get_project(db: Session, user: User, project_id: uuid.UUID) -> tuple[Project
     return project, get_project_role(db, user.id, project_id) or "viewer"
 
 
-def update_project(db: Session, actor: User, project_id: uuid.UUID, name: str) -> Project:
+def update_project(db: Session, actor: User, project_id: uuid.UUID, name: str | None = None,
+                   description: str | None = None) -> Project:
     project = get_accessible_project(db, actor.id, project_id, min_level="owner")
-    name = name.strip()
-    if not name:
-        raise invalid_request("项目名不能为空")
-    project.name = name
+    if name is None and description is None:
+        raise invalid_request("请填写需要修改的项目信息")
+    if name is not None:
+        if not name.strip():
+            raise invalid_request("项目名不能为空")
+        project.name = name.strip()
+    if description is not None:
+        project.description = description.strip()
     db.commit()
     return project
 
 
-def list_project_members(db: Session, user: User, project_id: uuid.UUID) -> list[tuple[User, str]]:
-    # 项目成员可查看彼此及角色；增删改成员仍由各写操作单独要求 owner。
-    get_accessible_project(db, user.id, project_id)
-    rows = db.execute(
-        select(User, ProjectMember.role)
-        .join(ProjectMember, ProjectMember.user_id == User.id)
-        .where(ProjectMember.project_id == project_id)
-        .order_by(ProjectMember.created_at)
-    ).all()
-    return [(u, role) for u, role in rows]
-
-
-def list_member_candidates(db: Session, actor: User, project_id: uuid.UUID) -> list[User]:
-    """可添加到项目的人选:工作区成员(非 admin)+ 全部 agent,剔除已在项目中的。"""
-    get_accessible_project(db, actor.id, project_id, min_level="owner")
-    team = get_team(db)
-    already = set(
-        db.scalars(select(ProjectMember.user_id).where(ProjectMember.project_id == project_id)).all()
-    )
-    humans = db.execute(
-        select(User)
+def _workspace_people(project: Project):
+    return (
+        select(User, WorkspaceMember.role)
         .join(WorkspaceMember, WorkspaceMember.user_id == User.id)
         .where(
-            WorkspaceMember.team_id == team.id,
-            WorkspaceMember.role != "admin",
+            WorkspaceMember.team_id == project.team_id,
+            User.is_agent.is_(False),
             User.deleted_at.is_(None),
         )
-        .order_by(User.created_at)
-    ).scalars().all()
-    # ADR 0004:agent 不再作为项目成员授权,候选仅工作区人类成员
-    return [u for u in humans if u.id not in already]
+    )
+
+
+def list_project_members(db: Session, user: User, project_id: uuid.UUID) -> list[tuple[User, str, str]]:
+    project = get_accessible_project(db, user.id, project_id)
+    rows = db.execute(
+        _workspace_people(project)
+        .add_columns(ProjectMember.role)
+        .join(ProjectMember, ProjectMember.user_id == User.id)
+        .where(ProjectMember.project_id == project.id)
+        .order_by(ProjectMember.created_at, User.id)
+    )
+    return [(person, workspace_role, project_role) for person, workspace_role, project_role in rows]
+
+
+def list_member_candidates(db: Session, actor: User, project_id: uuid.UUID) -> list[tuple[User, str]]:
+    """列出尚未在项目名册中登记的有效工作区人类成员，包括管理员。"""
+    project = get_accessible_project(db, actor.id, project_id, min_level="owner")
+    registered = select(ProjectMember.user_id).where(ProjectMember.project_id == project.id)
+    rows = db.execute(
+        _workspace_people(project)
+        .where(User.id.not_in(registered))
+        .order_by(User.created_at, User.id)
+    )
+    return [(person, workspace_role) for person, workspace_role in rows]
+
+
+def roster(db: Session, actor: User, project_id: uuid.UUID) -> list[dict]:
+    principal_id = effective_user_id(db, actor.id)
+    return [{**profile_payload(user), "role": role, "workspace_role": workspace_role,
+             "is_current_user": user.id == principal_id}
+            for user, workspace_role, role in list_project_members(db, actor, project_id)]
+
+
+def eligible_people(db: Session, actor: User, project_id: uuid.UUID) -> list[dict]:
+    return [{**profile_payload(user), "workspace_role": role}
+            for user, role in list_member_candidates(db, actor, project_id)]
 
 
 def _add_member_row(db: Session, project: Project, user_id: uuid.UUID, role: str, actor: User) -> None:
-    if role not in PROJECT_ROLES:
+    if role not in ("viewer", "editor"):
         raise invalid_request("角色不合法")
-    target = db.get(User, user_id)
-    if target is None or target.deleted_at is not None:
-        raise not_found("用户不存在")
-    if target.is_agent:
-        # ADR 0004:agent 随主人访问项目,不再单独授权
-        raise invalid_request("附属 Agent 不单独加入项目,其权限随主人")
-    team = get_team(db)
-    wm = db.scalar(
-        select(WorkspaceMember).where(
-            WorkspaceMember.team_id == team.id, WorkspaceMember.user_id == user_id
-        )
-    )
-    if wm is None:
+    if db.scalar(_workspace_people(project).where(User.id == user_id)) is None:
+        target = db.get(User, user_id)
+        if target is None or target.deleted_at is not None:
+            raise not_found("用户不存在")
+        if target.is_agent:
+            raise invalid_request("附属 Agent 不单独加入项目,其权限随主人")
         raise invalid_request("该账号不是工作区成员")
     dup = db.scalar(
         select(ProjectMember).where(
@@ -135,7 +182,15 @@ def add_project_member(
 ) -> None:
     project = get_accessible_project(db, actor.id, project_id, min_level="owner")
     _add_member_row(db, project, user_id, role, actor)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        if db.scalar(select(ProjectMember.id).where(
+            ProjectMember.project_id == project_id, ProjectMember.user_id == user_id
+        )):
+            raise conflict("该用户已在项目中")
+        raise
 
 
 def update_project_member_role(
@@ -201,6 +256,7 @@ def transfer_project_owner(
         select(ProjectMember).where(
             ProjectMember.project_id == project.id,
             ProjectMember.user_id == user_id,
+            ProjectMember.user_id.in_(_workspace_people(project).with_only_columns(User.id)),
         )
     )
     if target is None:

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { act, render, screen, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
@@ -22,7 +22,11 @@ vi.mock('@/lib/api', () => {
   }
 })
 
-import { api, type ProjectMemberRow } from '@/lib/api'
+vi.mock('@/lib/auth', () => ({
+  useAuth: () => ({ user: { workspace_role: 'admin' } }),
+}))
+
+import { api, type ProjectMemberCandidate, type ProjectMemberRow } from '@/lib/api'
 import { ProjectLayout } from '@/pages/project/layout'
 
 const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -35,21 +39,22 @@ const project = {
 }
 
 const members: ProjectMemberRow[] = [
-  { id: 'u1', username: 'admin', is_agent: false, role: 'owner', is_current_user: true },
-  { id: 'u2', username: 'bob', is_agent: false, role: 'viewer', is_current_user: false },
-  { id: 'u3', username: 'agent-a', is_agent: true, role: 'editor', is_current_user: false },
+  { id: 'u1', username: 'admin', is_agent: false, role: 'owner', workspace_role: 'admin', is_current_user: true },
+  { id: 'u2', username: 'bob', is_agent: false, role: 'viewer', workspace_role: 'member', is_current_user: false },
+  { id: 'u3', username: 'alex', is_agent: false, role: 'editor', workspace_role: 'admin', is_current_user: false },
 ]
 
-const candidates: ProjectMemberRow[] = [
-  { id: 'u4', username: 'carol', is_agent: false, role: 'viewer' },
-  { id: 'u5', username: 'agent-b', is_agent: true, role: 'viewer' },
+const candidates: ProjectMemberCandidate[] = [
+  { id: 'u4', username: 'carol', is_agent: false, workspace_role: 'member' },
+  { id: 'u5', username: 'new-admin', is_agent: false, workspace_role: 'admin' },
 ]
 
-function renderLayout(myRole = 'owner') {
+function renderLayout(myRole = 'owner', roster = members, loadCandidates = async () => candidates) {
   vi.mocked(api.get).mockImplementation((path: string) => {
     if (path === '/projects/p1') return Promise.resolve({ ...project, my_role: myRole })
-    if (path.includes('/members')) return Promise.resolve(members)
-    if (path.includes('/member_candidates')) return Promise.resolve(candidates)
+    if (path.includes('/members')) return Promise.resolve(roster)
+    if (path.includes('/member_candidates')) return loadCandidates()
+    if (path.includes('/files/associations?')) return Promise.resolve({ items: [], next_cursor: null })
     return Promise.resolve({})
   })
   return render(
@@ -63,19 +68,23 @@ function renderLayout(myRole = 'owner') {
   )
 }
 
+async function memberRow(name: string) {
+  return (await screen.findByText(name, { exact: true })).closest('li')!
+}
+
 describe('项目详情页(成员授权)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     qc.clear()
   })
 
-  it('owner 看到成员列表:Agent 标识、角色与操作按钮', async () => {
+  it('展示人类成员的名册角色及工作区管理员的实际权限', async () => {
     renderLayout()
-    expect(await screen.findByRole('row', { name: /admin/ })).toBeInTheDocument()
-    for (const name of ['bob', 'agent-a']) {
-      expect(screen.getByRole('row', { name: new RegExp(name) })).toBeInTheDocument()
+    expect(await memberRow('admin')).toBeInTheDocument()
+    for (const name of ['bob', 'alex']) {
+      expect(await memberRow(name)).toBeInTheDocument()
     }
-    expect(within(screen.getByRole('row', { name: /agent-aAgent/ })).getByTitle('Agent')).toBeInTheDocument()
+    expect(within(await memberRow('alex')).getByText(/拥有项目管理权限/)).toBeInTheDocument()
     expect(screen.queryByRole('columnheader', { name: '类型' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /添加成员/ })).toBeInTheDocument()
   })
@@ -84,7 +93,7 @@ describe('项目详情页(成员授权)', () => {
     const user = (await import('@testing-library/user-event')).default
     vi.mocked(api.patch).mockResolvedValue({ ok: true })
     renderLayout()
-    const row = await screen.findByRole('row', { name: /bob/ })
+    const row = await memberRow('bob')
     await user.click(within(row).getByRole('combobox'))
     await user.click(await screen.findByRole('option', { name: 'editor' }))
     expect(api.patch).toHaveBeenCalledWith('/projects/p1/members/u2', { role: 'editor' })
@@ -94,7 +103,7 @@ describe('项目详情页(成员授权)', () => {
     const user = (await import('@testing-library/user-event')).default
     vi.mocked(api.post).mockResolvedValue({ ok: true })
     renderLayout()
-    const ownerRow = await screen.findByRole('row', { name: /admin/ })
+    const ownerRow = await memberRow('admin')
     expect(within(ownerRow).getByRole('combobox')).toBeDisabled()
     await user.click(within(ownerRow).getByRole('button', { name: '转让 Owner' }))
     const dialog = await screen.findByRole('dialog')
@@ -113,21 +122,24 @@ describe('项目详情页(成员授权)', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     vi.mocked(api.delete).mockResolvedValue({ ok: true })
     renderLayout()
-    const row = await screen.findByRole('row', { name: /bob/ })
+    const row = await memberRow('bob')
     await user.click(within(row).getByRole('button', { name: /移除 bob/ }))
     expect(api.delete).toHaveBeenCalledWith('/projects/p1/members/u2')
   })
 
-  it('添加成员:候选人来自工作区成员与 Agent,提交调用 POST', async () => {
+  it('未入组管理员可添加人类管理员，附属 Agent 自动继承权限', async () => {
     const user = (await import('@testing-library/user-event')).default
     vi.mocked(api.post).mockResolvedValue({ ok: true })
-    renderLayout()
+    renderLayout('owner', members.map((person) => ({ ...person, is_current_user: false })))
+    expect(await screen.findByText(/在“添加成员”中选择自己/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '转让 Owner' })).not.toBeInTheDocument()
     await user.click(await screen.findByRole('button', { name: /添加成员/ }))
     const dialog = await screen.findByRole('dialog')
-    expect(await within(dialog).findByText('carol')).toBeInTheDocument()
-    expect(await within(dialog).findByText('agent-b (Agent)')).toBeInTheDocument()
-    await user.click(within(dialog).getAllByRole('combobox')[0])
-    await user.click(await screen.findByRole('option', { name: 'agent-b (Agent)' }))
+    expect(within(dialog).getByText(/附属 Agent 自动继承/)).toBeInTheDocument()
+    await user.click(await within(dialog).findByRole('combobox', { name: '工作区成员' }))
+    expect(screen.getByRole('option', { name: 'carol' })).toBeInTheDocument()
+    await user.click(screen.getByRole('option', { name: 'new-admin（工作区管理员）' }))
+    expect(within(dialog).getByText(/管理员始终拥有项目管理权限/)).toBeInTheDocument()
     await user.click(within(dialog).getByRole('button', { name: '添加' }))
     expect(api.post).toHaveBeenCalledWith('/projects/p1/members', {
       user_id: 'u5',
@@ -135,11 +147,28 @@ describe('项目详情页(成员授权)', () => {
     })
   })
 
+  it('候选请求加载及失败时不显示空态，重试成功后才显示无人可选', async () => {
+    const user = (await import('@testing-library/user-event')).default
+    let fail!: (reason: Error) => void
+    const pending = new Promise<ProjectMemberCandidate[]>((_, reject) => { fail = reject })
+    const load = vi.fn().mockReturnValueOnce(pending).mockResolvedValue([])
+    renderLayout('owner', members, load)
+    await user.click(await screen.findByRole('button', { name: /添加成员/ }))
+    const dialog = within(await screen.findByRole('dialog'))
+    expect(dialog.getByRole('status')).toHaveTextContent('正在加载')
+    await act(async () => fail(new Error('请求失败')))
+    expect(await dialog.findByRole('alert')).toHaveTextContent('加载失败')
+    expect(dialog.queryByText(/没有可添加/)).not.toBeInTheDocument()
+    await user.click(dialog.getByRole('button', { name: '重新加载成员' }))
+    expect(await dialog.findByText('没有可添加的人类成员。')).toBeInTheDocument()
+    expect(dialog.getByRole('button', { name: '添加' })).toBeDisabled()
+  })
+
   it('owner 重命名项目:提交调用 PATCH,名称更新', async () => {
     const user = (await import('@testing-library/user-event')).default
     vi.mocked(api.patch).mockResolvedValue({ ok: true })
     renderLayout()
-    await user.click(await screen.findByRole('button', { name: /重命名/ }))
+    await user.click(await screen.findByRole('button', { name: '编辑项目信息' }))
     const dialog = await screen.findByRole('dialog')
     const input = within(dialog).getByLabelText('项目名')
     await user.clear(input)
@@ -150,8 +179,8 @@ describe('项目详情页(成员授权)', () => {
 
   it('非 owner 可以只读查看项目成员，隐藏管理控件', async () => {
     renderLayout('viewer')
-    expect(await screen.findByRole('row', { name: /admin/ })).toBeInTheDocument()
-    expect(screen.getByRole('row', { name: /bob/ })).toBeInTheDocument()
+    expect(await memberRow('admin')).toBeInTheDocument()
+    expect(await memberRow('bob')).toBeInTheDocument()
     expect(screen.getByText('项目成员')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /添加成员/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /移除 bob/ })).not.toBeInTheDocument()

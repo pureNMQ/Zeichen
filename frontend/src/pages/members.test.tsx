@@ -202,6 +202,24 @@ describe('MembersPage 成员列表渲染', () => {
     expect(await screen.findByText('暂无成员')).toBeInTheDocument()
   })
 
+  it('角色保存失败后仍显示原角色，并可在原处重试', async () => {
+    const user = (await import('@testing-library/user-event')).default.setup()
+    const updated = rows.map((member) => member.id === 'u2' ? { ...member, role: 'admin' } : member)
+    vi.mocked(api.get).mockResolvedValueOnce(rows).mockResolvedValue(updated)
+    vi.mocked(api.patch).mockRejectedValueOnce(new ApiError(503, '暂时无法保存角色')).mockResolvedValueOnce({})
+    renderMembers()
+    const role = await screen.findByRole('combobox', { name: 'bob 的工作区角色' })
+    await user.click(role)
+    await user.click(await screen.findByRole('option', { name: '管理员' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('暂时无法保存角色')
+    expect(role).toBeEnabled()
+    expect(role).toHaveTextContent('成员')
+    await user.click(role)
+    await user.click(await screen.findByRole('option', { name: '管理员' }))
+    expect(role).toHaveTextContent('管理员')
+    expect(api.patch).toHaveBeenCalledTimes(2)
+  })
+
   it('创建成员后仅在弹窗展示可复制的设密链接', async () => {
     vi.mocked(api.get).mockResolvedValue(rows)
     vi.mocked(api.post).mockResolvedValue({

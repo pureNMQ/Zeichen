@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
@@ -13,6 +13,45 @@ from app.v2.resource_refs import ResourceKind, ResourceRef
 from app.v2.timeline_models import TimelineEntry
 
 from .conftest import login
+
+
+def test_web_reject_returns_to_backlog_and_records_reason_once(client, world, scopes):
+    scope, _, _ = scopes
+    login(client, "admin", "admin-pass-1")
+    path = f"/api{scope.path}"
+    rejection = {"reason": "补充键盘回归用例", "request_id": str(uuid4())}
+    assert client.post(path + "/reject", json=rejection).status_code == 409
+    assert client.post(path + "/status", json={"status": "verifying"}).status_code == 200
+    response = client.post(path + "/reject", json=rejection)
+    assert response.status_code == 200, response.text
+    assert client.get(path).json()["status"] == "backlog"
+    assert client.post(path + "/reject", json=rejection).json() == response.json()
+    assert client.post(path + "/reject", json={**rejection, "reason": "不同内容"}).status_code == 409
+    assert client.post(path + "/reject", json={**rejection, "request_id": str(uuid4())}).status_code == 409
+    rows = client.get(path + "/timeline", params={"keyword": rejection["reason"]}).json()["items"]
+    assert [(row["id"], row["body_preview"]) for row in rows] == [(response.json()["entry_id"], "打回：补充键盘回归用例")]
+    systems = client.get(path + "/timeline", params={"kind": "system"}).json()["items"]
+    assert sum(row["event_data"]["after"] == "backlog" for row in systems) == 1
+
+
+def test_web_reject_rolls_back_status_and_receipt_if_reason_write_fails(client, world, scopes, monkeypatch):
+    from app.errors import conflict
+
+    scope, _, _ = scopes
+    login(client, "admin", "admin-pass-1")
+    path = f"/api{scope.path}"
+    assert client.post(path + "/status", json={"status": "verifying"}).status_code == 200
+    rejection = {"reason": "重试验收", "request_id": str(uuid4())}
+
+    def fail(*args, **kwargs):
+        raise conflict("模拟时间轴写入失败")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(requirements, "record_manual_entry", fail)
+        assert client.post(path + "/reject", json=rejection).status_code == 409
+    assert client.get(path).json()["status"] == "verifying"
+    assert len(client.get(path + "/timeline").json()["items"]) == 1
+    assert client.post(path + "/reject", json=rejection).status_code == 200
 
 
 @pytest.fixture
@@ -103,11 +142,14 @@ def test_revision_and_withdrawal_preserve_original_and_reply(db, world, scopes):
     assert current["withdrawn"] and current["revised"] and current["body"] is None
     reply_target = timeline.get_entry(db, reader, scope, reply)["reply_to"]
     assert reply_target["entry_id"] == str(parent)
+    assert reply_target["actor_name"] == (editor.nickname or editor.username) and reply_target["revised"]
     assert reply_target["withdrawn"] and reply_target["body_preview"] is None
     assert not timeline.list_entries(db, reader, scope, keyword="original")["items"]
     assert not timeline.list_entries(db, reader, scope, keyword="current")["items"]
     newest = timeline.list_revisions(db, reader, scope, parent, limit=1)
     assert newest["items"][0]["reason"] == "resolved"
+    assert newest["items"][0]["actor_name"] == (owner.nickname or owner.username)
+    assert timeline.get_revision(db, reader, scope, parent, 2)["actor_name"] == (editor.nickname or editor.username)
     older = timeline.list_revisions(db, reader, scope, parent, cursor=newest["next_cursor"])
     assert [(row["version"], row["body"]) for row in older["items"]] == [(2, "current"), (1, "original")]
 
@@ -160,40 +202,57 @@ def test_db_foreign_key_rejects_cross_requirement_reply(db, world, scopes):
     db.rollback()
 
 
-def test_status_claim_and_reparent_keep_transaction_and_original_scope(db, world, scopes, monkeypatch):
+def test_child_work_and_discussion_count_as_recent_activity(db, world, scopes):
+    scope, other, _ = scopes
+    editor = world["admin"]
+    for ref in (scope, other):
+        db.get(Requirement, (ref.project_id, ref.identifier)).updated_at = datetime.now(UTC) - timedelta(days=10)
+    db.commit()
+    def recent_codes():
+        return [row["id"] for row in requirements.list_requirements(
+            db, editor, scope.project_id, None, None, 20, updated_within_days=3)["items"]]
+    assert recent_codes() == []
+    tasks.create_task(db, editor, scope.project_id, "新任务", requirement_id=scope.identifier)
+    assert recent_codes() == [scope.identifier]
+    timeline.append_entry(db, editor, other, request_id=uuid4(), body="验收")
+    db.commit()
+    assert recent_codes() == [other.identifier, scope.identifier]
+    system_events = timeline.list_entries(db, editor, scope, kind="system", keyword="创建任务")["items"]
+    assert len(system_events) == 1 and system_events[0]["source_task"] == scope.identifier + "-T1"
+
+
+def test_task_activity_stays_in_its_requirement(db, world, scopes, monkeypatch):
     scope, other, _ = scopes
     owner = world["admin"]
-    db.add(Task(project_id=scope.project_id, code="TASK-1", requirement_id=scope.identifier,
+    task_code = scope.identifier + "-T1"
+    db.add(Task(project_id=scope.project_id, code=task_code, requirement_id=scope.identifier,
                 title="交接", status="backlog"))
     db.commit()
     requirements.set_requirement_status(db, owner, scope.identifier, "in_progress", project_id=scope.project_id)
-    tasks.claim_task(db, owner, "TASK-1", project_id=scope.project_id)
-    assert_code("conflict", lambda: tasks.claim_task(db, owner, "TASK-1", project_id=scope.project_id))
-    tasks.set_task_status(db, owner, "TASK-1", "in_progress", project_id=scope.project_id)
-    task = db.get(Task, (scope.project_id, "TASK-1"))
-    task.requirement_id = other.identifier
-    db.commit()
-    tasks.set_task_status(db, owner, "TASK-1", "done", project_id=scope.project_id)
+    tasks.claim_task(db, owner, task_code, project_id=scope.project_id)
+    assert_code("conflict", lambda: tasks.claim_task(db, owner, task_code, project_id=scope.project_id))
+    tasks.set_task_status(db, owner, task_code, "in_progress", project_id=scope.project_id)
+    tasks.set_task_status(db, owner, task_code, "done", project_id=scope.project_id)
     initial = timeline.list_entries(db, owner, scope)["items"]
     moved = timeline.list_entries(db, owner, other)["items"]
     assert {item["event_type"] for item in initial} == {
         "requirement.status_changed", "task.claimed", "task.status_changed",
     }
-    assert len(initial) == 3
-    assert any(item["source_task"] == "TASK-1" and item["event_data"] == {
+    assert len(initial) == 4
+    assert any(item["source_task"] == task_code and item["event_data"] == {
         "before": "backlog", "after": "in_progress",
     } for item in initial)
-    assert len(moved) == 1
-    assert moved[0]["event_data"] == {"before": "in_progress", "after": "done"}
+    assert moved == []
+    assert initial[0]["event_data"] == {"before": "in_progress", "after": "done"}
 
     def fail_event(*args, **kwargs):
         raise RuntimeError("timeline unavailable")
 
     monkeypatch.setattr(tasks, "record_system_event", fail_event)
     with pytest.raises(RuntimeError, match="timeline unavailable"):
-        tasks.set_task_status(db, owner, "TASK-1", "backlog", project_id=scope.project_id)
+        tasks.set_task_status(db, owner, task_code, "backlog", project_id=scope.project_id)
     db.rollback()
-    assert db.get(Task, (scope.project_id, "TASK-1")).status == "done"
+    assert db.get(Task, (scope.project_id, task_code)).status == "done"
 
 
 def test_web_entries_use_scoped_receipts_and_public_errors(client, world, scopes):

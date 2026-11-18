@@ -110,6 +110,7 @@ def test_wiki_mcp_cursor_is_bound_to_actor_and_project_and_trash_respects_role(m
     assert client.call("wiki.delete", **target, confirmed_count=1) == {**target, "version": 1, "deleted": True}
     assert "not_found:" in client.call("wiki.get", **target)["error"]
     assert "permission_denied:" in viewer.call("wiki.trash_list", project_id=project_id)["error"]
+    assert "permission_denied:" in viewer.call("wiki.trash_read", **target)["error"]
     trash = client.call("wiki.trash_list", **filters)
     assert trash["items"][0]["id"] == first["id"] and "body" not in trash["items"][0]
     assert client.call("wiki.trash_get", **target)["deleted_at"] is not None

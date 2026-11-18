@@ -185,6 +185,15 @@ def register_wiki_tools(mcp) -> None:
         db, actor = dbc()
         return reads.read_trash(db, actor.id, parse_uuid(project_id, "project_id"), id)
 
+    @mcp.tool(name="wiki.trash_read", annotations=_READ)
+    @sessioned
+    def read_trashed_wiki(project_id: str, id: str, mode: reads.ReadMode = "range", start_line: StrictInt | None = None,
+                          end_line: StrictInt | None = None) -> reads.WikiRead:
+        """恢复前读取回收站 Wiki 正文，需项目编辑权限。默认按范围读取，支持大纲和显式全文。"""
+        db, actor = dbc()
+        entry = service.read_deleted_wiki(db, actor.id, parse_uuid(project_id, "project_id"), id)
+        return reads.body_read(entry, mode=mode, start_line=start_line, end_line=end_line)
+
     @mcp.tool(name="wiki.restore", annotations=_WRITE)
     @sessioned
     def restore_wiki(project_id: str, id: str) -> RestoredWiki:

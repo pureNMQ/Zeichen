@@ -2,20 +2,16 @@
 
 面向**人类与 AI agent 协同**的项目管理平台:需求、任务、文档与 MCP 工具一体。
 
-Zeichen(贼船)把软件开发的规格、需求、任务、词典与调研集中在一个系统里,并通过标准 MCP 协议把能力暴露给 Claude Code、Codex、opencode 等 agent 客户端——agent 与团队成员在同一个工作流中流转。
-
-> 当前版本:v0.1.1
+规格、术语和调研保存在项目 Wiki。开发工作通过需求和任务流转，团队成员及其附属 Agent 共享项目权限。
 
 ## 功能
 
-- **项目与团队**:项目、团队、成员与角色权限管理,agent API key 签发
-- **用户资料**:用户昵称与头像(自定义上传或默认头像),全站统一展示
-- **需求 / 任务**:需求五态(待确认 → 待办 → 实现中 → 已完成 / 已取消)与任务流转,指派与认领
-- **文档工作台**:文档目录树、多版本、评论、附件(单文件 20MB、单项目 2GB)、实体间引用(derives / documents / implements / mentions)
-- **项目代码仓库**:登记项目关联的代码仓库(git / svn / 其他)与默认分支
-- **通知与搜索**:站内通知、跨项目关键词搜索
-- **标准工作流 Skills**:为 agent 提供标准化的需求/任务/文档工作流技能包
-- **MCP 工具集**:60+ 工具,按域命名 —— `requirements.*` / `tasks.*` / `docs.*`(wiki / glossary)/ `comment.*` / `ref.*` / `project.*` / `agent.*` / `search.*` / `attachment.*`,统一 `code: message` 错误四件套
+- **项目与团队**支持人类成员管理、项目角色和附属 Agent。Agent 动态继承主人的项目权限，主人可以签发和吊销其密钥。
+- **需求和任务**包含待确认、待办、实现中、验收中、已完成和已取消六种需求状态。任务归属需求，使用待办、实现中、已完成和已取消四种状态，支持指派和认领；前置关系记录在需求之间。任务使用需求内编号，如 REQ-12-T1。需求和任务正文支持 Markdown、版本查看与恢复。
+- **需求时间轴**汇集讨论、任务证据与系统事件，支持回复、修订和撤回。有效提及及回复可产生通知。
+- **项目 Wiki**提供目录树、版本、属性和引用。项目文件库管理上传、关联和恢复，文件与项目限额可配置。
+- **项目搜索**可检索需求、时间轴、Wiki 和文件。代码仓库支持登记版本控制系统、仓库地址和默认分支。
+- **MCP 与工作流**通过标准 MCP 工具访问同一项目。客户端用 `tools/list` 查询当前契约，工作流示例见 `Skills/`。
 
 ## 技术栈
 
@@ -28,21 +24,7 @@ Zeichen(贼船)把软件开发的规格、需求、任务、词典与调研集�
 
 ## 架构
 
-```
-                 ┌─────────────┐   /api    ┌─────────┐   ┌──────────┐
- 浏览器(SPA) ────► │  nginx(web) │ ────────► │  api    │──►│ postgres │
-                 │             │   /mcp    ├─────────┤   └──────────┘
- MCP 客户端 ─────► │             │ ────────► │  mcp    │        ▲
- (Claude Code /  └─────────────┘            └────┬────┘        │
-  Codex / ...)                                   │       ┌─────┴────┐
-                                                ┌▼────┐  │ worker   │
-                                                │     │  │(物理清理)│
-                                                └─────┘  └──────────┘
-```
-
-- `api`(FastAPI):REST 业务接口,Web 与 MCP 共享同一套 service 层与权限模型
-- `mcp`:独立进程暴露 `/mcp`(Streamable HTTP),Bearer API key 认证,只签发给 agent
-- `worker`:周期执行软删实体的物理清理任务
+浏览器经 nginx 访问前端与 API，Agent 经同一入口访问 MCP。API 和 MCP 共用 PostgreSQL、项目文件卷及权限模型。v2 定时维护独立运行，只回收过期文件授权与废弃上传暂存；业务资源由各自的回收站管理。
 
 ## 快速开始
 
@@ -59,20 +41,18 @@ Zeichen(贼船)把软件开发的规格、需求、任务、词典与调研集�
 服务器按提交保存镜像，API/MCP 无源码挂载和热重载，Zeichen 前端为独立容器。
 共享 Nginx 与 PostgreSQL 不重建；MochiSite 配置与文件受到发布前检查保护。
 发布证据及备份保存在服务器 `/srv/zeichen/.release/`，其中包含私密配置，不可提交。
-新数据库迁移默认阻止发布；审阅迁移并确认影响后显式加 `-AllowMigration`。
-失败时仅在数据库版本未变化时自动恢复旧应用，不自动降级或还原数据库。
-详细运维说明及部署日志在 Zeichen 项目 Wiki 的 REQ-60 记录中。
+v2 日常发布要求候选与运行实例的 Alembic 版本相同。有迁移的候选走独立迁移流程。首次从 v1 切换须从同一停写快照准备独立数据库及文件卷。发布、恢复及定时维护见 [v2 运维说明](deploy/README.md)。
 
-### 方式一:Docker Compose 一键起(推荐)
+### 在空数据库上启动本地 v2 环境
 
 ```bash
 cp .env.example .env   # 生产必须覆盖 SESSION_SECRET 等
 docker compose up -d --build
 ```
 
-打开 http://localhost 完成初始化并创建首个用户。
+打开 http://localhost 完成初始化并创建首个用户。升级已有 v1 数据库时使用上文的独立切换流程。
 
-> 说明:compose 中 `api` / `mcp` / `worker` 不发布宿主端口,nginx 是唯一入口;`postgres:5432` 仅开发期暴露给宿主。
+> 说明:默认启动 `web`、`api`、`mcp` 和 `postgres`。API 和 MCP 不发布宿主端口,nginx 是唯一入口;`postgres:5432` 仅开发期暴露给宿主。
 
 ### 方式二:本地开发(Windows)
 
@@ -84,7 +64,7 @@ docker compose up -d postgres
 .\start-all.ps1
 ```
 
-- 前端 dev:http://localhost:5173(代理 API 与 MCP)
+- 前端 dev:http://localhost:5173(代理 API)
 - API:http://localhost:8001,健康检查 `GET /api/health`
 - MCP:http://localhost:8002/mcp
 
@@ -94,9 +74,8 @@ docker compose up -d postgres
 cd backend
 pip install -e ".[dev]"
 alembic upgrade head
-uvicorn app.main:app --reload          # API
+uvicorn app.main:app --port 8001 --reload  # API
 python -m app.mcp_server                # MCP
-python -m app.workers.main              # worker(物理清理)
 ```
 
 ### 前端单独开发
@@ -105,7 +84,7 @@ python -m app.workers.main              # worker(物理清理)
 cd frontend
 npm install
 npm run dev        # 开发
-npm run lint       # oxlint
+npm run lint       # 静态检查
 npm test           # vitest
 ```
 
@@ -121,7 +100,7 @@ npm test           # vitest
 | `MCP_ISSUER_URL` / `MCP_RESOURCE_SERVER_URL` | `http://localhost/...` | MCP OAuth 元数据地址,公网部署须指向外部 HTTPS |
 | `MCP_ALLOWED_HOSTS` | `127.0.0.1:*,localhost:*,[::1]:*` | MCP Host 白名单(DNS-rebinding 保护) |
 
-## 发布历史
+## 历史版本记录
 
 ### v0.1.1(2026-08-14)
 
@@ -158,10 +137,10 @@ cd frontend && npm test       # 前端 vitest
 
 ## 部署
 
-生产部署(单机 Docker Compose 全栈、TLS nginx、每日备份/恢复与运维手册)见 [`deploy/README.md`](deploy/README.md)。
+v2 切换、日常发布与维护定时器见 [`deploy/README.md`](deploy/README.md)。
 
 ## 文档与协作
 
-- 规格、需求、任务、词典与调研由 **Zeichen 自身**管理(通过本仓库的 MCP 接入),仓库内仅保留代码与本文件
+- 当前规格以 Zeichen 项目 Wiki 中的 DOC-41 为准。术语、ADR 与调研也在项目 Wiki 查阅。
 - 开发约定见 [`AGENTS.md`](AGENTS.md)
 - 前端模板说明见 [`frontend/README.md`](frontend/README.md)

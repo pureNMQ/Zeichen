@@ -150,7 +150,7 @@ class Release:
 
     def compose(self, files):
         cmd = ["docker", "compose", "--project-directory", self.root,
-               "--env-file", self.root / ".env", "-p", "zeichen"]
+               "--env-file", self.root / ".env", "-p", "zeichen", "--profile", "legacy-only"]
         for path in files:
             cmd += ["-f", path]
         return cmd

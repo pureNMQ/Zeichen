@@ -15,7 +15,6 @@ from ..schemas import (
     ProjectUpdate,
 )
 from ..services import projects as projects_service
-from ..services.user_profiles import payload as profile_payload
 from .deps import current_user
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -23,15 +22,7 @@ router = APIRouter(prefix="/api/projects", tags=["projects"])
 
 @router.get("")
 def list_projects(user: User = Depends(current_user), db: Session = Depends(get_db)) -> list[dict]:
-    return [
-        {
-            "id": str(p.id),
-            "name": p.name,
-            "created_at": p.created_at.isoformat(),
-            "my_role": role,
-        }
-        for p, role in projects_service.list_projects(db, user)
-    ]
+    return projects_service.project_directory(db, user)
 
 
 @router.post("", status_code=201)
@@ -39,9 +30,9 @@ def create_project(
     body: ProjectCreate, user: User = Depends(current_user), db: Session = Depends(get_db)
 ) -> dict:
     project = projects_service.create_project(
-        db, user, body.name.strip(), [m.model_dump() for m in body.members]
+        db, user, body.name, [m.model_dump() for m in body.members], body.description
     )
-    return {"id": str(project.id), "name": project.name, "my_role": "owner"}
+    return {"id": str(project.id), "name": project.name, "description": project.description, "my_role": "owner"}
 
 @router.get("/trash")
 def list_deleted_projects(
@@ -77,12 +68,7 @@ def get_project(
     project_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)
 ) -> dict:
     project, role = projects_service.get_project(db, user, project_id)
-    return {
-        "id": str(project.id),
-        "name": project.name,
-        "created_at": project.created_at.isoformat(),
-        "my_role": role,
-    }
+    return projects_service.project_summary(project, role)
 
 
 @router.patch("/{project_id}")
@@ -92,22 +78,15 @@ def update_project(
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    project = projects_service.update_project(db, user, project_id, body.name)
-    return {"id": str(project.id), "name": project.name}
+    project = projects_service.update_project(db, user, project_id, **body.model_dump(exclude_unset=True))
+    return {"id": str(project.id), "name": project.name, "description": project.description}
 
 
 @router.get("/{project_id}/members")
 def list_project_members(
     project_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db)
 ) -> list[dict]:
-    return [
-        {
-            **profile_payload(u),
-            "role": role,
-            "is_current_user": u.id == user.id,
-        }
-        for u, role in projects_service.list_project_members(db, user, project_id)
-    ]
+    return projects_service.roster(db, user, project_id)
 
 
 @router.post("/{project_id}/members", status_code=201)
@@ -173,7 +152,4 @@ def list_member_candidates(
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> list[dict]:
-    return [
-        profile_payload(u)
-        for u in projects_service.list_member_candidates(db, user, project_id)
-    ]
+    return projects_service.eligible_people(db, user, project_id)

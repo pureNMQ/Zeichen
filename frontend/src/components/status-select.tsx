@@ -5,8 +5,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { STATUS_COLORS, STATUS_DOT } from '@/components/status-badge'
 import { STATUS_LABEL, type WorkflowStatus } from '@/lib/api'
+import { STATUS_COLORS, STATUS_DOT } from '@/components/status-badge'
 import { cn } from '@/lib/utils'
 
 export function StatusSelect({
@@ -41,8 +41,8 @@ export function StatusSelect({
       <SelectContent>
         {statuses.map((s) => (
           <SelectItem key={s} value={s}>
-            <span className="flex items-center gap-1.5">
-              <span className={cn('size-2 shrink-0 rounded-full', STATUS_DOT[s as WorkflowStatus])} />
+            <span className="inline-flex items-center gap-1.5">
+              <span aria-hidden="true" className={cn('size-2 shrink-0 rounded-full', STATUS_DOT[s as WorkflowStatus])} />
               {STATUS_LABEL[s as WorkflowStatus]}
             </span>
           </SelectItem>

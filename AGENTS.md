@@ -1,6 +1,6 @@
 # 开发约定
 
-> 文档与开发管理入口:本仓库的规格、需求、任务、词典与调研已迁移至 **Zeichen**(贼船)统一管理。领域词汇见 Zeichen 项目词典;设计规格书 v1.0、前端功能需求 v1.0、ADR 与有效调研见 Zeichen 项目 Wiki。仓库内仅保留本文件与代码。开发工作经 Zeichen 的 requirement/task 流转,agent 经 MCP 访问。
+> 文档与开发管理入口:当前规格以 **Zeichen** 项目 Wiki 的《Zeichen 产品与系统规格说明书 v2.0 净室重组版》（DOC-41）为准。领域词汇、ADR 和调研也在项目 Wiki 中检索。需求与任务经 Zeichen 流转，Agent 通过 MCP 访问。
 
 ## 表单输入
 

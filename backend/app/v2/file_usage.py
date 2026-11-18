@@ -4,7 +4,7 @@ from enum import StrEnum
 from uuid import UUID
 
 from pydantic import BaseModel
-from sqlalchemy import String, and_, case, cast, delete, literal, select, tuple_, union
+from sqlalchemy import String, Uuid, and_, case, cast, delete, func, literal, select, tuple_, union, union_all
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
@@ -18,6 +18,7 @@ from .page_cursor import decode_position, encode_position, scope_key
 from .resource_refs import ResourceKind, ResourceRef, parse_uuid
 from .timeline_models import TimelineEntry, TimelineFileReference
 from .wiki import visible_wiki_codes
+from .work_content_models import WorkVersion, WorkReference
 from .wiki_models import Wiki, WikiReference, WikiVersion
 
 
@@ -79,12 +80,30 @@ def _association_uses(project_id: UUID, file_id: UUID, allowed_wikis):
     ).where(*predicates, _ASSOC.target_kind == TargetKind.PROJECT.value, _ASSOC.target_id == str(project_id), Project.deleted_at.is_(None))
 
     for kind, model in _MODELS.items():
-        version = Wiki.version_no if kind == TargetKind.WIKI else literal(0)
+        version = Wiki.version_no if kind == TargetKind.WIKI else model.version
         yield select(literal(kind.value).label("kind"), _ASSOC.target_id, model.title.label("label"),
                      version.label("version"), literal(True).label("current"),
                      literal(None, String()).label("requirement_code")).select_from(_ASSOC).join(
             model, and_(model.project_id == _ASSOC.project_id, model.code == _ASSOC.target_id),
         ).where(*predicates, _ASSOC.target_kind == kind.value, _active_target(kind, project_id, allowed_wikis))
+
+
+def _work_uses(project_id: UUID, file_id: UUID, include_history: bool):
+    ref = WorkReference
+    v = WorkVersion
+    for kind in (TargetKind.REQUIREMENT, TargetKind.TASK):
+        model = _MODELS[kind]
+        current = model.version == ref.version
+        statement = select(
+            literal(kind.value).label("kind"), ref.code.label("target_id"), v.title.label("label"),
+            ref.version.label("version"), current.label("current"), literal(None, String()).label("requirement_code"),
+        ).select_from(ref).join(model, and_(
+            model.project_id == ref.project_id, model.code == ref.code,
+        )).join(v, and_(v.project_id == ref.project_id, v.code == ref.code, v.version == ref.version)).where(
+            ref.project_id == project_id, ref.target_kind == ResourceKind.FILE.value, ref.target_id == str(file_id),
+            _active_target(kind, project_id),
+        )
+        yield statement if include_history else statement.where(current)
 
 
 def _wiki_uses(project_id: UUID, file_id: UUID, allowed_wikis, include_history: bool):
@@ -128,40 +147,67 @@ def _href(project_id: UUID, kind: TargetKind, target_id: str) -> str:
     return ResourceRef(project_id, ResourceKind(kind.value), target_id).path
 
 
-def _require_target(db: Session, project_id: UUID, kind: TargetKind, target_id: str) -> None:
+def _require_target(db: Session, project_id: UUID, kind: TargetKind, target_id: str) -> str:
     _href(project_id, kind, target_id)
     if kind != TargetKind.PROJECT:
         model = _MODELS[kind]
         visible = db.scalar(select(model.code).where(
-            model.project_id == project_id, model.code == target_id, _active_target(kind, project_id),
+            model.project_id == project_id, Task.matches_code(target_id) if model is Task else model.code == target_id,
+            _active_target(kind, project_id),
         ))
         if visible is None:
             raise not_found("关联目标不存在或不可见")
+        return visible
+    return target_id
 
 
 def list_associated_files(
     db: Session, actor_id: UUID, project_id: UUID, *, kind: TargetKind, target_id: str,
-    cursor: str | None = None, limit: int = DEFAULT_PAGE_SIZE,
+    cursor: str | None = None, limit: int = DEFAULT_PAGE_SIZE, include_body: bool = False,
 ) -> dict:
     require_file_access(db, actor_id, project_id)
-    _require_target(db, project_id, kind, target_id)
+    target_id = _require_target(db, project_id, kind, target_id)
     if type(limit) is not int or not 1 <= limit <= MAX_PAGE_SIZE:
         raise invalid_request(f"每页关联文件须为 1 至 {MAX_PAGE_SIZE} 条")
-    scope = scope_key("files.associations", str(actor_id), str(project_id), kind.value, target_id, limit)
+    view = "files.related" if include_body else "files.associations"
+    scope = scope_key(view, str(actor_id), str(project_id), kind.value, target_id, limit)
     position = decode_position(scope, cursor)
-    statement = select(ProjectFile).join(_ASSOC, and_(
-        _ASSOC.project_id == ProjectFile.project_id, _ASSOC.file_id == ProjectFile.id,
-    )).where(_ASSOC.project_id == project_id, _ASSOC.target_kind == kind.value, _ASSOC.target_id == target_id)
+    attached = select(_ASSOC.file_id, literal(1).label("attached"), literal(0).label("referenced")).where(
+        _ASSOC.project_id == project_id, _ASSOC.target_kind == kind.value, _ASSOC.target_id == target_id,
+    )
+    if include_body and kind != TargetKind.PROJECT:
+        model = _MODELS[kind]
+        if kind == TargetKind.WIKI:
+            ref, code, current_version = WikiReference, WikiReference.wiki_code, Wiki.version_no == WikiReference.version_no
+        else:
+            ref, code, current_version = WorkReference, WorkReference.code, model.version == WorkReference.version
+        is_file = ref.target_kind == ResourceKind.FILE.value
+        # Indexed references contain canonical text UUIDs; SQLite stores file UUIDs as hex,
+        # PostgreSQL as UUID. Never cast other resource codes (e.g. REQ-2) to UUID.
+        file_id = case((is_file, cast(func.replace(ref.target_id, "-", ""), Uuid())))
+        referenced = select(file_id.label("file_id"), literal(0), literal(1)).join_from(ref, model, and_(
+            model.project_id == ref.project_id, model.code == code, current_version,
+        )).where(ref.project_id == project_id, code == target_id, is_file, _active_target(kind, project_id))
+        sources = union_all(attached, referenced).subquery()
+        matches = select(sources.c.file_id, func.max(sources.c.attached).label("attached"),
+                         func.max(sources.c.referenced).label("referenced")).group_by(sources.c.file_id).subquery()
+    else:
+        matches = attached.subquery()
+    statement = select(ProjectFile, matches.c.attached, matches.c.referenced).join(
+        matches, matches.c.file_id == ProjectFile.id,
+    ).where(ProjectFile.project_id == project_id)
     if position is not None:
         if len(position) != 1 or not isinstance(position[0], str):
             raise invalid_request("关联文件游标无效")
         statement = statement.where(ProjectFile.id > parse_uuid(position[0], "cursor"))
-    rows = list(db.scalars(statement.order_by(ProjectFile.id).limit(limit + 1)))
-    items = [
-        file_summary(row) if row.deleted_at is None else {"id": str(row.id), "unavailable": True}
-        for row in rows[:limit]
-    ]
-    next_cursor = encode_position(scope, [str(rows[limit - 1].id)]) if len(rows) > limit else None
+    rows = db.execute(statement.order_by(ProjectFile.id).limit(limit + 1)).all()
+    items = []
+    for file, is_attached, is_referenced in rows[:limit]:
+        item = file_summary(file) if file.deleted_at is None else {"id": str(file.id), "unavailable": True}
+        if include_body:
+            item.update(attached=bool(is_attached), referenced=bool(is_referenced))
+        items.append(item)
+    next_cursor = encode_position(scope, [str(rows[limit - 1][0].id)]) if len(rows) > limit else None
     return {"items": items, "next_cursor": next_cursor}
 
 
@@ -176,6 +222,7 @@ def list_usage(
     position = decode_position(scope, cursor)
     allowed_wikis = visible_wiki_codes(project_id)
     uses = union(*_association_uses(project_id, file_id, allowed_wikis),
+                 *_work_uses(project_id, file_id, include_history),
                  _wiki_uses(project_id, file_id, allowed_wikis, include_history),
                  _timeline_uses(project_id, file_id, include_history)).subquery()
     order = (uses.c.kind, uses.c.target_id, -uses.c.version)
@@ -207,8 +254,8 @@ def list_usage(
             continue
         kind = TargetKind(row.kind)
         href, label = _href(project_id, kind, row.target_id), row.label
-        if kind == TargetKind.WIKI and not row.current:
-            href = f"{href}?version={row.version}"
+        if not row.current:
+            href = f"{href}{'&' if '?' in href else '?'}version={row.version}"
             label = f"{label} · v{row.version}"
         items.append(UsageItem(href=href, label=label, kind=_USAGE_LABELS[kind], current=row.current))
     last = rows[limit - 1] if len(rows) > limit else None
@@ -224,7 +271,7 @@ def set_association(
     ).with_for_update())
     if existing is None:
         raise not_found("文件不存在或不可用")
-    _require_target(db, project_id, kind, target_id)
+    target_id = _require_target(db, project_id, kind, target_id)
     if linked:
         insert = {"postgresql": pg_insert, "sqlite": sqlite_insert}[db.get_bind().dialect.name]
         statement = insert(_ASSOC).values(

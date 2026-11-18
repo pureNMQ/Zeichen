@@ -129,52 +129,103 @@
     }
 }
 
-.document-vditor .vditor {
+.markdown-wysiwyg .vditor {
   --border-color: var(--border);
-  --panel-background-color: transparent;
-  --textarea-background-color: transparent;
+  --panel-background-color: var(--background);
+  --second-color: var(--muted-foreground);
+  --textarea-background-color: var(--background);
+  --textarea-text-color: var(--foreground);
   --toolbar-background-color: var(--popover);
-  border: 0;
-  border-radius: 0;
-  min-height: 26rem;
+  --toolbar-icon-color: var(--muted-foreground);
+  --toolbar-icon-hover-color: var(--foreground);
+  --heading-border-color: var(--border);
+  --blockquote-color: var(--muted-foreground);
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
   position: relative;
+  min-width: 0;
 }
 
-.document-vditor .vditor-content,
-.document-vditor .vditor-ir,
-.document-vditor .vditor-ir pre.vditor-reset,
-.document-vditor .vditor-ir pre.vditor-reset:focus {
+.markdown-wysiwyg .vditor:focus-within {
+  border-color: var(--ring);
+  outline: 2px solid color-mix(in oklab, var(--ring) 35%, transparent);
+}
+
+.markdown-wysiwyg .vditor-content,
+.markdown-wysiwyg .vditor-wysiwyg {
+  border-radius: inherit;
+}
+
+/* The stock paragraph popover puts a delete button above the typing caret. */
+.markdown-wysiwyg .vditor-panel[data-toolbar-context="block"] {
+  display: none !important;
+}
+
+.markdown-wysiwyg .vditor-wysiwyg > pre.vditor-reset {
+  min-height: var(--writing-height, 11rem);
+  /* Vditor calculates desktop padding inline from the window width. */
+  padding: 0.75rem 1rem !important;
+  border-radius: inherit;
   background: transparent;
-}
-
-.document-vditor .vditor-ir pre.vditor-reset {
-  min-height: 26rem;
-  padding: 0;
   color: var(--foreground);
   font-family: var(--font-sans);
   font-size: 1rem;
-  line-height: 1.75;
+  line-height: 1.7;
 }
 
-.document-vditor .vditor-toolbar {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  box-shadow: 0 10px 24px rgb(0 0 0 / 0.1);
-  left: 0;
-  max-width: min(100%, 32rem);
-  position: absolute;
-  top: 0;
-  width: max-content;
-  z-index: 20;
+.markdown-wysiwyg .vditor-wysiwyg > pre.vditor-reset a {
+  color: var(--foreground);
+  text-decoration: underline;
+  text-decoration-color: var(--muted-foreground);
+  text-underline-offset: 0.16em;
 }
 
-.document-vditor .vditor-toolbar.vditor-toolbar--hide {
+.markdown-wysiwyg .vditor-wysiwyg > .vditor-reset > :is(h1,h2,h3,h4,h5,h6)::before,
+.markdown-wysiwyg .vditor-wysiwyg__block::before {
   display: none;
 }
 
-.document-vditor .vditor-reset h1,
-.document-vditor .vditor-reset h2,
-.document-vditor .vditor-reset h3 {
-  font-family: var(--font-sans);
-  letter-spacing: -0.025em;
+.markdown-wysiwyg .vditor-wysiwyg > .vditor-reset > :first-child {
+  margin-top: 0;
+}
+
+.markdown-wysiwyg .vditor-toolbar {
+  position: absolute;
+  z-index: 20;
+  width: max-content;
+  max-width: 100%;
+  flex-wrap: wrap;
+  padding: 2px 4px !important;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.1);
+}
+
+.markdown-wysiwyg .vditor-toolbar.vditor-toolbar--hide {
+  display: none;
+}
+
+/* Join marker centers so expanded Markdown and wrapped rows extend the same rail. */
+.work-timeline > li:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: calc(0.875rem - 1px);
+  inset-block: 0.875rem -0.875rem;
+  width: 2px;
+  background: var(--border);
+  pointer-events: none;
+}
+
+.participant-name {
+  display: grid;
+  grid-template-columns: 0fr;
+  opacity: 0;
+  transition: grid-template-columns 160ms ease-out, opacity 120ms ease-out;
+}
+.participant-chip[aria-expanded="true"] .participant-name {
+  grid-template-columns: 1fr;
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .participant-name { transition: none; }
 }

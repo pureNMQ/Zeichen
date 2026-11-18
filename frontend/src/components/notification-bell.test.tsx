@@ -22,7 +22,7 @@ const mention = {
 
 function CurrentLocation() {
   const location = useLocation()
-  return <output>{location.pathname}{location.hash}</output>
+  return <output>{location.pathname}{location.search}{location.hash}</output>
 }
 
 function renderBell() {
@@ -68,6 +68,21 @@ describe('通知铃铛', () => {
     await user.click(await screen.findByText(/回复了你的记录/))
     expect(api.post).toHaveBeenCalledWith('/v2/notifications/n1/open')
     expect(await screen.findByText(path)).toBeInTheDocument()
+  })
+
+  it.each([
+    ['requirement', '需求正文', 'REQ-1', '/projects/project-a/requirements/REQ-1?tab=body'],
+    ['task', '任务正文', 'REQ-1-T1', '/projects/project-a/tasks/REQ-1-T1'],
+  ])('正文提及显示来源并打开对应正文：%s', async (kind, label, code, sourcePath) => {
+    const notice = { ...mention, source_kind: kind, source_code: code, source_path: sourcePath }
+    vi.mocked(api.get).mockImplementation(url => Promise.resolve(url.endsWith('unread-count')
+      ? { count: 1 } : { items: [notice], next_cursor: null }))
+    vi.mocked(api.post).mockResolvedValue(notice)
+    renderBell()
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: '通知' }))
+    await user.click(await screen.findByRole('menuitem', { name: new RegExp(label) }))
+    expect(await screen.findByText(sourcePath)).toBeInTheDocument()
   })
 
   it('来源权限变化时给出错误反馈并留在原页', async () => {

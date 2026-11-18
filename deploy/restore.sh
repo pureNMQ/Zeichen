@@ -21,6 +21,10 @@ COMPOSE_FILES=(-f docker-compose.yml -f deploy/docker-compose.prod.yml)
 BACKUP_ROOT="${BACKUP_ROOT:-/srv/zeichen/backups}"
 
 cd "$PROJECT_ROOT"
+if [[ -e .release/v2-cutover-active.json || -L .release/v2-cutover-active.json ]]; then
+    echo "此恢复脚本适用于旧单机栈。已切换的 v2 实例请按 deploy/README.md 恢复。" >&2
+    exit 1
+fi
 COMPOSE=(docker compose "${COMPOSE_FILES[@]}")
 
 YES=0
@@ -56,11 +60,17 @@ if [ "$YES" -ne 1 ]; then
 fi
 
 # 1) 停应用服务(postgres 保持运行,pg 恢复要用)
-"${COMPOSE[@]}" stop api mcp worker web > /dev/null
-echo "已停止 api/mcp/worker/web"
+running=$("${COMPOSE[@]}" --profile legacy-only ps --status running --services)
+apps=(api mcp web)
+if grep -qx worker <<< "$running"; then
+    COMPOSE+=(--profile legacy-only)
+    apps+=(worker)
+fi
+"${COMPOSE[@]}" stop "${apps[@]}" > /dev/null
+printf '已停止 %s\n' "${apps[*]}"
 
 # 2) 恢复附件卷
-API_CID="$("${COMPOSE[@]}" ps -q api)"
+API_CID="$("${COMPOSE[@]}" ps -aq api)"
 if [ -z "$API_CID" ]; then
     echo "错误: 未找到 api 容器" >&2
     exit 1

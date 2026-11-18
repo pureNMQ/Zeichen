@@ -11,9 +11,11 @@ import {
 import { ErrorNotification } from '@/components/ui/notification'
 import { cn } from '@/lib/utils'
 
+const sourceLabels = { timeline: '需求时间轴', wiki: 'Wiki', requirement: '需求正文', task: '任务正文' }
+
 type Notice = {
   id: string
-  source_kind: 'timeline' | 'wiki'
+  source_kind: keyof typeof sourceLabels
   source_path: string
   source_code: string
   visibility: 'shared' | 'owner_only'
@@ -90,7 +92,7 @@ export function NotificationBell() {
                 onSelect={(event) => { event.preventDefault(); void openNotification(item) }}>
                 <span>{item.reply_user_id ? '有人回复了你的记录' : '有人提及了你'} · {item.source_code}</span>
                 <span className="text-xs text-muted-foreground">
-                  {item.source_kind === 'wiki' ? 'Wiki' : '需求时间轴'}
+                  {sourceLabels[item.source_kind]}
                   {item.visibility === 'owner_only' ? ' · 仅主人可见' : ''}
                   {!item.read_at ? ' · 未读' : ''}
                 </span>

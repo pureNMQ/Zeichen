@@ -1,6 +1,6 @@
 ---
 name: use-zeichen
-description: 定义使用 Zeichen 协作工具的公共协议，包括项目上下文、协作事实、写入、状态和失败处理。Use before any Skill or agent reads or writes Zeichen projects, requirements, tasks, documents, comments, or activity.
+description: 定义使用 Zeichen 协作工具的公共协议，包括项目上下文、协作事实、写入、状态和失败处理。Use before any Skill or agent reads or writes Zeichen projects, requirements, tasks, Wiki, files, or requirement timelines.
 ---
 
 # Use Zeichen
@@ -11,7 +11,7 @@ description: 定义使用 Zeichen 协作工具的公共协议，包括项目上�
 
 1. 先确定唯一当前项目。用户给出 Requirement、Task、Wiki 或其它实体时，读取该实体并以其所属项目为准。
 2. 用户未指定项目且当前身份可访问多个项目时，列出可选项目并要求用户选择。
-3. 每次运行只读取和写入当前项目。不得将其他项目的需求、任务、Wiki、评论或测试证据带入当前项目。
+3. 每次运行只读取和写入当前项目。不得将其他项目的需求、任务、Wiki、时间轴记录或测试证据带入当前项目。
 
 ## 行为前置：需求与任务状态确认（强制）
 
@@ -32,9 +32,9 @@ description: 定义使用 Zeichen 协作工具的公共协议，包括项目上�
 
 ## 协作事实与工具
 
-- 需求、任务、状态、评论、活动、Wiki、词典和权限以 Zeichen 工具记录为准；本地仓库、Git、测试输出只能补充或验证，不能替代协作记录。
+- 需求、任务、状态、需求时间轴、Wiki 和权限以 Zeichen 工具记录为准；本地仓库、Git、测试输出只能补充或验证，不能替代协作记录。
 - 先读取相关现有记录并查重，再创建或更新协作实体。
-- 先检查当前连接的工具清单，按实际可用的版本调用。新版用 `search.project` 检索当前项目、用 `wiki.get` 查属性、用 `wiki.read` 按范围读正文、用 `timeline.list` 看需求记录。旧版分别使用 `search.query`、`docs.wiki.*` 和 `comment.list`。项目内短码与 `project_id` 一起传递。
+- 先检查当前连接的工具清单，按实际可用的版本调用。新版用 `search.project` 检索当前项目、用 `wiki.get` 查属性、用 `wiki.read` 按范围读正文、用 `timeline.list` 看需求记录。项目内短码与 `project_id` 一起传递。
 - 新版传文件时用 `files.prepare_upload` 或 `files.authorize_read` 领取限时链接，再由支持原始字节传输的客户端发送或获取文件。正文保存文件的稳定地址，不保存限时链接或凭据。
 
 ## 列表筛选约定(需求/任务)
@@ -45,17 +45,17 @@ description: 定义使用 Zeichen 协作工具的公共协议，包括项目上�
 
 ## 写入与文档
 
-- 创建或更新 Requirement、Task 时，描述只支持简短纯文本。长篇背景、验收细则、方案比较和标准流程写 Wiki；实施证据使用简短纯文本写评论。Wiki、词典应使用 Markdown。
-- 写入 Requirement、Task、Wiki、词典或评论前，先展示草案并取得用户确认，除非用户已明确授权该项具体写入。
+- 需求和任务正文使用 Markdown，可直接引用同项目的需求、任务、Wiki 或文件。修改标题或正文前先读取当前 version，更新时传 expected_version。版本冲突时重新读取并核对差异。实施证据写入需求时间轴。
+- 写入 Requirement、Task、Wiki 或时间轴记录前，先展示草案并取得用户确认，除非用户已明确授权该项具体写入。
 - 需求和任务状态只通过显式状态操作改变；任务状态不会自动改变关联需求状态。
-- 任务必须挂需求（requirement_id 必填，ADR 0003）：创建指定同项目已确认需求；可改指向同项目其他需求，禁止解除关联。任务无评论区——对 task 目标的 comment 创建/列表返回 invalid_request。
-- 任务实施证据写到关联需求。新版用 `timeline.append` 并传来源任务；旧版用 `comment.create` 并在正文标注来源任务。任务没有自己的评论区。
+- 任务固定归属创建时指定的同项目需求，可在实施中随时拆分。新短码如 REQ-12-T1；跨项目分享请保留项目链接。前置需求使用 requirements.set_blockers 管理。
+- 任务实施证据写到关联需求。用 `timeline.append` 传 `project_id`、`requirement_id`、`source_task`、`body` 和本次写入的 UUID `request_id`。重试时沿用同一 UUID。
 - 状态机（ADR 0003）：需求六态（待确认/待办/实现中/验收中/已完成/已取消），验收语义在需求层；任务四态（待办/实现中/已完成/已取消）。
 - 实施会话完成本会话任务并回写证据后，可直接将该任务置“已完成”；但**不得**将本会话实施任务所挂的关联需求置“已完成”（需求完成由验收主体显式执行）。
 
 ## 行为留痕
 
-- 每个对 Zeichen 实体的行为（创建、修改、状态变更、评论、部署）都必须通过 Zeichen 工具留下记录；禁止只改本地仓库而不记录。
+- 每个对 Zeichen 实体的行为（创建、修改、状态变更、时间轴记录、部署）都必须通过 Zeichen 工具留下记录；禁止只改本地仓库而不记录。
 - 实施证据和验证结果回写关联需求；需要长期查阅的设计和部署记录保存为 Wiki。
 - 状态流转必须显式操作（`requirements.set_status` / `tasks.set_status`），禁止只口头宣称或聊天描述代替。
 - 会话结束前核对：本会话所有实质行为在 Zeichen 中均有对应记录，无孤儿操作、无未留痕变更。

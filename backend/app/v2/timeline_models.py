@@ -38,7 +38,7 @@ class TimelineEntry(Base):
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     actor_id: Mapped[UUID | None] = mapped_column(ForeignKey("user.id", ondelete="SET NULL"))
     kind: Mapped[str] = mapped_column(String(8), nullable=False)
-    source_task_code: Mapped[str | None] = mapped_column(String(16))
+    source_task_code: Mapped[str | None] = mapped_column(String(36))
     reply_to_id: Mapped[UUID | None] = mapped_column()
     latest_version: Mapped[int | None] = mapped_column()
     event_type: Mapped[str | None] = mapped_column(String(64))

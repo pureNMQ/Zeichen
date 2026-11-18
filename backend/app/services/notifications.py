@@ -242,53 +242,34 @@ def update_preferences(db: Session, user: User, domains: dict[str, bool], action
     return get_preferences(db, user)
 
 
-def is_watching(
-    db: Session, user: User, target_type: str, target_id,
-    project_id: uuid.UUID | None = None,
-) -> bool:
-    return (
-        db.scalar(
-            select(EntityWatch.id).where(
-                EntityWatch.user_id == user.id,
-                EntityWatch.target_type == target_type,
-                EntityWatch.target_id == target_id,
-            )
-        )
-        is not None
-    )
-
-
-def watch_entity(
-    db: Session, user: User, target_type: str, target_id,
-    project_id: uuid.UUID | None = None,
-) -> None:
+def _watch_target(db, user, target_type, target_id, project_id):
     from .polymorphic import resolve_target
+    from .short_code_lookup import resolve_by_code
 
-    project = resolve_target(db, target_type, target_id, user=user, project_id=project_id)
+    if target_type == "task":
+        task, project = resolve_by_code(db, user, target_type, target_id, project_id=project_id)
+        target_id = task.code
+    else:
+        project = resolve_target(db, target_type, target_id, user=user, project_id=project_id)
     require_project_role(db, user.id, project.id, min_level="viewer")
-    if not is_watching(db, user, target_type, target_id):
-        db.add(
-            EntityWatch(
-                project_id=project.id,
-                user_id=user.id,
-                target_type=target_type,
-                target_id=str(target_id),
-            )
-        )
+    return {"project_id": project.id, "user_id": user.id, "target_type": target_type, "target_id": str(target_id)}
+
+
+def is_watching(db: Session, user: User, target_type: str, target_id, project_id: uuid.UUID | None = None) -> bool:
+    key = _watch_target(db, user, target_type, target_id, project_id)
+    return db.scalar(select(EntityWatch.id).filter_by(**key)) is not None
+
+
+def watch_entity(db: Session, user: User, target_type: str, target_id, project_id: uuid.UUID | None = None) -> None:
+    key = _watch_target(db, user, target_type, target_id, project_id)
+    if db.scalar(select(EntityWatch.id).filter_by(**key)) is None:
+        db.add(EntityWatch(**key))
         db.commit()
 
 
-def unwatch_entity(
-    db: Session, user: User, target_type: str, target_id,
-    project_id: uuid.UUID | None = None,
-) -> None:
-    db.execute(
-        sa_delete(EntityWatch).where(
-            EntityWatch.user_id == user.id,
-            EntityWatch.target_type == target_type,
-            EntityWatch.target_id == target_id,
-        )
-    )
+def unwatch_entity(db: Session, user: User, target_type: str, target_id, project_id: uuid.UUID | None = None) -> None:
+    key = _watch_target(db, user, target_type, target_id, project_id)
+    db.execute(sa_delete(EntityWatch).filter_by(**key))
     db.commit()
 
 
@@ -301,6 +282,7 @@ def _filter_by_preferences(
     watchers = set(
         db.scalars(
             select(EntityWatch.user_id).where(
+                EntityWatch.project_id == activity.project_id,
                 EntityWatch.target_type == activity.target_type,
                 EntityWatch.target_id == activity.target_id,
             )

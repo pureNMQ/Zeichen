@@ -177,7 +177,7 @@ def cmd_next(mcp, project_id: str, dry_run: bool) -> int:
         "rules": {
             "admission": "in_progress 优先（最近活跃在前），否则 backlog；pending 永不准入",
             "worker": "ZCode 独立子代理，一需求一会话，串行执行；完成后 dispatch.py mark 回报",
-            "constraints": "不 push、不部署；任务完成只置 verifying；证据回写需求/任务评论",
+            "constraints": "不 push、不部署；已验证的任务可置 done，证据写入关联需求时间轴并注明来源任务",
         },
     }
     ticket_path = None

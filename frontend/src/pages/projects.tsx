@@ -1,21 +1,16 @@
 import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus, FolderOpen, Trash2 } from 'lucide-react'
+import { ChevronRight, Ellipsis, Plus, FolderOpen, Trash2 } from 'lucide-react'
 import { api, ApiError, type ProjectRow } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ErrorNotification } from '@/components/ui/notification'
-import { Badge } from '@/components/ui/badge'
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
+import { Textarea } from '@/components/ui/textarea'
+import { Card, CardContent } from '@/components/ui/card'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import {
   Dialog,
   DialogContent,
@@ -28,6 +23,7 @@ import {
 function CreateProjectDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const qc = useQueryClient()
   const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
@@ -36,8 +32,9 @@ function CreateProjectDialog({ open, onOpenChange }: { open: boolean; onOpenChan
     setError(null)
     setSubmitting(true)
     try {
-      await api.post('/projects', { name: name.trim() })
+      await api.post('/projects', { name: name.trim(), description: description.trim() })
       setName('')
+      setDescription('')
       onOpenChange(false)
       await qc.invalidateQueries({ queryKey: ['projects'] })
     } catch (err) {
@@ -66,9 +63,14 @@ function CreateProjectDialog({ open, onOpenChange }: { open: boolean; onOpenChan
               required
             />
           </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="new-project-description">项目描述（选填）</Label>
+            <Textarea id="new-project-description" value={description} onChange={(e) => setDescription(e.target.value)}
+              autoComplete="off" maxLength={1000} rows={3} />
+          </div>
           {error && <p className="text-sm text-destructive">{error}</p>}
           <DialogFooter>
-            <Button type="submit" disabled={submitting}>
+            <Button type="submit" disabled={submitting || !name.trim()}>
               {submitting ? '创建中…' : '创建'}
             </Button>
           </DialogFooter>
@@ -233,15 +235,8 @@ export function ProjectsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">项目</h1>
-          <p className="text-sm text-muted-foreground">
-            {user?.workspace_role === 'admin'
-              ? '管理员可见全部项目'
-              : '仅显示你已加入的项目'}
-          </p>
-        </div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-xl font-semibold">项目</h1>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={() => setTrashOpen(true)}>
             <Trash2 className="mr-2 h-4 w-4" />项目回收站
@@ -265,31 +260,31 @@ export function ProjectsPage() {
         </Card>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,17rem),1fr))] gap-3">
         {projects?.map((p) => (
-          <Card key={p.id}>
-            <CardHeader>
-              <CardTitle className="text-base">
-                <Link to={`/projects/${p.id}`} className="hover:text-primary">
-                  {p.name}
-                </Link>
-              </CardTitle>
-              <CardDescription>
-                创建于 {new Date(p.created_at).toLocaleDateString()}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex items-center gap-2">
-              <Badge variant="outline">{p.my_role}</Badge>
-              <Link
-                to={`/projects/${p.id}`}
-                className="text-xs text-muted-foreground hover:text-primary"
-              >
-                基础信息 / 成员授权 →
-              </Link>
-              {p.my_role === 'owner' && <Button variant="ghost" size="sm"
-                onClick={() => setDeleteProject(p)}>删除项目</Button>}
-            </CardContent>
-          </Card>
+          <article key={p.id} className="relative flex min-w-0">
+            <Link to={`/projects/${p.id}`} aria-label={p.name}
+              className="group flex w-full flex-col gap-2 rounded-xl border bg-card p-5 text-card-foreground transition-colors hover:border-muted-foreground/50 focus-visible:ring-2 focus-visible:ring-ring">
+              <h2 className="pr-8 text-base font-semibold [overflow-wrap:anywhere]">{p.name}</h2>
+              {p.description && <p className="line-clamp-2 text-sm leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">{p.description}</p>}
+              <div className="mt-auto flex items-center justify-between gap-3 pt-3 text-xs text-muted-foreground">
+                <span className="[overflow-wrap:anywhere]">{p.member_count != null && `${p.member_count} 位成员`}{p.owner_name && ` · 负责人 ${p.owner_name}`}</span>
+                <ChevronRight aria-hidden="true" className="size-4 shrink-0" />
+              </div>
+            </Link>
+            {p.my_role === 'owner' && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="absolute right-2 top-2" aria-label={`${p.name}的更多操作`}><Ellipsis /></Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem variant="destructive" onSelect={() => setDeleteProject(p)}>
+                    <Trash2 />删除项目
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </article>
         ))}
       </div>
 

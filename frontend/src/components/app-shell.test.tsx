@@ -87,18 +87,11 @@ describe('AppShell 侧边栏', () => {
     expect(screen.queryByRole('link', { name: 'Agent' })).not.toBeInTheDocument()
   })
 
-  it('文档为可折叠父项，展开后显示 Wiki（REQ-59 词条并入 wiki，单入口），不再显示 API 子页', async () => {
-    const user = (await import('@testing-library/user-event')).default.setup()
+  it('工作区直接显示 Wiki 入口', async () => {
     renderShell('admin')
-    const documentToggle = await screen.findByRole('button', { name: '文档' })
-    expect(documentToggle).toHaveAttribute('aria-expanded', 'false')
-    expect(screen.queryByRole('link', { name: 'Wiki' })).not.toBeInTheDocument()
-
-    await user.click(documentToggle)
-
-    expect(documentToggle).toHaveAttribute('aria-expanded', 'true')
     expect(await screen.findByText('demo')).toBeVisible()
     expect(screen.getByRole('link', { name: 'Wiki' })).toHaveAttribute('href', '/projects/p1/wiki')
+    expect(screen.queryByRole('button', { name: '文档' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: '词条' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: '代码 API 参考' })).not.toBeInTheDocument()
   })

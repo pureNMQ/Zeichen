@@ -17,6 +17,8 @@
 """
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 from app.config import Settings
 
@@ -25,12 +27,11 @@ from app.services import physical_purge as physical_purge_service
 from app.workers import physical_purge as worker
 
 
-class FakeSessionLocal:
-    def __enter__(self):
-        return object()
-
-    def __exit__(self, *args):
-        return False
+def test_legacy_worker_refuses_v2_database_before_purge(db, monkeypatch):
+    monkeypatch.setattr(worker, "SessionLocal", sessionmaker(db.get_bind()))
+    monkeypatch.setattr(physical_purge_service, "purge_soft_deleted", lambda _: pytest.fail("purge started"))
+    with pytest.raises(RuntimeError, match="v2 database"):
+        worker.run_once()
 
 
 # ---------- Settings 契约(保留期可配置 + 24h 周期) ----------
@@ -54,7 +55,7 @@ def test_settings_env_overrides(monkeypatch):
 
 
 def test_run_once_executes_one_purge_pass_and_returns_report(monkeypatch):
-    monkeypatch.setattr(worker, "SessionLocal", FakeSessionLocal)
+    monkeypatch.setattr(worker, "SessionLocal", sessionmaker(create_engine("sqlite://")))
     sessions = []
     report = {"requirement": 2, "attachment": 1}
 
@@ -71,7 +72,7 @@ def test_run_once_executes_one_purge_pass_and_returns_report(monkeypatch):
 
 
 def test_run_loops_every_24h(monkeypatch):
-    monkeypatch.setattr(worker, "SessionLocal", FakeSessionLocal)
+    monkeypatch.setattr(worker, "SessionLocal", sessionmaker(create_engine("sqlite://")))
     monkeypatch.setattr(physical_purge_service, "purge_soft_deleted", lambda db, **kwargs: {})
     runs = []
     monkeypatch.setattr(worker, "run_once", lambda: (runs.append(1), True)[1])

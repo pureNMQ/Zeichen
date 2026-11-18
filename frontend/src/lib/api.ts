@@ -49,12 +49,19 @@ export interface PasswordSetupLinkResponse {
 export interface ProjectRow {
   id: string
   name: string
+  description?: string
+  member_count?: number
+  owner_name?: string | null
   created_at: string
   my_role: ProjectRole
 }
 
-export interface ProjectMemberRow extends UserIdentity {
+export interface ProjectMemberCandidate extends UserIdentity {
   is_agent: boolean
+  workspace_role: Role
+}
+
+export interface ProjectMemberRow extends ProjectMemberCandidate {
   role: ProjectRole
   is_current_user?: boolean
 }
@@ -101,18 +108,17 @@ export interface RequirementRow {
   created_at: string
   updated_at: string
   task_count: number
+  participants?: { id: string; name: string; avatar?: string | null }[]
+  blocked_by?: { id: string; title: string; status: RequirementStatus }[]
+  blocks?: { id: string; title: string; status: RequirementStatus }[]
+  blocked?: boolean
+  version?: number
   done_task_count?: number
 }
 
-export interface TaskBlockerSummary {
-  id: string
-  title: string
-  status: TaskStatus
-  resolved: boolean
-}
-
 export interface TaskRow {
-  /** 实体短码(ADR 0002):TASK-n */
+  /** 项目内稳定任务短码 REQ-n-Tm。 */
+  version?: number
   id: string
   title: string
   description: string | null
@@ -126,8 +132,6 @@ export interface TaskRow {
   created_by: string | null
   created_at: string
   updated_at: string
-  blocked?: boolean
-  blocked_by?: TaskBlockerSummary[]
 }
 
 export interface CommentRow {
@@ -153,21 +157,6 @@ export interface ActivityRow {
   created_at: string
 }
 
-export interface ReferenceRow {
-  id: string
-  from_type: string
-  from_id: string
-  to_type: string
-  to_id: string
-  type: string
-  from_title?: string
-  to_title?: string
-  from_module?: string | null
-  to_module?: string | null
-  created_by: string | null
-  created_at: string
-}
-
 export interface Page<T> {
   items: T[]
   next_cursor: string | null
@@ -177,6 +166,7 @@ export interface Page<T> {
 export type FilterViewMode = 'board' | 'list'
 
 export interface FilterCriteria {
+  participated_by_me?: boolean
   statuses?: string[]
   updated_within_days?: number
   keyword?: string
@@ -325,23 +315,6 @@ export interface NotificationRow {
   actor_id: string | null
   read: boolean
   created_at: string
-}
-
-export type SearchDomain = 'requirement' | 'task' | 'document'
-
-export interface SearchItem {
-  domain: SearchDomain
-  id: string
-  project_id: string
-  project_name: string
-  title: string
-  summary: string
-  status?: string
-  doc_type?: string
-  kind?: string
-  /** REQ-59:文档域命中片段(首个命中词上下文);其余域无此字段 */
-  snippet?: string | null
-  doc_kind?: string | null
 }
 
 export interface AttachmentRow {

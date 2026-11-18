@@ -1,7 +1,8 @@
 from .base import Base
 from .user import ApiKey, PasswordSetupToken, User
 from .team_project import Project, ProjectMember, Team, WorkspaceMember
-from .requirement import Requirement, Task, TaskBlocker
+from .requirement import Requirement, Task
+from .requirement_board import RequirementAssigneeHistory, RequirementBlocker
 from .document import Document, DocLink, DocumentVersion
 from .repository import Repository
 from .polymorphic import Activity, Attachment, Comment, Reference
@@ -19,8 +20,9 @@ __all__ = [
     "Project",
     "ProjectMember",
     "Requirement",
+    "RequirementAssigneeHistory",
+    "RequirementBlocker",
     "Task",
-    "TaskBlocker",
     "Document",
     "DocLink",
     "DocumentVersion",

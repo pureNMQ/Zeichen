@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { viteStaticCopy } from 'vite-plugin-static-copy'
 
 // 产品版本唯一来源 = backend/pyproject.toml(见 Zeichen「版本策略」)。
 const APP_VERSION = (() => {
@@ -20,7 +21,17 @@ const APP_VERSION = (() => {
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [
+    react(),
+    tailwindcss(),
+    viteStaticCopy({
+      targets: [{
+        src: 'node_modules/vditor/dist/{js,css,images}/**/*',
+        dest: 'vendor/vditor/dist',
+        rename: { stripBase: 3 },
+      }],
+    }),
+  ],
   define: {
     __APP_VERSION__: JSON.stringify(APP_VERSION),
   },

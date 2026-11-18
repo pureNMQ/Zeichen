@@ -34,7 +34,7 @@ def test_usage_merges_live_and_migrated_references_and_hides_deleted_targets(cli
     db.flush()
     db.add_all([
         Requirement(project_id=other.id, code="REQ-3", title="Remote only", status="backlog"),
-        Task(project_id=project_id, code="TASK-1", requirement_id="REQ-2", title="Hidden task", status="backlog"),
+        Task(project_id=project_id, code="REQ-2-T1", requirement_id="REQ-2", title="Hidden task", status="backlog"),
     ])
     body = f"[download]({file['href']})"
     doc = create_wiki(db, actor_id, project_id, request_id=uuid4(), content=WikiContent(title="Visible Wiki", body=body))
@@ -44,14 +44,14 @@ def test_usage_merges_live_and_migrated_references_and_hides_deleted_targets(cli
     delete_wiki(db, actor_id, project_id, parent["id"], confirmed_count=2)
     db.add_all([FileAssociation(project_id=project_id, file_id=file_id, target_kind=kind, target_id=target)
                 for kind, target in [("requirements", "REQ-1"), ("requirements", "REQ-2"),
-                                     ("requirements", "REQ-3"), ("tasks", "TASK-1"), ("wiki", doc["id"])]])
+                                     ("requirements", "REQ-3"), ("tasks", "REQ-2-T1"), ("wiki", doc["id"])]])
     db.commit()
 
     current = client.get(usage).json()
     assert [row["label"] for row in current["items"]] == ["Migrated requirement", "Visible Wiki"]
     assert all(row["current"] for row in current["items"])
     assert client.put(usage, params={"target_kind": "requirements", "target_id": "REQ-3"}).status_code == 404
-    assert client.put(usage, params={"target_kind": "tasks", "target_id": "TASK-1"}).status_code == 404
+    assert client.put(usage, params={"target_kind": "tasks", "target_id": "REQ-2-T1"}).status_code == 404
 
     update_wiki(db, actor_id, project_id, doc["id"], expected_version=1, patch=WikiPatch(title="Current Wiki", body="No link"))
     world["member"].password_hash = hash_password("synthetic-usage-reader")

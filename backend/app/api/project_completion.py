@@ -14,6 +14,13 @@ from .deps import current_user
 router = APIRouter(prefix="/api/projects", tags=["project completions"])
 
 
+@router.get("/{project_id}/assignees")
+def project_assignees(
+    project_id: uuid.UUID, user: User = Depends(current_user), db: Session = Depends(get_db),
+) -> list[dict]:
+    return service.list_assignees(db, user, project_id)
+
+
 @router.get("/{project_id}/completions")
 def completions(
     project_id: uuid.UUID,

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
@@ -42,6 +42,7 @@ vi.mock('@/lib/auth', () => ({
 
 import { api, ApiError, type ProjectRow, type RequirementRow, type TaskRow } from '@/lib/api'
 import { CurrentProjectProvider } from '@/lib/current-project'
+import { WorkEditorPage } from '@/pages/project/work-editor'
 import { RequirementDetailPage } from '@/pages/requirement-detail'
 import { NotificationProvider } from '@/components/ui/notification'
 
@@ -83,8 +84,6 @@ const panelTasks: TaskRow[] = [
     created_by: 'u1',
     created_at: '2026-08-01T00:00:00+00:00',
     updated_at: '2026-08-01T00:00:00+00:00',
-    blocked: false,
-    blocked_by: [],
   },
   {
     id: 't2',
@@ -98,8 +97,6 @@ const panelTasks: TaskRow[] = [
     created_by: 'u1',
     created_at: '2026-08-01T00:00:00+00:00',
     updated_at: '2026-08-02T00:00:00+00:00',
-    blocked: false,
-    blocked_by: [],
   },
   {
     id: 't3',
@@ -113,8 +110,6 @@ const panelTasks: TaskRow[] = [
     created_by: 'u1',
     created_at: '2026-08-01T00:00:00+00:00',
     updated_at: '2026-08-03T00:00:00+00:00',
-    blocked: false,
-    blocked_by: [],
   },
 ]
 
@@ -127,7 +122,7 @@ function renderDetail(
     const hit = extraMock?.(path)
     if (hit !== undefined) return Promise.resolve(hit)
     if (path === '/projects') return Promise.resolve(projectList)
-    if (path === '/requirements/r1') return Promise.resolve(requirement)
+    if (path === '/requirements/r1' || path === '/projects/p2/requirements/r1') return Promise.resolve(requirement)
     if (path === '/projects/p2/tasks?requirement_id=r1&limit=100') return Promise.resolve({ items: panelTasks })
     if (path === '/tasks/t1') return Promise.resolve(panelTasks[0])
     return Promise.resolve({ items: [] })
@@ -139,6 +134,7 @@ function renderDetail(
           <MemoryRouter initialEntries={[initialEntry]}>
             <Routes>
               <Route path="/requirements/:id" element={<RequirementDetailPage />} />
+              <Route path="/projects/:projectId/requirements/:id/tasks/new" element={<WorkEditorPage kind="tasks" creating />} />
             </Routes>
           </MemoryRouter>
         </NotificationProvider>
@@ -150,7 +146,7 @@ function renderDetail(
 async function switchProject() {
   const user = (await import('@testing-library/user-event')).default
   await user.click(await screen.findByRole('button', { name: '切换到该项目' }))
-  expect(await screen.findByText('← 返回需求')).toBeInTheDocument()
+  expect(await screen.findByRole('link', { name: '返回需求' })).toBeInTheDocument()
   return user
 }
 
@@ -201,7 +197,7 @@ describe('需求详情操作(状态下拉六态)', () => {
     expect(screen.getByRole('option', { name: '验收中' })).toBeInTheDocument()
   })
 
-  it('待确认需求提供确认操作且不允许创建任务', async () => {
+  it('待确认需求可先拆任务也可直接确认', async () => {
     vi.mocked(api.post).mockResolvedValue({ ok: true })
     renderDetail(projects, (path: string) => {
       if (path === '/requirements/r1') return pendingRequirement
@@ -209,8 +205,7 @@ describe('需求详情操作(状态下拉六态)', () => {
     })
     const user = await switchProject()
     expect(await screen.findByText('等待确认的需求')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '新建任务' })).not.toBeInTheDocument()
-    expect(screen.getByText('需求确认后才能创建任务。')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name:'新建任务' })).toBeVisible()
     await user.click(screen.getByRole('button', { name: '确认需求' }))
     expect(api.post).toHaveBeenCalledWith('/requirements/r1/status', { status: 'backlog' })
   })
@@ -247,8 +242,47 @@ describe('需求详情任务面板(ADR 0003)', () => {
     expect(screen.getByText('联调接口')).toBeInTheDocument()
     expect(screen.queryByText('废弃方案')).not.toBeInTheDocument()
     const user = (await import('@testing-library/user-event')).default
-    await user.click(screen.getByRole('button', { name: /隐藏已取消/ }))
+    await user.click(screen.getByRole('button', { name: /显示已取消/ }))
     expect(screen.getByText('废弃方案')).toBeInTheDocument()
+  })
+
+  it('完整加载后续任务页，分列和完成数覆盖第二页', async () => {
+    renderDetail(projects, path => {
+      if (path === '/projects/p2/tasks?requirement_id=r1&limit=100') return { items:[panelTasks[0]], next_cursor:'next +/' }
+      if (path === '/projects/p2/tasks?requirement_id=r1&limit=100&cursor=next%20%2B%2F') return { items:[panelTasks[1]], next_cursor:null }
+      return undefined
+    })
+    await switchProject()
+    expect(await screen.findByRole('button',{name:'打开任务 联调接口'})).toBeVisible()
+    expect(screen.getByText('完成 1/2')).toBeVisible()
+  })
+
+  it.each([
+    { role: 'viewer', assignee: 'u1', allowed: false },
+    { role: 'editor', assignee: 'u2', allowed: false },
+    { role: 'editor', assignee: 'u1', allowed: true },
+    { role: 'owner', assignee: 'u2', allowed: true },
+  ] as const)('$role 查看指派给 $assignee 的任务时看板和阅读页遵循同一权限', async ({ role, assignee, allowed }) => {
+    localStorage.setItem('zeichen.currentProjectId', 'p2')
+    const task = { ...panelTasks[0], assignee_id: assignee, assignee: '承接人' }
+    renderDetail([{ ...projects[1], my_role: role }], path => {
+      if (path.startsWith('/projects/p2/tasks?')) return { items: [task] }
+      if (path === '/tasks/t1') return task
+    })
+    const open = await screen.findByRole('button', { name: '打开任务 实现登录页' })
+    const card = open.closest<HTMLElement>('[data-slot="card"]')!
+    const status = within(card).getByRole('combobox', { name: '状态' })
+    const remove = within(card).queryByRole('button', { name: '删除' })
+    expect(status.hasAttribute('disabled')).toBe(!allowed)
+    expect(!!remove).toBe(allowed)
+    expect(card.parentElement).toHaveAttribute('aria-disabled', String(!allowed))
+
+    const user = (await import('@testing-library/user-event')).default
+    await user.click(open)
+    expect(await screen.findByRole('heading', { name: /实现登录页/ })).toBeVisible()
+    expect(screen.getByRole('combobox', { name: '状态' }).hasAttribute('disabled')).toBe(!allowed)
+    expect(!!screen.queryByRole('button', { name: '负责人：承接人' })).toBe(allowed)
+    expect(!!screen.queryByRole('link', { name: '编辑任务' })).toBe(role !== 'viewer')
   })
 
   it('未指派任务可认领,认领失败显示可关闭的应用内通知', async () => {
@@ -266,14 +300,14 @@ describe('需求详情任务面板(ADR 0003)', () => {
     expect(screen.queryByText('任务已被认领')).not.toBeInTheDocument()
   })
 
-  it('点击任务打开任务详情弹窗(无评论区)', async () => {
+  it('点击任务打开任务阅读页(无评论区)', async () => {
     renderDetail()
     await switchProject()
     const user = (await import('@testing-library/user-event')).default
     await user.click(screen.getByRole('button', { name: '打开任务 实现登录页' }))
-    const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByText('实现登录页')).toBeInTheDocument()
-    expect(within(dialog).queryByPlaceholderText(/评论/)).not.toBeInTheDocument()
+    expect(await screen.findByRole('heading',{name:/实现登录页/})).toBeVisible()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.queryByLabelText('改指向需求')).toBeNull()
   })
 
   it('删除任务需二次确认', async () => {
@@ -287,19 +321,42 @@ describe('需求详情任务面板(ADR 0003)', () => {
     expect(api.post).toHaveBeenCalledWith('/tasks/t1/delete')
   })
 
-  it('为该需求新建任务:对话框预选本需求,提交带 requirement_id', async () => {
+  it('删除确认期间任务改派给其他编辑者后收起确认', async () => {
+    localStorage.setItem('zeichen.currentProjectId', 'p2')
+    renderDetail()
+    const user = (await import('@testing-library/user-event')).default
+    const open = await screen.findByRole('button', { name: '打开任务 实现登录页' })
+    const card = open.closest<HTMLElement>('[data-slot="card"]')!
+    await user.click(within(card).getByRole('button', { name: '删除' }))
+    expect(await screen.findByRole('button', { name: '确认删除' })).toBeVisible()
+    await act(async () => {
+      qc.setQueryData(['requirement-tasks', 'r1', 'p2'], {
+        items: [{ ...panelTasks[0], assignee_id: 'u2', assignee: '其他编辑者' }],
+      })
+    })
+    await waitFor(() => expect(screen.queryByRole('button', { name: '确认删除' })).not.toBeInTheDocument())
+    expect(within(card).queryByRole('button', { name: '删除' })).not.toBeInTheDocument()
+    await act(async () => {
+      qc.setQueryData(['requirement-tasks', 'r1', 'p2'], { items: [panelTasks[0]] })
+    })
+    expect(await within(card).findByRole('button', { name: '删除' })).toBeEnabled()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(api.post).not.toHaveBeenCalled()
+  })
+
+  it('为该需求新建任务:固定本需求,提交带 requirement_id', async () => {
     vi.mocked(api.post).mockResolvedValue({ id: 't-new' })
     renderDetail()
     await switchProject()
     const user = (await import('@testing-library/user-event')).default
     await user.click(await screen.findByRole('button', { name: '新建任务' }))
-    await user.type(screen.getByLabelText('标题'), '承接任务')
-    await user.click(screen.getByRole('button', { name: '创建' }))
-    expect(api.post).toHaveBeenCalledWith('/projects/p2/tasks', {
+    await user.type(await screen.findByLabelText('标题'), '承接任务')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    expect(api.post).toHaveBeenCalledWith('/projects/p2/tasks', expect.objectContaining({
       title: '承接任务',
-      description: null,
+      description: '',
       requirement_id: 'r1',
-    })
+    }))
   })
 
   it('任务面板以看板分列展示:默认待办/实现中/已完成三列,已取消列随开关显隐', async () => {
@@ -310,7 +367,7 @@ describe('需求详情任务面板(ADR 0003)', () => {
     expect(screen.getAllByText('已完成').length).toBeGreaterThan(0)
     expect(screen.queryAllByText('已取消')).toHaveLength(0)
     const user = (await import('@testing-library/user-event')).default
-    await user.click(screen.getByRole('button', { name: /隐藏已取消/ }))
+    await user.click(screen.getByRole('button', { name: /显示已取消/ }))
     expect(screen.getAllByText('已取消').length).toBeGreaterThan(0)
     expect(screen.getByText('废弃方案')).toBeInTheDocument()
   })
@@ -326,21 +383,12 @@ describe('需求详情任务面板(ADR 0003)', () => {
     expect(api.post).toHaveBeenCalledWith('/tasks/t1/status', { status: 'done' })
   })
 
-  it('任务详情弹窗加宽且限高内部滚动(不溢出视口)', async () => {
-    renderDetail()
-    await switchProject()
-    const user = (await import('@testing-library/user-event')).default
-    await user.click(screen.getByRole('button', { name: '打开任务 实现登录页' }))
-    const dialog = await screen.findByRole('dialog')
-    expect(dialog.className).toContain('sm:max-w-2xl')
-    expect(dialog.className).toContain('max-h-[85svh]')
-    expect(dialog.className).toContain('overflow-hidden')
-  })
-
-  it('?task= 深链定位任务弹窗(通知/搜索跳转)', async () => {
+  it('?task= 深链定位任务阅读页，返回后找到所属需求', async () => {
+    localStorage.setItem('zeichen.currentProjectId','p2')
     renderDetail(projects, undefined, '/requirements/r1?task=t1')
-    await switchProject()
-    const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByText('实现登录页')).toBeInTheDocument()
+    expect(await screen.findByRole('heading',{name:/实现登录页/})).toBeVisible()
+    const user = (await import('@testing-library/user-event')).default
+    await user.click(screen.getByRole('button',{name:/返回所属需求/}))
+    expect(await screen.findByRole('button',{name:'打开任务 实现登录页'})).toBeVisible()
   })
 })

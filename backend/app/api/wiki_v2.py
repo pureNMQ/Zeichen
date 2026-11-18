@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..db import get_db
-from ..errors import invalid_request, not_found
+from ..errors import invalid_request
 from ..models import User
 from ..services.pagination import decode_cursor, encode_cursor
 from ..services.permissions import get_accessible_project, require_project_role
@@ -129,10 +129,7 @@ def get_deleted_wiki(
     project_id: str, code: str, user: User = Depends(current_user), db: Session = Depends(get_db),
 ) -> dict:
     scope = parse_uuid(project_id, "project_id")
-    require_project_role(db, user.id, scope, min_level="editor")
-    wiki = db.get(Wiki, (scope, code))
-    if wiki is None or wiki.deleted_at is None:
-        raise not_found("已删除的 Wiki 不存在")
+    wiki = service.read_deleted_wiki(db, user.id, scope, code)
     return {**_summary(wiki), "deleted_at": wiki.deleted_at, "deleted_by": wiki.deleted_by, "body": wiki.body}
 
 

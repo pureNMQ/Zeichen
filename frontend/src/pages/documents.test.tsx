@@ -4,8 +4,8 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
-vi.mock('@/components/vditor-ir-editor', () => ({
-  VditorIrEditor: ({ initialMarkdown, onChange }: { initialMarkdown: string; onChange: (markdown: string) => void }) => <textarea aria-label="Markdown 正文" autoComplete="off" data-testid="vditor-ir-editor" defaultValue={initialMarkdown} onChange={(event) => onChange(event.target.value)} />,
+vi.mock('@/components/vditor-ir-editor', async () => ({
+  WysiwygMarkdownEditor: (await import('@/test/fake-wysiwyg-editor')).FakeWysiwygMarkdownEditor,
   VditorMarkdownViewer: ({ markdown }: { markdown: string }) => <div>{markdown}</div>,
 }))
 vi.mock('@/lib/api', () => {

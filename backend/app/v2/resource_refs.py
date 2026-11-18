@@ -19,7 +19,7 @@ class ResourceKind(StrEnum):
 
 _SHORT_CODES = {
     ResourceKind.REQUIREMENT: re.compile(r"REQ-[1-9][0-9]*"),
-    ResourceKind.TASK: re.compile(r"TASK-[1-9][0-9]*"),
+    ResourceKind.TASK: re.compile(r"(?:TASK-[1-9][0-9]*|REQ-[1-9][0-9]*-T[1-9][0-9]*)"),
     ResourceKind.WIKI: re.compile(r"(?:DOC|TERM)-[1-9][0-9]*"),
 }
 
@@ -46,7 +46,7 @@ class ResourceRef:
         pattern = _SHORT_CODES.get(self.kind)
         if pattern is None:
             parse_uuid(self.identifier, "identifier")
-        elif len(self.identifier) > 16 or pattern.fullmatch(self.identifier) is None:
+        elif len(self.identifier) > (36 if self.kind == ResourceKind.TASK else 16) or pattern.fullmatch(self.identifier) is None:
             raise invalid_request("identifier 不符合该资源类型的短码格式")
 
     @property
