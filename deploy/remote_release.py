@@ -258,7 +258,8 @@ class Release:
                 raise RuntimeError("Disposable migration database did not start")
             run(["docker", "run", "--rm", "--network", name, "--memory", "1024m", "--cpus", "1",
                  "-e", f"ZEICHEN_TEST_POSTGRES_URL=postgresql+psycopg://postgres:release-test-only@{name}/zeichen",
-                 image, "python", "-m", "pytest", "app/tests/test_wiki_merge_migration.py"])
+                 image, "python", "-m", "pytest", "app/tests/test_wiki_merge_migration.py",
+                 "app/tests/test_task_blocker_id_migration.py"])
             run(["docker", "exec", name, "createdb", "-U", "postgres", "zeichen_v2_candidate"])
             run(["docker", "run", "--rm", "--network", name, "--memory", "1024m", "--cpus", "1",
                  "-e", f"ZEICHEN_TEST_V2_POSTGRES_URL=postgresql+psycopg://postgres:release-test-only@{name}/zeichen_v2_candidate",

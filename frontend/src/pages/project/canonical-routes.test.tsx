@@ -640,7 +640,7 @@ describe('canonical project routes', () => {
     await user.click(await screen.findByRole('link', { name: 'DOC-1 · 同码 Wiki A' }))
     expect(await screen.findByText('正文 A')).toBeVisible()
     await user.click(screen.getByRole('button', { name: '恢复 Wiki' }))
-    expect(await screen.findByRole('heading', { name: '同码 Wiki A' })).toBeVisible()
+    expect(await screen.findByRole('heading', { level: 1, name: '同码 Wiki A' })).toBeVisible()
     const apiPath = `/api/v2/projects/${a}/wiki`
     expect(fetchMock).toHaveBeenCalledWith(`${apiPath}/DOC-1?confirmed_count=2`, expect.objectContaining({ method: 'DELETE' }))
     expect(fetchMock).toHaveBeenCalledWith(`${apiPath}/DOC-1?confirmed_count=3`, expect.objectContaining({ method: 'DELETE' }))
